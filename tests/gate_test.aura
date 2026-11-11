@@ -1,0 +1,61 @@
+(require "lib/gen")
+(require "std/math" all:)
+
+(define rules (rules-of 32.0 11.2 5.0 0.48 0.12 0.12))
+
+(define (line k v)
+  (display k)
+  (display " ")
+  (display v)
+  (newline))
+
+(define fair "(seq (ground 8) (coin 1.4) (hurdle 0.45 0.7) (ground 4) (gap 1.2) (ground 5) (spring 0.7) (ground 4))")
+(define unfair "(seq (ground 4) (gap 5.5) (ground 4))")
+(define tall "(seq (ground 4) (hurdle 2.4 0.7) (ground 6))")
+(define nasty "(seq (ground 4) (hurdle 0.4 0.7) (gun 1))")
+(define broken "(seq (ground 4) (lambda (x) x))")
+(define junk "not a form")
+
+(define (report name text)
+  (let ((r (check-source text rules)))
+    (display name)
+    (display " ")
+    (display (if (hash-ref r "ok") 1 0))
+    (display " ")
+    (display (hash-ref r "why"))
+    (newline)))
+
+(report "fair" fair)
+(report "unfair" unfair)
+(report "tall" tall)
+(report "nasty" nasty)
+(report "broken" broken)
+(report "junk" junk)
+
+(define fast (rules-of 32.0 11.2 7.4 0.48 0.12 0.12))
+(define (band-ok band ruleset)
+  (let ((ch (offline-chunk 42 0 band ruleset)))
+    (if (and ch (violations-clear? (constraint-hash (hash-ref ch "pieces") ruleset)))
+      1
+      0)))
+
+(line "band0" (band-ok 0 rules))
+(line "band2" (band-ok 2 fast))
+(line "band4" (band-ok 4 (rules-of 32.0 11.2 8.0 0.48 0.12 0.12)))
+
+(define a (offline-chunk 42 3 1 rules))
+(define b (offline-chunk 42 3 1 rules))
+(define c (offline-chunk 99 3 1 rules))
+
+(define (sig ch)
+  (let ((ps (hash-ref ch "pieces")))
+    (let loop ((xs ps) (n 0) (acc 0.0))
+      (if (null? xs)
+        (list n (floor (+ (* acc 1000.0) 0.5)))
+        (loop (cdr xs) (+ n 1) (+ acc (piece-x (car xs)) (piece-w (car xs))))))))
+
+(display "replay ")
+(display (if (equal? (sig a) (sig b)) 1 0))
+(display " ")
+(display (if (equal? (sig a) (sig c)) 1 0))
+(newline)

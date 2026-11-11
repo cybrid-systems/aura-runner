@@ -1,0 +1,96 @@
+; Allowlisted s-expression reader for obstacle proposals.
+; Accepts lists, symbols and numbers. Rejects strings, quotes, comments
+; and any character outside that grammar so an LLM form cannot escape
+; into eval, mutate or I/O. The result is data: nested lists of strings
+; and flonums. Nothing here calls eval.
+
+(define (sexp-parse s)
+  (if (not (string? s))
+    #f
+    (let ((n (string-length s)))
+      (if (or (= n 0) (> n 700))
+        #f
+        (let* ((r (parse-skip s 0 n))
+               (i (car r))
+               (form (parse-one s i n)))
+          (if (not form)
+            #f
+            (let ((j (car (parse-skip s (car (cdr form)) n))))
+              (if (< j n) #f (car form)))))))))
+
+(define (parse-skip s i n)
+  (let loop ((k i))
+    (if (>= k n)
+      (list k)
+      (let ((c (string-ref s k)))
+        (if (or (= c 32) (= c 9) (= c 10) (= c 13))
+          (loop (+ k 1))
+          (list k))))))
+
+(define (parse-one s i n)
+  (if (>= i n)
+    #f
+    (let ((c (string-ref s i)))
+      (cond
+        ((= c 40) (parse-list s (+ i 1) n))
+        ((or (and (>= c 48) (<= c 57)) (and (= c 45) (< (+ i 1) n)
+                                            (>= (string-ref s (+ i 1)) 48)
+                                            (<= (string-ref s (+ i 1)) 57)))
+         (parse-num s i n))
+        ((or (and (>= c 65) (<= c 90)) (and (>= c 97) (<= c 122)))
+         (parse-sym s i n))
+        (else #f)))))
+
+(define (parse-list s i n)
+  (let loop ((k i) (acc (list)))
+    (let ((sk (parse-skip s k n)))
+      (let ((j (car sk)))
+        (if (>= j n)
+          #f
+          (if (= (string-ref s j) 41)
+            (list (reverse acc) (+ j 1))
+            (let ((one (parse-one s j n)))
+              (if (not one)
+                #f
+                (loop (car (cdr one)) (cons (car one) acc))))))))))
+
+(define (parse-sym s i n)
+  (let loop ((k i))
+    (if (or (>= k n) (not (sym-char? (string-ref s k))))
+      (list (substring s i k) k)
+      (loop (+ k 1)))))
+
+(define (sym-char? c)
+  (or (and (>= c 65) (<= c 90))
+      (and (>= c 97) (<= c 122))
+      (and (>= c 48) (<= c 57))
+      (= c 45)))
+
+(define (parse-num s i n)
+  (let loop ((k i) (dot #f) (digits 0))
+    (if (>= k n)
+      (finish-num s i k dot digits)
+      (let ((c (string-ref s k)))
+        (cond
+          ((and (>= c 48) (<= c 57))
+           (loop (+ k 1) dot (+ digits 1)))
+          ((and (= c 46) (not dot))
+           (loop (+ k 1) #t digits))
+          (else (finish-num s i k dot digits)))))))
+
+(define (finish-num s i k dot digits)
+  (if (or (= digits 0) (<= k i))
+    #f
+    (let ((text (substring s i k)))
+      (let ((v (string->number text)))
+        (if (number? v)
+          (list (exact->inexact v) k)
+          #f)))))
+
+(define (form-symbols form)
+  (cond
+    ((string? form) (list form))
+    ((number? form) (list))
+    ((pair? form)
+     (append (form-symbols (car form)) (form-symbols (cdr form))))
+    (else (list))))
