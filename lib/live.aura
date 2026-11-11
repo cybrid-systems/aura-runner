@@ -1,0 +1,52 @@
+; Rebuild the live rule workspace. mutate:rebind is preferred; after
+; evo:trial the parent layer answers cow-refused (read-only), and set-code
+; is the path that still installs the defines.
+(require "std/string" all:)
+
+(define (num-src n)
+  (let ((s (number->string (exact->inexact n))))
+    (if (string-contains? s ".") s (string-append s ".0"))))
+
+(define (hot-source g jump slide speed coyote forgive hue motif)
+  (string-append
+    "(define (rule-gravity) " (num-src g) ")\n"
+    "(define (rule-jump-v) " (num-src jump) ")\n"
+    "(define (rule-slide-s) " (num-src slide) ")\n"
+    "(define (rule-run-speed) " (num-src speed) ")\n"
+    "(define (rule-coyote-s) " (num-src coyote) ")\n"
+    "(define (rule-forgive) " (num-src forgive) ")\n"
+    "(define (rule-hue) " (num-src hue) ")\n"
+    "(define (motif-form) \"" motif "\")\n"
+    "0"))
+
+; Returns "rebind" or "set-code".
+(define (publish-rule! name body full-src)
+  (let ((rb (mutate:rebind name body "tune")))
+    (if (equal? rb #t)
+      (begin (eval-current) "rebind")
+      (if (set-code full-src)
+        (begin (eval-current) "set-code")
+        "fail"))))
+
+(define (extract-seq s)
+  (if (not (string? s))
+    #f
+    (let ((i (string-find s "(seq")))
+      (if (< i 0)
+        #f
+        (let ((n (string-length s)))
+          (let loop ((k i) (depth 0))
+            (if (>= k n)
+              #f
+              (let ((c (string-ref s k)))
+                (cond
+                  ((= c 40)
+                   (loop (+ k 1) (+ depth 1)))
+                  ((= c 41)
+                   (if (<= depth 1)
+                     (substring s i (+ k 1))
+                     (loop (+ k 1) (- depth 1))))
+                  (else (loop (+ k 1) depth)))))))))))
+
+(define (one-line s)
+  (string-replace (string-replace s "\n" " ") "\r" " "))
