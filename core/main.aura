@@ -1,0 +1,581 @@
+; Lumen Run server. Aura owns rules, chunks, fairness, difficulty and score.
+; The browser predicts motion from the rule snapshot so a slow tick never
+; changes how a jump feels.
+(require "std/socket" all:)
+(require "std/string" all:)
+(require "std/math" all:)
+(require "std/evo" all:)
+(require "std/evo-core" all:)
+(require "lib/gen")
+(require "lib/live")
+
+(define SYS
+  "You design one obstacle phrase for a children's 3D endless runner called Lumen Run. The runner has three lanes (0 left, 1 centre, 2 right), jumps, and slides. Reply with ONLY one s-expression and no markdown. Allowed pieces: (seq (ground W) (gap W) (hurdle H W) (gate BOTTOM W) (coin Y) (spring W) (block LANE DEPTH) (coin-lane LANE Y)). block sits in one lane and does not cover the whole road. Meters. gap W at most 2.0, hurdle H at most 0.9, gate BOTTOM between 0.58 and 0.85, LANE is 0, 1 or 2. Start and end with ground. Leave at least one lane open beside every block. No violence, fear, weapons, or scary words. Bright garden, friendly shapes.")
+
+(define g-now 32.0)
+(define jump-now 11.2)
+(define slide-now 0.48)
+(define speed-now 5.0)
+(define coyote-now 0.12)
+(define forgive-now 0.12)
+(define hue-now 0.0)
+(define motif-now "")
+(define motif-pieces (list))
+(define motif-span 0.0)
+(define speed-lock #f)
+(define rule-rev 1)
+(define publish-via "set-code")
+
+(define seed 1)
+(define player (make-player 1.2))
+(define world (list))
+(define chunks (list))
+(define next-id 0)
+(define next-x 0.0)
+(define sent-id 0)
+(define run-ms 0.0)
+(define band 0)
+(define acc 0.0)
+(define last-ms 0)
+(define audit (list))
+(define policy #f)
+(define cleared (list))
+(define llm-busy #f)
+(define asked-at -1)
+(define pending (list))
+(define llm-on #f)
+(define req-ch #f)
+(define res-ch #f)
+(define buf "")
+
+(define (rules-hash)
+  (rules-of g-now jump-now speed-now slide-now coyote-now forgive-now))
+
+(define (full-src)
+  (hot-source g-now jump-now slide-now speed-now coyote-now forgive-now hue-now motif-now))
+
+(define (rule-body n)
+  (string-append "(lambda () " (num-src n) ")"))
+
+(define (publish-all!)
+  (let ((how (publish-rule! "rule-gravity" (rule-body g-now) (full-src))))
+    (set! publish-via how)
+    (set! rule-rev (+ rule-rev 1))
+    how))
+
+(define (publish-named! name value)
+  (let ((how (publish-rule! name (rule-body value) (full-src))))
+    (set! publish-via how)
+    (set! rule-rev (+ rule-rev 1))
+    how))
+
+(define (note! kind why arm)
+  (let ((row (hash "op" "decision" "kind" kind "why" why "arm" arm "via" publish-via)))
+    (set! audit (cons (hash "kind" kind "why" why "arm" arm) audit))
+    (if (> (length audit) 12)
+      (set! audit (take-n audit 12))
+      #f)
+    (set! pending (cons row pending))
+    (try (evo:record! arm kind why (hash "arm" arm) "" 0) (catch (e) #f))
+    row))
+
+(define (flush-notes! c)
+  (let loop ((xs (reverse pending)))
+    (if (null? xs)
+      (set! pending (list))
+      (begin
+        (send c (car xs))
+        (loop (cdr xs))))))
+
+(define (int-str n)
+  (let ((s (number->string (floor (exact->inexact n)))))
+    (if (string-suffix? s ".0")
+      (substring s 0 (- (string-length s) 2))
+      s)))
+
+(define (take-n xs n)
+  (if (or (null? xs) (<= n 0))
+    (list)
+    (cons (car xs) (take-n (cdr xs) (- n 1)))))
+
+(define (arm-name b)
+  (string-append "band-" (number->string b)))
+
+(define (band-of arm)
+  (cond
+    ((string=? arm "band-1") 1)
+    ((string=? arm "band-2") 2)
+    ((string=? arm "band-3") 3)
+    ((string=? arm "band-4") 4)
+    (else 0)))
+
+(define (speed-for b)
+  (cond
+    ((= b 0) 5.0)
+    ((= b 1) 5.8)
+    ((= b 2) 6.6)
+    ((= b 3) 7.3)
+    (else 8.0)))
+
+(define (make-policy)
+  (let ((p (evo:policy "ucb" (quote ()))))
+    (hash-set! p "arms"
+               (list
+                 (list (cons "arm" "band-0") (cons "n" 0) (cons "keeps" 0) (cons "mean" 0.0))
+                 (list (cons "arm" "band-1") (cons "n" 0) (cons "keeps" 0) (cons "mean" 0.0))
+                 (list (cons "arm" "band-2") (cons "n" 0) (cons "keeps" 0) (cons "mean" 0.0))
+                 (list (cons "arm" "band-3") (cons "n" 0) (cons "keeps" 0) (cons "mean" 0.0))
+                 (list (cons "arm" "band-4") (cons "n" 0) (cons "keeps" 0) (cons "mean" 0.0))))
+    p))
+
+(define (choose-band)
+  (if (< run-ms 30000.0)
+    (begin (set! band 0) "tutorial")
+    (let ((sel (evo:policy-select policy)))
+      (let ((arm (if (pair? sel) (car sel) "band-0")))
+        (set! band (band-of (if (string? arm) arm "band-0")))
+        "ucb"))))
+
+(define (apply-band-speed! why)
+  (if speed-lock
+    why
+    (let ((want (speed-for band)))
+      (if (= want speed-now)
+        why
+        (begin
+          (set! speed-now want)
+          (publish-named! "rule-run-speed" speed-now)
+          why)))))
+
+(define (shift-onto pieces x0)
+  (shift-pieces pieces x0))
+
+(define (add-chunk! origin pieces span b h)
+  (let ((placed (shift-onto pieces next-x))
+        (id next-id)
+        (x0 next-x)
+        (x1 (+ next-x span)))
+    (set! chunks (append chunks (list (hash "id" id "x0" x0 "x1" x1
+                                            "band" b "origin" origin "hue" h
+                                            "pieces" placed))))
+    (set! world (append world placed))
+    (set! next-x x1)
+    (set! next-id (+ id 1))
+    id))
+
+(define (spawn-chunk!)
+  (let ((why (choose-band)))
+    (apply-band-speed! why)
+    (if (and (pair? motif-pieces) (= (modulo next-id 3) 2))
+      (add-chunk! "motif" motif-pieces motif-span band hue-now)
+      (let ((ch (pattern-chunk seed next-id band)))
+        (if ch
+          (add-chunk! "offline" (hash-ref ch "pieces") (hash-ref ch "x1") band hue-now)
+          #f)))))
+
+(define (ensure-ahead!)
+  (let loop ((guard 0))
+    (if (or (>= guard 8) (> next-x (+ (player-x player) 42.0)))
+      #t
+      (begin
+        (spawn-chunk!)
+        (loop (+ guard 1))))))
+
+(define (reset-run!)
+  (set! player (make-player 1.2))
+  (set! world (list))
+  (set! chunks (list))
+  (set! next-id 0)
+  (set! next-x 0.0)
+  (set! sent-id 0)
+  (set! run-ms 0.0)
+  (set! band 0)
+  (set! acc 0.0)
+  (set! last-ms 0)
+  (set! cleared (list))
+  (if (not speed-lock) (set! speed-now 5.0) #f)
+  (ensure-ahead!))
+
+(define (parse-seed v)
+  (cond
+    ((and (number? v) (> v 0)) (exact->inexact v))
+    ((and (string? v) (string-prefix? v "LUMEN-"))
+     (let ((n (string->number (substring v 6 (string-length v)))))
+       (if (and (number? n) (> n 0)) (exact->inexact n) #f)))
+    (else #f)))
+
+(define (fresh-seed)
+  (+ 1 (modulo (monotonic-ms) 900000)))
+
+(define (send c v)
+  (tcp-send c (string-append (json-encode v) "\n")))
+
+(define (rules-msg)
+  (hash "op" "rules" "rev" rule-rev
+        "g" g-now "jump" jump-now "speed" speed-now
+        "slide" slide-now "coyote" coyote-now "forgive" forgive-now
+        "hue" hue-now "ph" 1.05 "pw" 0.56 "sh" 0.46
+        "via" publish-via))
+
+(define (welcome-msg)
+  (hash "op" "welcome" "seed" seed
+        "replay" (string-append "LUMEN-" (int-str seed))
+        "rev" rule-rev "via" publish-via
+        "g" g-now "jump" jump-now "speed" speed-now
+        "slide" slide-now "coyote" coyote-now "forgive" forgive-now
+        "hue" hue-now "ph" 1.05 "pw" 0.56 "sh" 0.46))
+
+(define (state-msg)
+  (hash "op" "state"
+        "x" (player-x player)
+        "y" (player-y player)
+        "vy" (player-vy player)
+        "alive" (if (player-alive? player) #t #f)
+        "score" (floor (score-now player))
+        "slide" (if (> (pxs player 3) 0.0) 1 0)
+        "lane" (player-lane player)
+        "lx" (player-lx player)
+        "band" band
+        "speed" speed-now
+        "rev" rule-rev
+        "run" (floor run-ms)
+        "hue" hue-now
+        "seed" seed))
+
+(define (chunk-msg c)
+  (hash "op" "chunk"
+        "id" (hash-ref c "id")
+        "x0" (hash-ref c "x0")
+        "x1" (hash-ref c "x1")
+        "band" (hash-ref c "band")
+        "origin" (hash-ref c "origin")
+        "hue" (hash-ref c "hue")
+        "pieces" (hash-ref c "pieces")))
+
+(define (send-new-chunks c)
+  (let loop ((cs chunks))
+    (if (null? cs)
+      #t
+      (begin
+        (if (>= (hash-ref (car cs) "id") sent-id)
+          (send c (chunk-msg (car cs)))
+          #f)
+        (loop (cdr cs)))))
+  (set! sent-id next-id))
+
+(define (mark-cleared!)
+  (let loop ((cs chunks))
+    (if (null? cs)
+      #t
+      (let ((ch (car cs)))
+        (if (and (player-alive? player)
+                 (>= (player-x player) (hash-ref ch "x1"))
+                 (not (member-id? (hash-ref ch "id") cleared)))
+          (begin
+            (set! cleared (cons (hash-ref ch "id") cleared))
+            (set! policy (evo:policy-report policy (arm-name (hash-ref ch "band")) #t))
+            (note! "CLEAR" "cleared" (arm-name (hash-ref ch "band"))))
+          #f)
+        (loop (cdr cs))))))
+
+(define (member-id? id xs)
+  (let loop ((ys xs))
+    (if (null? ys) #f
+      (if (= (car ys) id) #t (loop (cdr ys))))))
+
+(define (one-step!)
+  (if (player-alive? player)
+    (let ((r (step player world (rules-hash) PHYS-DT)))
+      (set! player (car r))
+      (set! world (prune-world (car (cdr r)) (player-x player)))
+      (set! run-ms (+ run-ms (* PHYS-DT 1000.0)))
+      (if (not (player-alive? player))
+        (begin
+          (set! policy (evo:policy-report policy (arm-name band) #f))
+          "dead")
+        (begin
+          (mark-cleared!)
+          (car (cdr (cdr r))))))
+    "dead"))
+
+(define (prune-world ps x)
+  (let loop ((ys ps) (acc (list)))
+    (if (null? ys)
+      (reverse acc)
+      (let ((q (car ys)))
+        (if (or (= (piece-k q) 0.0)
+                (< (+ (piece-x q) (piece-w q)) (- x 8.0)))
+          (loop (cdr ys) acc)
+          (loop (cdr ys) (cons q acc)))))))
+
+(define (pump! dt-ms)
+  (set! acc (+ acc (min 0.1 (/ (exact->inexact dt-ms) 1000.0))))
+  (let loop ((n 0) (ev "ok"))
+    (if (or (< acc PHYS-DT) (>= n 6) (not (player-alive? player)))
+      ev
+      (begin
+        (set! acc (- acc PHYS-DT))
+        (loop (+ n 1) (one-step!))))))
+
+(define (elapsed-ms)
+  (let ((now (monotonic-ms)))
+    (let ((d (if (= last-ms 0) 16 (- now last-ms))))
+      (set! last-ms now)
+      (if (> d 80) 80 (if (< d 0) 0 d)))))
+
+(define (consider-form! text)
+  (let ((form (one-line (if (string? text) text ""))))
+    (let ((found #f))
+      (let* ((cand (evo:candidate form (hash "id" (string-append "m" (int-str next-id))
+                                            "target" "motif-form")))
+             (trial (evo:trial cand
+                               (hash "timeout-ms" 4000
+                                     "apply" (lambda (c) #t)
+                                     "evaluate"
+                                     (lambda (c)
+                                       (set! found (check-source form (rules-hash)))
+                                       (hash "status" "ok"
+                                             "objectives"
+                                             (hash "fair" (if (and found (hash-ref found "ok")) 1.0 0.0))
+                                             "constraints"
+                                             (if (and found (hash? (hash-ref found "violations")))
+                                               (hash-ref found "violations")
+                                               (hash "reachable" 1.0))
+                                             "behavior" (hash "band" (exact->inexact band))))))))
+        (cond
+          ((or (not found) (not (hash-ref found "ok"))
+               (not (evo:trial-ok? trial)) (not (evo:feasible? trial)))
+           (note! "ROLLBACK" (if (and found (string? (hash-ref found "why")))
+                               (hash-ref found "why")
+                               "trial")
+                  "motif"))
+          (else
+           (set! motif-now form)
+           (set! motif-pieces (hash-ref found "pieces"))
+           (set! motif-span (hash-ref found "x1"))
+           (set! hue-now (exact->inexact (modulo (+ (floor hue-now) 1) 6)))
+           (let ((ev (hash "status" "ok"
+                           "objectives" (hash "fair" 1.0)
+                           "constraints" (hash-ref found "violations")
+                           "behavior" (hash "band" (exact->inexact band))))
+                 (search (evo:search
+                           (hash "algo" "lumen" "seed" (floor seed) "budget" 8
+                                 "target" "motif-form"
+                                 "apply"
+                                 (lambda (s c)
+                                   (if (set-code (full-src))
+                                     (begin (eval-current) #t)
+                                     #f))))))
+             (evo:tell! search (list cand) (list ev))
+             (if (evo:commit! search cand)
+               (begin
+                 (set! publish-via "set-code")
+                 (set! rule-rev (+ rule-rev 1))
+                 (note! "KEEP" "fair" "motif"))
+               (note! "ROLLBACK" "commit" "motif")))))))))
+
+(define (llm-prompt)
+  (string-append "Difficulty band " (number->string band)
+                 ". Jump speed is " (num-src speed-now)
+                 " m/s. Invent a different rhythm from a straight row of hurdles."))
+
+(define (poll-llm! c)
+  (if (not llm-on)
+    #f
+    (let ((ans (channel:try-recv res-ch)))
+      (if (hash? ans)
+        (begin
+          (set! llm-busy #f)
+          (if (hash-ref ans "ok")
+            (let ((form (extract-seq (hash-ref ans "content" ""))))
+              (if form
+                (consider-form! form)
+                (note! "ROLLBACK" "no-seq" "llm")))
+            (note! "ROLLBACK" (hash-ref ans "error" "llm") "llm"))
+          (send c (rules-msg)))
+        #f)
+      (if (and llm-on (not llm-busy) (>= next-id 3) (not (= asked-at next-id))
+               (= (modulo next-id 3) 0))
+        (begin
+          (set! asked-at next-id)
+          (set! llm-busy #t)
+          (channel:send req-ch (llm-prompt)))
+        #f))))
+
+(define (on-hello c msg)
+  (let ((parsed (parse-seed (hash-ref msg "seed" #f))))
+    (set! seed (if parsed parsed (exact->inexact (fresh-seed))))
+    (set! speed-lock #f)
+    (set! speed-now 5.0)
+    (reset-run!)
+    (send c (welcome-msg))
+    (send-new-chunks c)
+    (send c (state-msg))
+    (flush-notes! c)))
+
+(define (on-restart c msg)
+  (let ((parsed (parse-seed (hash-ref msg "seed" #f))))
+    (if parsed (set! seed parsed) #f)
+    (reset-run!)
+    (send c (welcome-msg))
+    (send-new-chunks c)
+    (send c (state-msg))
+    (flush-notes! c)))
+
+(define (on-tick c msg)
+  (if (and (player-alive? player) (> (hash-ref msg "jump" 0) 0))
+    (set! player (press-jump player))
+    #f)
+  (if (and (player-alive? player) (> (hash-ref msg "slide" 0) 0))
+    (set! player (press-slide player))
+    #f)
+  (if (and (player-alive? player) (number? (hash-ref msg "lane" 0))
+           (not (= (hash-ref msg "lane" 0) 0)))
+    (set! player (press-lane player (hash-ref msg "lane" 0)))
+    #f)
+  (let ((ev (if (player-alive? player) (pump! (elapsed-ms)) "dead")))
+    (ensure-ahead!)
+    (poll-llm! c)
+    (send-new-chunks c)
+    (let ((st (state-msg)))
+      (hash-set! st "event" ev)
+      (send c st))
+    (flush-notes! c)))
+
+(define (on-rebind c msg)
+  (let ((name (hash-ref msg "name" ""))
+        (value (hash-ref msg "value" #f)))
+    (if (not (and (number? value)
+                  (or (string=? name "gravity") (string=? name "jump")
+                      (string=? name "slide") (string=? name "speed")
+                      (string=? name "hue"))))
+      (send c (hash "op" "err" "why" "bad-value"))
+      (begin
+        (cond
+          ((string=? name "gravity") (set! g-now (exact->inexact value)))
+          ((string=? name "jump") (set! jump-now (exact->inexact value)))
+          ((string=? name "slide") (set! slide-now (exact->inexact value)))
+          ((string=? name "speed")
+           (begin (set! speed-now (exact->inexact value)) (set! speed-lock #t)))
+          ((string=? name "hue") (set! hue-now (exact->inexact value))))
+        (publish-named! (cond
+                          ((string=? name "gravity") "rule-gravity")
+                          ((string=? name "jump") "rule-jump-v")
+                          ((string=? name "slide") "rule-slide-s")
+                          ((string=? name "speed") "rule-run-speed")
+                          (else "rule-hue"))
+                        (cond
+                          ((string=? name "gravity") g-now)
+                          ((string=? name "jump") jump-now)
+                          ((string=? name "slide") slide-now)
+                          ((string=? name "speed") speed-now)
+                          (else hue-now)))
+        (note! "KEEP" name "rule")
+        (flush-notes! c)
+        (send c (rules-msg))))))
+
+(define (on-propose c msg)
+  (consider-form! (hash-ref msg "form" ""))
+  (flush-notes! c)
+  (send c (rules-msg))
+  (send c (state-msg)))
+
+(define (on-audit c msg)
+  (send c (hash "op" "audit" "items" audit "via" publish-via "rev" rule-rev)))
+
+(define (dispatch c msg)
+  (let ((op (hash-ref msg "op" "")))
+    (cond
+      ((string=? op "hello") (on-hello c msg))
+      ((string=? op "restart") (on-restart c msg))
+      ((string=? op "tick") (on-tick c msg))
+      ((string=? op "rebind") (on-rebind c msg))
+      ((string=? op "propose") (on-propose c msg))
+      ((string=? op "audit") (on-audit c msg))
+      ((string=? op "bye") #f)
+      (else (send c (hash "op" "err" "why" "unknown"))))))
+
+(define (take-line)
+  (let ((i (string-find buf "\n")))
+    (if (< i 0)
+      #f
+      (let ((line (substring buf 0 i)))
+        (set! buf (substring buf (+ i 1) (string-length buf)))
+        line))))
+
+(define (read-msg c)
+  (let ((have (take-line)))
+    (if have
+      have
+      (let ((got (tcp-recv c 8192)))
+        (if (or (not (string? got)) (= (string-length got) 0))
+          #f
+          (begin
+            (set! buf (string-append buf got))
+            (read-msg c)))))))
+
+(define (serve-client c)
+  (set! buf "")
+  (let loop ()
+    (let ((line (read-msg c)))
+      (if (not line)
+        #f
+        (let ((msg (try (json-parse line) (catch (e) #f))))
+          (if (not (hash? msg))
+            (begin (send c (hash "op" "err" "why" "json")) (loop))
+            (if (string=? (hash-ref msg "op" "") "bye")
+              #t
+              (begin (dispatch c msg) (loop)))))))))
+
+(define (start-llm!)
+  (let ((key (try (getenv "LLM_API_KEY") (catch (e) ""))))
+    (if (and (string? key) (> (string-length key) 0))
+      (begin
+        (require "std/llm" all:)
+        (set! llm-on #t)
+        (set! req-ch (channel:create 1))
+        (set! res-ch (channel:create 1))
+        (fiber:spawn (lambda ()
+                       (let loop ()
+                         (let ((prompt (channel:recv req-ch)))
+                           (let ((ans (llm:chat SYS (if (string? prompt) prompt ""))))
+                             (channel:send res-ch
+                                           (if (hash? ans)
+                                             ans
+                                             (hash "ok" #f "error" "bad" "content" ""))))
+                           (loop))))))
+      #f)))
+
+(define (port-number)
+  (let ((raw (try (getenv "AURA_RUNNER_PORT") (catch (e) ""))))
+    (let ((n (if (and (string? raw) (> (string-length raw) 0))
+               (string->number raw)
+               8765)))
+      (if (and (number? n) (> n 0)) n 8765))))
+
+(define (main)
+  (set-code (read-file "core/hot.aura"))
+  (eval-current)
+  (set! policy (make-policy))
+  (publish-all!)
+  (start-llm!)
+  (let ((port (port-number)))
+    (let ((listener (tcp-listen port "127.0.0.1")))
+      (if (not (number? listener))
+        (begin (display "listen-failed\n") 1)
+        (let ((bound (tcp-local-port listener)))
+          (try (make-directory "out") (catch (e) #f))
+          (write-file "out/aura.port" (number->string bound))
+          (display "PORT ")
+          (display bound)
+          (newline)
+          (let accept-loop ()
+            (let ((client (tcp-accept listener)))
+              (if (number? client)
+                (begin
+                  (serve-client client)
+                  (tcp-close client)
+                  (accept-loop))
+                #f))))))))
+
+(main)

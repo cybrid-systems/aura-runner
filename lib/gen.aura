@@ -1,0 +1,438 @@
+; Chunk grammar: offline patterns, motif layout, and the executable
+; fairness gate a proposal has to pass before it can be rebound in.
+(require "lib/phys")
+(require "lib/sexp")
+(require "std/string" all:)
+(require "std/random" all:)
+
+(define (cons-all items acc)
+  (if (null? items)
+    acc
+    (cons-all (cdr items) (cons (car items) acc))))
+
+(define (layout-specs specs x0)
+  (let loop ((ss specs) (x x0) (acc (list)))
+    (if (null? ss)
+      (list (reverse acc) x)
+      (let* ((sp (car ss))
+             (kind (car sp))
+             (placed (place-one kind sp x)))
+        (if (not placed)
+          #f
+          (loop (cdr ss) (car (cdr placed)) (cons-all (car placed) acc)))))))
+
+(define (place-one kind sp x)
+  (cond
+    ((string=? kind "ground")
+     (let ((w (spec-num sp 1 4.0)))
+       (if (not (positive-range? w 0.8 18.0))
+         #f
+         (list (list (piece 1.0 x w 0.45 0.0)) (+ x w)))))
+    ((string=? kind "gap")
+     (let ((w (spec-num sp 1 1.2)))
+       (if (not (positive-range? w 0.4 8.0))
+         #f
+         (list (list (piece 2.0 x w 1.2 -1.2)) (+ x w)))))
+    ((string=? kind "hurdle")
+     (let ((h (spec-num sp 1 0.5))
+           (w (spec-num sp 2 0.7)))
+       (if (or (not (positive-range? h 0.15 3.0))
+               (not (positive-range? w 0.35 2.2)))
+         #f
+         (list (list (piece 3.0 (+ x 0.25) w h 0.0)) (+ x w 1.05)))))
+    ((string=? kind "gate")
+     (let ((bottom (spec-num sp 1 0.66))
+           (w (spec-num sp 2 0.7)))
+       (if (or (not (positive-range? bottom 0.3 1.6))
+               (not (positive-range? w 0.35 2.0)))
+         #f
+         (list (list (piece 4.0 (+ x 0.2) w 0.34 bottom)) (+ x w 0.95)))))
+    ((string=? kind "coin")
+     (let ((y (spec-num sp 1 1.35)))
+       (if (not (positive-range? y 0.4 2.4))
+         #f
+         (list (list (piece 5.0 (+ x 0.35) 0.42 0.42 y)) (+ x 1.35)))))
+    ((string=? kind "spring")
+     (let ((w (spec-num sp 1 0.75)))
+       (if (not (positive-range? w 0.45 1.6))
+         #f
+         (list (list (piece 6.0 x w 0.32 0.0)) (+ x w 0.7)))))
+    ; Side or centre crate. Does not advance the track, so it sits beside
+    ; the piece that follows and the fair centre line keeps its timing.
+    ((string=? kind "block")
+     (let ((lane (spec-num sp 1 0.0))
+           (w (spec-num sp 2 1.1)))
+       (if (or (not (lane-id? lane)) (not (positive-range? w 0.5 2.2)))
+         #f
+         (list (list (piece 7.0 (+ x 0.15) w 1.65 0.0 lane)) x))))
+    ((string=? kind "coin-lane")
+     (let ((lane (spec-num sp 1 2.0))
+           (y (spec-num sp 2 1.3)))
+       (if (or (not (lane-id? lane)) (not (positive-range? y 0.4 2.4)))
+         #f
+         (list (list (piece 5.0 (+ x 0.4) 0.42 0.42 y lane)) x))))
+    (else #f)))
+
+(define (lane-id? v)
+  (or (= v 0.0) (= v 1.0) (= v 2.0)))
+
+(define (spec-num sp i fallback)
+  (let ((v (list-ref-or sp i #f)))
+    (if (number? v) (exact->inexact v) fallback)))
+
+(define (list-ref-or xs i fallback)
+  (if (or (not (pair? xs)) (< i 0))
+    fallback
+    (if (= i 0)
+      (car xs)
+      (list-ref-or (cdr xs) (- i 1) fallback))))
+
+(define (positive-range? v lo hi)
+  (and (number? v) (>= v lo) (<= v hi)))
+
+(define (pattern-table band)
+  (cond
+    ((= band 0) patterns-0)
+    ((= band 1) patterns-1)
+    ((= band 2) patterns-2)
+    ((= band 3) patterns-3)
+    (else patterns-4)))
+
+(define patterns-0
+  (list
+    (list (list "ground" 9.0) (list "block" 0.0 1.1) (list "coin-lane" 2.0 1.4)
+          (list "coin" 1.5) (list "ground" 2.5)
+          (list "coin" 1.2) (list "ground" 3.0) (list "hurdle" 0.40 0.65)
+          (list "ground" 4.5) (list "coin" 1.6) (list "gap" 1.05)
+          (list "ground" 5.5) (list "spring" 0.7) (list "ground" 4.0))
+    (list (list "ground" 7.0) (list "block" 2.0 1.0) (list "coin-lane" 0.0 1.2)
+          (list "coin" 1.3) (list "hurdle" 0.36 0.6)
+          (list "ground" 3.5) (list "coin" 1.5) (list "ground" 3.0)
+          (list "gap" 1.0) (list "ground" 4.0) (list "coin" 1.4)
+          (list "ground" 5.0))
+    (list (list "ground" 8.0) (list "block" 0.0 1.2) (list "spring" 0.7)
+          (list "ground" 3.0)
+          (list "coin" 1.8) (list "hurdle" 0.45 0.7) (list "ground" 4.0)
+          (list "gap" 1.15) (list "ground" 6.0) (list "coin" 1.3)
+          (list "ground" 3.5))))
+
+(define patterns-1
+  (list
+    (list (list "ground" 5.0) (list "block" 0.0 1.1) (list "hurdle" 0.55 0.7)
+          (list "ground" 3.2)
+          (list "coin" 1.5) (list "gap" 1.45) (list "ground" 3.4)
+          (list "hurdle" 0.48 0.65) (list "ground" 3.0) (list "coin" 1.6)
+          (list "spring" 0.7) (list "ground" 4.0))
+    (list (list "ground" 4.5) (list "block" 2.0 1.0) (list "gap" 1.35)
+          (list "ground" 3.0)
+          (list "coin" 1.4) (list "hurdle" 0.6 0.7) (list "ground" 3.5)
+          (list "gap" 1.5) (list "ground" 5.0) (list "coin" 1.2)
+          (list "ground" 3.0))))
+
+; Recovery ground is long enough that a jump lands before the next
+; hazard. A gate never sits inside the arc of the previous jump.
+(define patterns-2
+  (list
+    (list (list "ground" 5.0) (list "block" 1.0 1.0) (list "block" 0.0 1.0)
+          (list "ground" 4.2) (list "gate" 0.66 0.75) (list "ground" 4.0)
+          (list "coin" 1.4) (list "hurdle" 0.55 0.7) (list "ground" 4.6)
+          (list "gap" 1.5) (list "ground" 4.5) (list "spring" 0.7)
+          (list "ground" 4.0))
+    (list (list "ground" 4.6) (list "block" 1.0 1.0) (list "block" 2.0 1.0)
+          (list "ground" 3.6) (list "hurdle" 0.6 0.7) (list "ground" 4.4)
+          (list "gate" 0.64 0.7) (list "ground" 4.0) (list "gap" 1.55)
+          (list "ground" 4.2) (list "coin" 1.5) (list "ground" 3.6))))
+
+(define patterns-3
+  (list
+    (list (list "ground" 4.2) (list "block" 1.0 1.05) (list "ground" 3.4)
+          (list "gap" 1.6) (list "ground" 4.4)
+          (list "hurdle" 0.7 0.7) (list "ground" 4.6) (list "gate" 0.64 0.7)
+          (list "ground" 4.0) (list "coin" 1.6) (list "gap" 1.55)
+          (list "ground" 4.0) (list "spring" 0.75) (list "ground" 3.6))
+    (list (list "ground" 4.0) (list "block" 1.0 1.0) (list "ground" 3.4)
+          (list "gate" 0.62 0.7) (list "ground" 4.2)
+          (list "gap" 1.7) (list "ground" 4.4) (list "hurdle" 0.75 0.7)
+          (list "ground" 4.2) (list "coin" 1.5) (list "spring" 0.7)
+          (list "ground" 3.8))))
+
+(define patterns-4
+  (list
+    (list (list "ground" 3.8) (list "block" 1.0 1.0) (list "ground" 3.2)
+          (list "hurdle" 0.82 0.68) (list "ground" 4.4)
+          (list "gap" 1.85) (list "ground" 4.2) (list "gate" 0.62 0.68)
+          (list "ground" 3.8) (list "spring" 0.7) (list "ground" 3.4)
+          (list "gap" 1.7) (list "ground" 4.2) (list "coin" 1.6)
+          (list "ground" 3.2))
+    (list (list "ground" 3.6) (list "block" 1.0 1.0) (list "ground" 3.2)
+          (list "gap" 1.9) (list "ground" 4.2)
+          (list "gate" 0.6 0.66) (list "ground" 4.0) (list "hurdle" 0.88 0.68)
+          (list "ground" 4.2) (list "coin" 1.5) (list "spring" 0.7)
+          (list "ground" 3.6))))
+
+(define (pick-pattern band rng)
+  (let* ((table (pattern-table band))
+         (n (length table))
+         (draw (random-range 0 n rng))
+         (idx (car draw))
+         (rng2 (car (cdr draw))))
+    (list (list-ref-or table idx (car table)) rng2)))
+
+(define (specs-of-form form)
+  (if (or (not (pair? form)) (not (string? (car form)))
+          (not (string=? (car form) "seq")) (null? (cdr form)))
+    #f
+    (let loop ((xs (cdr form)) (acc (list)))
+      (if (null? xs)
+        (reverse acc)
+        (let ((sp (car xs)))
+          (if (or (not (pair? sp)) (not (string? (car sp))))
+            #f
+            (loop (cdr xs) (cons sp acc))))))))
+
+(define (jump-apex rules)
+  (let ((v (hash-ref rules "jump"))
+        (g (hash-ref rules "g")))
+    (/ (* v v) (* 2.0 g))))
+
+(define (jump-distance rules)
+  (let ((v (hash-ref rules "jump"))
+        (g (hash-ref rules "g"))
+        (s (hash-ref rules "speed")))
+    (* s (/ (* 2.0 v) g))))
+
+; Numeric pre-checks plus an autopilot that has to finish the chunk alive.
+; Violation magnitudes follow std/evo-core: 0 means the constraint holds.
+(define (constraint-hash pieces rules)
+  (let ((budget (budget-violation pieces))
+        (geom (geom-violation pieces rules))
+        (auto (if (autopilot-clear? pieces rules) 0.0 1.0)))
+    (hash "budget" budget
+          "geometry" geom
+          "reachable" auto
+          "safe" 0.0)))
+
+(define (budget-violation pieces)
+  (let ((n (length pieces)))
+    (if (> n 16) (exact->inexact (- n 16)) 0.0)))
+
+(define (geom-violation pieces rules)
+  (let ((apex (jump-apex rules))
+        (dist (jump-distance rules)))
+    (let loop ((ps pieces) (worst 0.0))
+      (if (null? ps)
+        worst
+        (let* ((q (car ps))
+               (k (piece-k q))
+               (v (cond
+                    ((= k 2.0)
+                     (let ((over (- (piece-w q) (* dist 0.78))))
+                       (if (> over 0.0) over 0.0)))
+                    ((= k 3.0)
+                     (let ((over (- (piece-h q) (* apex 0.72))))
+                       (if (> over 0.0) over 0.0)))
+                    ((= k 4.0)
+                     (let ((bottom (piece-y q)))
+                       (if (or (< bottom 0.55) (> bottom 0.92)) 1.0 0.0)))
+                    (else 0.0))))
+          (loop (cdr ps) (if (> v worst) v worst)))))))
+
+(define (violations-clear? h)
+  (and (<= (hash-ref h "budget" 1.0) 0.0)
+       (<= (hash-ref h "geometry" 1.0) 0.0)
+       (<= (hash-ref h "reachable" 1.0) 0.0)
+       (<= (hash-ref h "safe" 1.0) 0.0)))
+
+(define (autopilot-clear? pieces rules)
+  (if (null? pieces)
+    #f
+    (let ((x-end (chunk-end pieces))
+          (limit 900))
+      (let loop ((i 0) (p (make-player 0.4)) (sim pieces))
+        (if (or (>= i limit) (not (player-alive? p)) (>= (player-x p) x-end))
+          (and (player-alive? p) (>= (player-x p) (- x-end 0.05)))
+          (let* ((p1 (autopilot-press p sim rules))
+                 (r (step p1 sim rules PHYS-DT)))
+            (loop (+ i 1) (car r) (car (cdr r)))))))))
+
+(define (chunk-end pieces)
+  (let loop ((ps pieces) (m 0.0))
+    (if (null? ps)
+      m
+      (let ((e (+ (piece-x (car ps)) (piece-w (car ps)))))
+        (loop (cdr ps) (if (> e m) e m))))))
+
+; The next hazard only. Sliding wins over jumping so a gate is never
+; met at the top of a hurdle arc, and a jump is not spent early.
+(define (next-hazard pieces x lane)
+  (let loop ((ps pieces) (best #f) (best-dx 9999.0))
+    (if (null? ps)
+      best
+      (let* ((q (car ps))
+             (k (piece-k q))
+             (dx (- (piece-x q) x)))
+        (if (and (or (= k 2.0) (= k 3.0) (= k 4.0))
+                 (hits-lane? q lane)
+                 (>= dx -0.05)
+                 (< dx best-dx))
+          (loop (cdr ps) q dx)
+          (loop (cdr ps) best best-dx))))))
+
+(define (block-ahead? pieces x lane lo hi)
+  (let loop ((ps pieces))
+    (if (null? ps)
+      #f
+      (let ((q (car ps)))
+        (if (and (= (piece-k q) 7.0) (hits-lane? q lane))
+          (let ((dx (- (piece-x q) x)))
+            (if (and (>= dx lo) (<= dx hi))
+              #t
+              (loop (cdr ps))))
+          (loop (cdr ps)))))))
+
+(define (lane-clear? pieces x lane)
+  (not (block-ahead? pieces x lane 0.0 3.2)))
+
+; Leave a crate by one lane. Only commits a switch when the body has
+; arrived at its current target, so a held decision cannot walk off the road.
+(define (dodge-block p pieces)
+  (let ((lane (body-lane p))
+        (x (player-x p)))
+    (if (and (block-ahead? pieces x lane 0.15 2.4)
+             (= (player-lane p) lane))
+      (cond
+        ((and (< lane 1.5) (lane-clear? pieces x (+ lane 1.0)))
+         (press-lane p 1.0))
+        ((and (> lane 0.5) (lane-clear? pieces x (- lane 1.0)))
+         (press-lane p -1.0))
+        (else p))
+      p)))
+
+(define (autopilot-press p pieces rules)
+  (if (not (player-alive? p))
+    p
+    (let ((p1 (dodge-block p pieces)))
+      (let ((q (next-hazard pieces (player-x p1) (body-lane p1))))
+        (if (not q)
+          p1
+          (let ((dx (- (piece-x q) (player-x p1)))
+                (k (piece-k q)))
+            (cond
+              ((and (= k 4.0) (< dx 1.4) (> dx -0.15))
+               (press-slide p1))
+              ((and (or (= k 2.0) (= k 3.0)) (< dx 0.95) (> dx 0.0))
+               (press-jump p1))
+              (else p1))))))))
+
+(define banned-words
+  (list "kill" "blood" "gun" "knife" "scary" "monster" "weapon"
+        "damn" "drug" "bomb" "gore" "murder"))
+
+(define (banned? text)
+  (let ((low (string-downcase text)))
+    (let loop ((ws banned-words))
+      (if (null? ws)
+        #f
+        (if (string-contains? low (car ws))
+          #t
+          (loop (cdr ws)))))))
+
+(define (allowed-symbol? s)
+  (or (string=? s "seq") (string=? s "ground") (string=? s "gap")
+      (string=? s "hurdle") (string=? s "gate") (string=? s "coin")
+      (string=? s "spring") (string=? s "block") (string=? s "coin-lane")))
+
+(define (symbols-allowed? form)
+  (let loop ((ss (form-symbols form)))
+    (if (null? ss)
+      #t
+      (if (allowed-symbol? (car ss))
+        (loop (cdr ss))
+        #f))))
+
+; Check a proposal source. Returns a hash:
+;   ok (#t/#f), why (string), pieces (list of vectors or ()),
+;   violations (evo constraint hash).
+(define (check-source text rules)
+  (cond
+    ((or (not (string? text)) (= (string-length text) 0))
+     (refuse "empty" rules))
+    ((banned? text)
+     (refuse "banned" rules))
+    (else
+     (let ((form (sexp-parse text)))
+       (cond
+         ((not form) (refuse "syntax" rules))
+         ((not (symbols-allowed? form)) (refuse "symbol" rules))
+         (else
+          (let ((specs (specs-of-form form)))
+            (if (not specs)
+              (refuse "shape" rules)
+              (let ((laid (layout-specs specs 0.0)))
+                (if (not laid)
+                  (refuse "range" rules)
+                  (let* ((pieces (car laid))
+                         (viol (constraint-hash pieces rules)))
+                    (if (violations-clear? viol)
+                      (hash "ok" #t "why" "fair" "pieces" pieces
+                            "violations" viol "x1" (car (cdr laid)))
+                      (hash "ok" #f
+                            "why" (first-violation viol)
+                            "pieces" pieces
+                            "violations" viol
+                            "x1" (car (cdr laid)))))))))))))))
+
+(define (refuse why rules)
+  (hash "ok" #f "why" why "pieces" (list)
+        "violations" (hash "budget" 0.0 "geometry" 0.0 "reachable" 1.0 "safe"
+                           (if (string=? why "banned") 1.0 0.0))
+        "x1" 0.0))
+
+(define (first-violation viol)
+  (cond
+    ((> (hash-ref viol "safe" 0.0) 0.0) "banned")
+    ((> (hash-ref viol "budget" 0.0) 0.0) "budget")
+    ((> (hash-ref viol "geometry" 0.0) 0.0) "geometry")
+    ((> (hash-ref viol "reachable" 0.0) 0.0) "reachable")
+    (else "fair")))
+
+; The shipped tables are gated by tests. The running game lays them out
+; directly so a new chunk does not pay for another autopilot sim.
+(define (pattern-chunk seed index band)
+  (let* ((rng (make-random (modulo (+ seed (* index 9973) (* band 13)) 2147483646)))
+         (picked (pick-pattern band rng))
+         (laid (layout-specs (car picked) 0.0)))
+    (if (not laid)
+      #f
+      (hash "pieces" (car laid) "x1" (car (cdr laid)) "origin" "offline"))))
+
+(define (offline-chunk seed index band rules)
+  (let* ((rng (make-random (modulo (+ seed (* index 9973) (* band 13)) 2147483646)))
+         (picked (pick-pattern band rng))
+         (specs (car picked))
+         (laid (layout-specs specs 0.0)))
+    (if (not laid)
+      #f
+      (let ((pieces (car laid)))
+        (if (violations-clear? (constraint-hash pieces rules))
+          (hash "pieces" pieces "x1" (car (cdr laid)) "origin" "offline")
+          #f)))))
+
+; Shift a laid-out chunk (which starts at x=0) onto a world origin.
+(define (shift-pieces pieces x0)
+  (let loop ((ps pieces) (acc (list)))
+    (if (null? ps)
+      (reverse acc)
+      (let ((q (car ps)))
+        (loop (cdr ps)
+              (cons (piece (piece-k q)
+                           (+ (piece-x q) x0)
+                           (piece-w q)
+                           (piece-h q)
+                           (piece-y q)
+                           (piece-lane q))
+                    acc))))))
+
+(define (make-chunk id x0 band origin hue pieces x1)
+  (hash "id" id "x0" x0 "x1" x1 "band" band "origin" origin
+        "hue" hue "pieces" pieces))

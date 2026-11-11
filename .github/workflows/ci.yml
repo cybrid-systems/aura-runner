@@ -1,0 +1,60 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  aura:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/cybrid-systems/aura:0.2.0
+    steps:
+      - uses: actions/checkout@v4
+      - name: Aura core tests
+        run: aura test
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Frontend syntax
+        run: |
+          node --check web/sim.mjs
+          node --check web/render.mjs
+          node --check web/input.mjs
+          node --check web/audio.mjs
+          node --check web/main.mjs
+          node --check bridge/server.mjs
+          node --check scripts/smoke.mjs
+          node --check scripts/check-sim.mjs
+      - name: Physics parity with the Aura golden
+        run: node scripts/check-sim.mjs
+
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Aura v0.2.0
+        run: |
+          set -euo pipefail
+          arch="$(uname -m)"
+          case "$arch" in
+            x86_64) arch=x86_64 ;;
+            aarch64|arm64) arch=arm64 ;;
+          esac
+          tarball="aura-0.2.0-linux-${arch}.tar.gz"
+          curl -fsSL -o "/tmp/${tarball}" "https://github.com/cybrid-systems/aura/releases/download/v0.2.0/${tarball}"
+          curl -fsSL -o "/tmp/${tarball}.sha256" "https://github.com/cybrid-systems/aura/releases/download/v0.2.0/${tarball}.sha256"
+          (cd /tmp && sha256sum -c "${tarball}.sha256")
+          mkdir -p "$RUNNER_TEMP/aura"
+          tar -xzf "/tmp/${tarball}" -C "$RUNNER_TEMP/aura" --strip-components=1
+          echo "$RUNNER_TEMP/aura/bin" >> "$GITHUB_PATH"
+      - name: Seeded end-to-end run
+        run: node scripts/smoke.mjs
