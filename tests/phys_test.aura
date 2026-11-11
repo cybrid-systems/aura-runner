@@ -1,0 +1,150 @@
+(require "lib/phys")
+(require "std/math" all:)
+
+(define rules (rules-of 32.0 11.2 5.0 0.48 0.12 0.12))
+
+(define (mm x)
+  (let ((v (* x 1000.0)))
+    (if (>= v 0.0)
+      (floor (+ v 0.5))
+      (- 0.0 (floor (+ (- 0.0 v) 0.5))))))
+
+(define (show-player tag p)
+  (display tag)
+  (display " ")
+  (display (mm (player-x p)))
+  (display " ")
+  (display (mm (player-y p)))
+  (display " ")
+  (display (mm (player-vy p)))
+  (display " ")
+  (display (if (player-alive? p) 1 0))
+  (newline))
+
+(display "apex ")
+(display (mm (/ (* 11.2 11.2) (* 2.0 32.0))))
+(newline)
+(display "air ")
+(display (mm (* 5.0 (/ (* 2.0 11.2) 32.0))))
+(newline)
+
+; Jump on open ground. No gaps, so the runner stays alive.
+(define open (list (piece 1.0 0.0 80.0 0.45 0.0)))
+(define jumper (press-jump (make-player 1.0)))
+(define ti 0)
+(let loop ()
+  (if (>= ti 70)
+    #t
+    (begin
+      (if (or (= ti 0) (= ti 10) (= ti 22) (= ti 40) (= ti 55))
+        (show-player (number->string ti) jumper)
+        #f)
+      (let ((r (step jumper open rules PHYS-DT)))
+        (set! jumper (car r)))
+      (set! ti (+ ti 1))
+      (loop))))
+(display "alive ")
+(display (if (and (player-alive? jumper) (<= (player-y jumper) 0.001)) 1 0))
+(newline)
+
+; Short gap is clearable when the jump is pressed as the lip approaches.
+(define gap-run
+  (list (piece 1.0 0.0 8.0 0.45 0.0)
+        (piece 2.0 8.0 1.2 1.2 -1.2)
+        (piece 1.0 9.2 12.0 0.45 0.0)))
+(define gp (make-player 1.0))
+(define gpieces gap-run)
+(define crossed 0)
+(let loop ((i 0))
+  (if (or (>= i 400) (not (player-alive? gp)))
+    #t
+    (begin
+      (if (and (>= (- 8.0 (player-x gp)) 0.2)
+               (<= (- 8.0 (player-x gp)) 0.7))
+        (set! gp (press-jump gp))
+        #f)
+      (let ((r (step gp gpieces rules PHYS-DT)))
+        (set! gp (car r))
+        (set! gpieces (car (cdr r))))
+      (if (and (player-alive? gp) (> (player-x gp) 10.5))
+        (set! crossed 1)
+        #f)
+      (loop (+ i 1)))))
+(display "gap-clear ")
+(display crossed)
+(display " ")
+(display (if (player-alive? gp) 1 0))
+(newline)
+
+; A gap wider than the jump is fatal.
+(define wide
+  (list (piece 1.0 0.0 6.0 0.45 0.0)
+        (piece 2.0 6.0 6.0 1.2 -1.2)))
+(define wp (make-player 1.0))
+(define wpieces wide)
+(let loop ((i 0))
+  (if (or (>= i 400) (not (player-alive? wp)))
+    #t
+    (begin
+      (if (and (>= (- 6.0 (player-x wp)) 0.15)
+               (<= (- 6.0 (player-x wp)) 0.8))
+        (set! wp (press-jump wp))
+        #f)
+      (let ((r (step wp wpieces rules PHYS-DT)))
+        (set! wp (car r))
+        (set! wpieces (car (cdr r))))
+      (loop (+ i 1)))))
+(display "wide-alive ")
+(display (if (player-alive? wp) 1 0))
+(newline)
+
+; Slide under a gate; standing into it is fatal.
+(define gated
+  (list (piece 1.0 0.0 30.0 0.45 0.0)
+        (piece 4.0 8.0 0.7 0.34 0.66)))
+(define sp (make-player 1.0))
+(define spieces gated)
+(let loop ((i 0))
+  (if (or (>= i 300) (not (player-alive? sp)) (> (player-x sp) 10.0))
+    #t
+    (begin
+      (if (and (>= (- 8.0 (player-x sp)) 0.3)
+               (<= (- 8.0 (player-x sp)) 1.0))
+        (set! sp (press-slide sp))
+        #f)
+      (let ((r (step sp spieces rules PHYS-DT)))
+        (set! sp (car r))
+        (set! spieces (car (cdr r))))
+      (loop (+ i 1)))))
+(display "slide-alive ")
+(display (if (and (player-alive? sp) (> (player-x sp) 9.2)) 1 0))
+(newline)
+
+(define stand (make-player 1.0))
+(define stand-pieces gated)
+(let loop ((i 0))
+  (if (or (>= i 300) (not (player-alive? stand)))
+    #t
+    (let ((r (step stand stand-pieces rules PHYS-DT)))
+      (set! stand (car r))
+      (set! stand-pieces (car (cdr r)))
+      (loop (+ i 1)))))
+(display "stand-alive ")
+(display (if (player-alive? stand) 1 0))
+(newline)
+
+; Coin adds 25 and is spent once.
+(define coined
+  (list (piece 1.0 0.0 20.0 0.45 0.0)
+        (piece 5.0 3.0 0.42 0.42 0.4)))
+(define cp (make-player 1.0))
+(define cpieces coined)
+(let loop ((i 0))
+  (if (>= i 80) #t
+    (let ((r (step cp cpieces rules PHYS-DT)))
+      (set! cp (car r))
+      (set! cpieces (car (cdr r)))
+      (loop (+ i 1)))))
+(display "coins ")
+(display (player-score cp))
+(newline)

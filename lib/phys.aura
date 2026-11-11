@@ -1,0 +1,191 @@
+; Fixed-step runner physics. The browser twin is web/sim.js.
+; Values are lists, and every step returns new lists. evo:trial's child
+; workspace denies vector-set! / hash-set! / set-car! (they are gated on
+; the AST mutate capability), so an in-place sim cannot run inside a
+; trial. set! on a local is allowed, but returning new lists keeps the
+; gate pure.
+;
+; Every literal that participates in motion is inexact: Aura `/` on two
+; exact integers truncates (docs/stdlib/division.md).
+;
+; Player: (x y vy slide-left coyote alive score jump-buffer slide-buffer
+;          lane lx)
+;   lane is 0 left, 1 centre, 2 right. lx eases toward that lane.
+;   Forward x is the track axis (rendered as world Z). lx is world X.
+; Piece:  (kind x w h y lane)
+;   lane -1 means every lane. kinds: 1 ground, 2 gap, 3 hurdle, 4 gate,
+;   5 coin, 6 spring, 7 block (a crate you change lanes to avoid).
+
+(define PHYS-DT (/ 1.0 60.0))
+(define LANE-W 1.8)
+
+(define (make-player x)
+  (list x 0.0 0.0 0.0 0.12 1.0 0.0 0.0 0.0 1.0 0.0))
+
+(define (pxs p i)
+  (if (= i 0) (car p) (pxs (cdr p) (- i 1))))
+
+(define (pset p i v)
+  (let loop ((xs p) (k 0) (acc (list)))
+    (if (null? xs)
+      (reverse acc)
+      (loop (cdr xs) (+ k 1) (cons (if (= k i) v (car xs)) acc)))))
+
+(define (player-x p) (car p))
+(define (player-y p) (car (cdr p)))
+(define (player-vy p) (car (cdr (cdr p))))
+(define (player-alive? p) (> (pxs p 5) 0.0))
+(define (player-score p) (pxs p 6))
+
+(define (press-jump p) (pset p 7 0.14))
+(define (press-slide p) (pset p 8 0.14))
+
+(define (press-lane p dir)
+  (let ((cur (pxs p 9))
+        (d (if (< dir 0) -1.0 1.0)))
+    (pset p 9 (max 0.0 (min 2.0 (+ cur d))))))
+
+(define (player-lane p) (pxs p 9))
+(define (player-lx p) (pxs p 10))
+
+(define (piece k x w h y . rest)
+  (list k x w h y (if (null? rest) -1.0 (exact->inexact (car rest)))))
+
+(define (piece-k q) (car q))
+(define (piece-x q) (car (cdr q)))
+(define (piece-w q) (car (cdr (cdr q))))
+(define (piece-h q) (car (cdr (cdr (cdr q)))))
+(define (piece-y q) (car (cdr (cdr (cdr (cdr q))))))
+
+(define (piece-lane q)
+  (let loop ((xs q) (i 0))
+    (if (null? xs)
+      -1.0
+      (if (= i 5) (car xs) (loop (cdr xs) (+ i 1))))))
+
+; Which lane the body occupies right now (midpoints at ±0.9).
+(define (body-lane p)
+  (let ((lx (pxs p 10)))
+    (cond ((< lx -0.9) 0.0) ((> lx 0.9) 2.0) (else 1.0))))
+
+(define (hits-lane? q lane)
+  (let ((pl (piece-lane q)))
+    (or (< pl -0.5) (= pl lane))))
+
+(define (ease-lane p dt)
+  (let* ((target (* (- (pxs p 9) 1.0) LANE-W))
+         (lx (pxs p 10))
+         (delta (- target lx))
+         (maxstep (* 14.0 dt))
+         (step (if (> delta maxstep) maxstep
+                 (if (< delta (- 0.0 maxstep)) (- 0.0 maxstep) delta))))
+    (pset p 10 (+ lx step))))
+
+(define (piece->list q) q)
+
+(define (rules-of g jump speed slide coyote forgive)
+  (hash "g" g "jump" jump "speed" speed "slide" slide
+        "coyote" coyote "forgive" forgive
+        "ph" 1.05 "pw" 0.56 "sh" 0.46))
+
+(define (over-gap? x lane pieces)
+  (let loop ((ps pieces))
+    (if (null? ps)
+      #f
+      (let ((q (car ps)))
+        (if (and (= (piece-k q) 2.0)
+                 (hits-lane? q lane)
+                 (>= x (piece-x q))
+                 (< x (+ (piece-x q) (piece-w q))))
+          #t
+          (loop (cdr ps)))))))
+
+(define (rects-overlap? ax1 ay1 ax2 ay2 bx1 by1 bx2 by2)
+  (and (< ax1 bx2) (> ax2 bx1) (< ay1 by2) (> ay2 by1)))
+
+; Returns (list player pieces event). event is "ok" "coin" "spring" "dead".
+(define (step p pieces rules dt)
+  (if (<= (pxs p 5) 0.0)
+    (list p pieces "dead")
+    (let* ((g (hash-ref rules "g"))
+           (jump (hash-ref rules "jump"))
+           (speed (hash-ref rules "speed"))
+           (slide-dur (hash-ref rules "slide"))
+           (coyote-max (hash-ref rules "coyote"))
+           (forgive (hash-ref rules "forgive"))
+           (ph (hash-ref rules "ph"))
+           (pw (hash-ref rules "pw"))
+           (sh (hash-ref rules "sh"))
+           (p1 (if (> (pxs p 7) 0.0) (pset p 7 (max 0.0 (- (pxs p 7) dt))) p))
+           (p2 (if (> (pxs p1 8) 0.0) (pset p1 8 (max 0.0 (- (pxs p1 8) dt))) p1))
+           (grounded (and (<= (player-y p2) 0.0001)
+                          (not (over-gap? (player-x p2) (body-lane p2) pieces))))
+           (p3 (if grounded
+                 (pset p2 4 coyote-max)
+                 (pset p2 4 (max 0.0 (- (pxs p2 4) dt)))))
+           (can-jump (or grounded (> (pxs p3 4) 0.0)))
+           (jumped (and (> (pxs p3 7) 0.0) can-jump))
+           (p4 (if jumped
+                 (let ((launched (pset (pset (pset (pset p3 2 jump) 4 0.0) 7 0.0) 3 0.0)))
+                   (if (< (player-y launched) 0.0) (pset launched 1 0.0) launched))
+                 p3))
+           (p5 (if (and (> (pxs p4 8) 0.0) grounded (not jumped))
+                 (pset (pset p4 3 slide-dur) 8 0.0)
+                 p4))
+           (p6 (if (> (pxs p5 3) 0.0)
+                 (pset p5 3 (max 0.0 (- (pxs p5 3) dt)))
+                 p5))
+           (vy (- (player-vy p6) (* g dt)))
+           (y (+ (player-y p6) (* vy dt)))
+           (x (+ (player-x p6) (* speed dt)))
+           (p7 (pset (pset (pset p6 0 x) 1 y) 2 vy)))
+      (let ((done
+             (if (<= (player-y p7) 0.0)
+               (if (over-gap? (player-x p7) (body-lane p7) pieces)
+                 (list (pset p7 5 0.0) pieces "dead")
+                 (collide (pset (pset p7 1 0.0) 2 0.0) pieces rules))
+               (collide p7 pieces rules))))
+        (list (ease-lane (car done) dt) (car (cdr done)) (car (cdr (cdr done))))))))
+
+(define (collide p pieces rules)
+  (let* ((forgive (hash-ref rules "forgive"))
+         (ph (hash-ref rules "ph"))
+         (pw (hash-ref rules "pw"))
+         (sh (hash-ref rules "sh"))
+         (jump (hash-ref rules "jump"))
+         (h (if (> (pxs p 3) 0.0) sh ph))
+         (lane (body-lane p))
+         (left (+ (- (player-x p) (/ pw 2.0)) forgive))
+         (right (- (+ (player-x p) (/ pw 2.0)) forgive))
+         (bottom (+ (player-y p) forgive))
+         (top (- (+ (player-y p) h) forgive)))
+    (let loop ((ps pieces) (acc (list)) (player p) (event "ok") (dead #f))
+      (if (or (null? ps) dead)
+        (list player (append (reverse acc) ps) (if dead "dead" event))
+        (let* ((q (car ps))
+               (k (piece-k q))
+               (x1 (piece-x q))
+               (y1 (piece-y q))
+               (x2 (+ x1 (piece-w q)))
+               (y2 (+ y1 (piece-h q)))
+               (hit (and (hits-lane? q lane)
+                         (rects-overlap? left bottom right top x1 y1 x2 y2))))
+          (cond
+            ((and hit (or (= k 3.0) (= k 4.0) (= k 7.0)))
+             (loop (cdr ps) (cons q acc) (pset player 5 0.0) "dead" #t))
+            ((and hit (= k 5.0))
+             (loop (cdr ps)
+                   (cons (piece 0.0 x1 (piece-w q) (piece-h q) y1 (piece-lane q)) acc)
+                   (pset player 6 (+ (player-score player) 25.0))
+                   "coin"
+                   #f))
+            ((and hit (= k 6.0) (<= (player-y player) 0.05) (<= (player-vy player) 0.0))
+             (loop (cdr ps) (cons q acc)
+                   (pset (pset player 2 (* jump 1.28)) 3 0.0)
+                   "spring"
+                   #f))
+            (else (loop (cdr ps) (cons q acc) player event #f))))))))
+
+; Distance score starts at the spawn line so the counter opens on 0.
+(define (score-now p)
+  (+ (player-score p) (max 0.0 (- (player-x p) 1.2))))

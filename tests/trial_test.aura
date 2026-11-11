@@ -1,0 +1,85 @@
+; Worldline gate: a proposal is scored inside evo:trial (the live
+; workspace is not mutated), then evo:commit! rebinds motif-form only
+; when every constraint violation is zero.
+(require "std/evo-core" all:)
+(require "lib/gen")
+
+(define rules (rules-of 32.0 11.2 5.0 0.48 0.12 0.12))
+(set-code (read-file "core/hot.aura"))
+(eval-current)
+
+(define fair "(seq (ground 8) (coin 1.4) (hurdle 0.45 0.7) (ground 4) (gap 1.2) (ground 6))")
+(define unfair "(seq (ground 4) (gap 5.5) (ground 4))")
+
+(define (score-text text)
+  (let ((chk (check-source text rules)))
+    (hash "status" "ok"
+          "objectives" (hash "fair" (if (hash-ref chk "ok") 1.0 0.0))
+          "constraints" (hash-ref chk "violations")
+          "behavior" (hash "band" 0.0))))
+
+(display "rebind-before ")
+(display (if (equal? (mutate:rebind "rule-gravity" "(lambda () 30.0)" "g") #t) 1 0))
+(newline)
+(eval-current)
+
+(define (trial-of text id)
+  (let ((cand (evo:candidate text (hash "id" id "target" "motif-form"))))
+    (evo:trial cand
+               (hash "timeout-ms" 4000
+                     "apply" (lambda (c) #t)
+                     "evaluate" (lambda (c) (score-text (evo:candidate-genome c)))))))
+
+(define good (trial-of fair "fair-1"))
+(define bad (trial-of unfair "unfair-1"))
+
+(display "trial-good ")
+(display (if (evo:trial-ok? good) 1 0))
+(display " ")
+(display (if (evo:feasible? good) 1 0))
+(newline)
+(display "trial-bad ")
+(display (if (evo:trial-ok? bad) 1 0))
+(display " ")
+(display (if (evo:feasible? bad) 1 0))
+(newline)
+(display "live-before ")
+(display (motif-form))
+(newline)
+
+; After evo:trial the parent workspace stays a read-only COW layer, so
+; mutate:rebind is refused even though preset=dev granted mutate.
+; set-code still installs the kept motif. See the Aura bug note in README.
+(display "rebind-after ")
+(display (if (equal? (mutate:rebind "rule-gravity" "(lambda () 28.0)" "g2") #t) 1 0))
+(newline)
+
+(define search
+  (evo:search
+    (hash "algo" "lumen" "seed" 1 "budget" 4 "target" "motif-form"
+          "apply"
+          (lambda (s c)
+            (let ((src (string-append "(define (motif-form) \""
+                                      (evo:candidate-genome c)
+                                      "\")\n(define (rule-gravity) 30.0)\n0")))
+              (if (set-code src)
+                (begin (eval-current) #t)
+                #f))))))
+
+(define fair-c (evo:candidate fair (hash "id" "fair-1" "target" "motif-form")))
+(define unfair-c (evo:candidate unfair (hash "id" "unfair-1" "target" "motif-form")))
+(evo:tell! search (list fair-c) (list good))
+(evo:tell! search (list unfair-c) (list bad))
+
+(display "keep-unfair ")
+(display (if (evo:commit! search unfair-c) 1 0))
+(newline)
+(display "keep-fair ")
+(display (if (evo:commit! search fair-c) 1 0))
+(newline)
+(display "motif ")
+(display (if (string=? (motif-form) fair) 1 0))
+(newline)
+(display "tip ")
+(display (if (string=? (evo:tip search) "fair-1") 1 0))
+(newline)
