@@ -7,14 +7,28 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <canvas id="view"></canvas>
+  <canvas id="view" tabindex="0"></canvas>
   <p id="nogpu" hidden>This browser needs WebGL2 to draw the course.</p>
+  <div id="hint" role="group" aria-label="How to play">
+    <p class="hint-title">Lumen</p>
+    <div class="hint-row"><span class="key">↑</span><span>jump</span></div>
+    <div class="hint-row"><span class="key">↓</span><span>slide</span></div>
+    <div class="hint-row"><span class="key">←</span><span>left</span></div>
+    <div class="hint-row"><span class="key">→</span><span>right</span></div>
+  </div>
+  <div id="chevrons" aria-hidden="true">
+    <span>↑ jump</span>
+    <span>↓ slide</span>
+    <span>← left</span>
+    <span>→ right</span>
+  </div>
   <div id="score" aria-hidden="true">0</div>
   <div id="replay" aria-label="Share code"></div>
   <button id="motion" type="button" aria-label="Reduce motion" aria-pressed="false">◎</button>
   <button id="mute" type="button" aria-label="Mute" aria-pressed="false">♪</button>
   <button id="dead" type="button" hidden aria-label="Play again">
     <span class="arrow" aria-hidden="true"></span>
+    <span class="again">tap</span>
   </button>
   <p id="stats" hidden></p>
   <pre id="bench" hidden></pre>

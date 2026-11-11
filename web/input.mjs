@@ -16,15 +16,20 @@ export function createInput(el) {
 
   function onKey(e) {
     if (e.repeat) return;
-    const k = e.key;
-    if (k === " " || k === "ArrowUp" || k === "w" || k === "W") { jump(); e.preventDefault(); }
-    else if (k === "ArrowDown" || k === "s" || k === "S") { slide(); e.preventDefault(); }
-    else if (k === "ArrowLeft" || k === "a" || k === "A") { lane(-1); e.preventDefault(); }
-    else if (k === "ArrowRight" || k === "d" || k === "D") { lane(1); e.preventDefault(); }
-    else if (k === "r" || k === "R") { edges.restart = 1; }
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const code = e.code || "";
+    const k = e.key || "";
+    if (code === "Space" || code === "ArrowUp" || code === "KeyW" || k === " ") { jump(); e.preventDefault(); }
+    else if (code === "ArrowDown" || code === "KeyS") { slide(); e.preventDefault(); }
+    else if (code === "ArrowLeft" || code === "KeyA") { lane(-1); e.preventDefault(); }
+    else if (code === "ArrowRight" || code === "KeyD") { lane(1); e.preventDefault(); }
+    else if (code === "KeyR") { edges.restart = 1; }
   }
 
   window.addEventListener("keydown", onKey, { passive: false });
+  el.tabIndex = 0;
+  el.addEventListener("pointerdown", () => el.focus());
+  queueMicrotask(() => el.focus());
 
   el.addEventListener("touchstart", (e) => {
     const t = e.changedTouches[0];

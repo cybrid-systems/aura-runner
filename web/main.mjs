@@ -11,6 +11,7 @@ const statsEl = document.getElementById("stats");
 const motionBtn = document.getElementById("motion");
 const muteBtn = document.getElementById("mute");
 const benchEl = document.getElementById("bench");
+const hintEl = document.getElementById("hint");
 
 const params = new URLSearchParams(location.search);
 const reducedPref = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -43,6 +44,9 @@ let slideQ = 0;
 let laneQ = 0;
 let inputAt = 0;
 let latency = 0;
+let lastShown = "0";
+let spark = "";
+if (localStorage.getItem("lumen-hint") === "off") hintEl.hidden = true;
 let ws;
 let connected = false;
 
@@ -161,6 +165,10 @@ function frame(now) {
   if (inp.jump || inp.slide || inp.lane) {
     audio.unlock();
     inputAt = now;
+    if (!hintEl.hidden) {
+      hintEl.hidden = true;
+      localStorage.setItem("lumen-hint", "off");
+    }
   }
   if (!alive && (inp.jump || inp.restart || inp.slide)) restart();
   if (alive) {
@@ -176,8 +184,9 @@ function frame(now) {
         latency = now - inputAt;
         inputAt = 0;
       }
-      if (ev === "coin") audio.coin();
-      if (ev === "spring") audio.spring();
+      if (ev === "coin") { audio.coin(); spark = "coin"; }
+      if (ev === "spring") { audio.spring(); spark = "spring"; }
+      if (inp.lane) spark = "lane";
       if (ev === "dead" || player[5] <= 0) {
         alive = false;
         audio.die();
@@ -198,12 +207,19 @@ function frame(now) {
   if (renderer) {
     renderer.resize();
     renderer.frame({
-      x: player[0], y: player[1], lx: player[10],
-      slide: player[3], hue, time: now / 1000, reduced, pieces,
+      x: player[0], y: player[1], vy: player[2], lx: player[10],
+      slide: player[3], hue, time: now / 1000, reduced, pieces, event: spark,
     });
+    spark = "";
   }
   const shown = Math.max(0, Math.floor(scoreNow(player)), serverScore | 0);
-  if (scoreEl.textContent !== String(shown)) scoreEl.textContent = String(shown);
+  if (scoreEl.textContent !== String(shown)) {
+    scoreEl.textContent = String(shown);
+    scoreEl.classList.remove("pop");
+    void scoreEl.offsetWidth;
+    scoreEl.classList.add("pop");
+    lastShown = String(shown);
+  }
   if (showStats && frameN % 20 === 0) paintStats();
   if (benchMode && frameN === 180) finishBench();
   requestAnimationFrame(frame);

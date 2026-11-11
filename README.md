@@ -2,7 +2,7 @@
 
 A 3D parkour runner for children. The game core is [Aura](https://github.com/cybrid-systems/aura) **v0.2.0** (`cf7353373ea276bc03e8364592814382ebd62539`). The browser is a WebGL2 view: a third-person camera sits behind the runner, and the course is three lanes of real boxes, gates, crates and gems.
 
-Tap or press Space to jump. Swipe down or press Down to slide. Swipe sideways or press Left and Right to change lane. The same edges work on a gamepad (A jump, B or down slide, d-pad lanes). The first stretch is a straight garden path. Nothing has to be read to start, and a death is a single tap to run it again.
+The opening shows four hints: up jumps, down slides, left and right change lane. Left, A, a left swipe and a left stick all move the runner toward the left of the screen. The same edges work on a gamepad (A jump, B or down slide, d-pad lanes). The first stretch is a straight garden path, and a death is one tap to run the same seed again.
 
 ## Play
 
@@ -63,5 +63,5 @@ node scripts/smoke.mjs    # seeded run, then a WebSocket hello
 
 GitHub Actions runs those three jobs. The Aura job uses `ghcr.io/cybrid-systems/aura:0.2.0`.
 
-On this VM (Linux x86_64, 4 cores, Chrome 156 headless, SwiftShader WebGL2, 1280×720) a seeded run held **60 fps, frame p50 16.7 ms, p95 33.4 ms** over 180 frames. An Aura physics step is **174 µs** (3000 steps in 523 ms), so a 60 Hz tick is about 1% of the frame. The p95 blip is a doubled vsync interval under software GL, not the game core.
+On this VM (Linux x86_64, 4 cores, Chrome 156 headless, SwiftShader WebGL2, 1280×720) a warmed seeded run holds **60 fps**. Before the scenery pass, frame p50 was 16.7 ms and p95 was 16.8 ms. After it, p50 is still 16.7 ms and p95 is 33.4 ms: some frames miss one vsync under software GL. An Aura physics step is **174 µs** (3000 steps in 523 ms).
 
