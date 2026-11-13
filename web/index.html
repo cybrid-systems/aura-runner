@@ -3,32 +3,41 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f0b06a" />
   <title>Lumen Run</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <canvas id="view" tabindex="0"></canvas>
-  <p id="nogpu" hidden>This browser needs WebGL2 to draw the course.</p>
+  <p id="nogpu" hidden>This browser needs WebGL2 to draw the garden.</p>
   <div id="hint" role="group" aria-label="How to play">
-    <p class="hint-title">Lumen</p>
-    <div class="hint-row"><span class="key">↑</span><span>jump</span></div>
-    <div class="hint-row"><span class="key">↓</span><span>slide</span></div>
-    <div class="hint-row"><span class="key">←</span><span>left</span></div>
-    <div class="hint-row"><span class="key">→</span><span>right</span></div>
+    <p class="eyebrow">Lumen</p>
+    <p class="hint-title">Run the garden</p>
+    <div class="hint-row"><span class="key" aria-hidden="true">↑</span><span>jump</span></div>
+    <div class="hint-row"><span class="key" aria-hidden="true">↓</span><span>slide</span></div>
+    <div class="hint-row"><span class="key" aria-hidden="true">←</span><span>left</span></div>
+    <div class="hint-row"><span class="key" aria-hidden="true">→</span><span>right</span></div>
+    <p class="hint-foot">Left is the left of the screen.</p>
   </div>
-  <div id="chevrons" aria-hidden="true">
-    <span>↑ jump</span>
-    <span>↓ slide</span>
-    <span>← left</span>
-    <span>→ right</span>
-  </div>
+  <p id="toast" hidden aria-live="polite"></p>
   <div id="score" aria-hidden="true">0</div>
-  <div id="replay" aria-label="Share code"></div>
+  <p id="combo" hidden aria-hidden="true"></p>
+  <button id="badge" type="button" aria-expanded="false" aria-controls="notes">
+    <span class="badge-kicker">world</span>
+    <span id="replay">LUMEN</span>
+  </button>
+  <div id="notes" hidden>
+    <p class="notes-title">Garden notes</p>
+    <ol id="note-list"></ol>
+  </div>
   <button id="motion" type="button" aria-label="Reduce motion" aria-pressed="false">◎</button>
   <button id="mute" type="button" aria-label="Mute" aria-pressed="false">♪</button>
-  <button id="dead" type="button" hidden aria-label="Play again">
-    <span class="arrow" aria-hidden="true"></span>
-    <span class="again">tap</span>
+  <button id="dead" type="button" hidden aria-label="Run again">
+    <span class="card">
+      <span class="seedling" aria-hidden="true"></span>
+      <span class="rest">The light rested</span>
+      <span class="again">Run again</span>
+    </span>
   </button>
   <p id="stats" hidden></p>
   <pre id="bench" hidden></pre>

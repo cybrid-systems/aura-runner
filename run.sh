@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One command: Aura v0.2.0 game core + the browser.
+# One command: Aura v0.2.2 game core + the browser.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
@@ -8,7 +8,7 @@ mkdir -p out .tools
 # shellcheck source=scripts/aura-path.sh
 source "$ROOT/scripts/aura-path.sh"
 
-AURA_VERSION="${AURA_VERSION:-0.2.0}"
+AURA_VERSION="${AURA_VERSION:-0.2.2}"
 WEB_PORT="${AURA_RUNNER_WEB:-8080}"
 AURA_PORT="${AURA_RUNNER_PORT:-8765}"
 

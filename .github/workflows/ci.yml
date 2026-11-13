@@ -8,7 +8,7 @@ jobs:
   aura:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/cybrid-systems/aura:0.2.0
+      image: ghcr.io/cybrid-systems/aura:0.2.2
     steps:
       - uses: actions/checkout@v4
       - name: Aura core tests
@@ -44,7 +44,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Install Aura v0.2.0
+      - name: Install Aura v0.2.2
         run: |
           set -euo pipefail
           arch="$(uname -m)"
@@ -52,9 +52,9 @@ jobs:
             x86_64) arch=x86_64 ;;
             aarch64|arm64) arch=arm64 ;;
           esac
-          tarball="aura-0.2.0-linux-${arch}.tar.gz"
-          curl -fsSL -o "/tmp/${tarball}" "https://github.com/cybrid-systems/aura/releases/download/v0.2.0/${tarball}"
-          curl -fsSL -o "/tmp/${tarball}.sha256" "https://github.com/cybrid-systems/aura/releases/download/v0.2.0/${tarball}.sha256"
+          tarball="aura-0.2.2-linux-${arch}.tar.gz"
+          curl -fsSL -o "/tmp/${tarball}" "https://github.com/cybrid-systems/aura/releases/download/v0.2.2/${tarball}"
+          curl -fsSL -o "/tmp/${tarball}.sha256" "https://github.com/cybrid-systems/aura/releases/download/v0.2.2/${tarball}.sha256"
           (cd /tmp && sha256sum -c "${tarball}.sha256")
           mkdir -p "$RUNNER_TEMP/aura"
           tar -xzf "/tmp/${tarball}" -C "$RUNNER_TEMP/aura" --strip-components=1

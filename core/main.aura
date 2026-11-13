@@ -63,21 +63,35 @@
     (set! rule-rev (+ rule-rev 1))
     how))
 
+(define rules-dirty #f)
+(define next-dream 1500.0)
+(define dream-phase 0)
+(define dream-pieces (list))
+(define dream-sim (list))
+(define dream-body #f)
+(define dream-i 0)
+(define dream-form "")
+(define dream-span 0.0)
+(define tuned #f)
+
 (define (publish-named! name value)
   (let ((how (publish-rule! name (rule-body value) (full-src))))
     (set! publish-via how)
     (set! rule-rev (+ rule-rev 1))
+    (set! rules-dirty #t)
     how))
 
-(define (note! kind why arm)
-  (let ((row (hash "op" "decision" "kind" kind "why" why "arm" arm "via" publish-via)))
-    (set! audit (cons (hash "kind" kind "why" why "arm" arm) audit))
+(define (note! kind why arm . rest)
+  (let ((cue (if (and (pair? rest) (string? (car rest))) (car rest) "")))
+    (let ((row (hash "op" "decision" "kind" kind "why" why "arm" arm
+                     "via" publish-via "cue" cue)))
+    (set! audit (cons (hash "kind" kind "why" why "arm" arm "cue" cue) audit))
     (if (> (length audit) 12)
       (set! audit (take-n audit 12))
       #f)
     (set! pending (cons row pending))
     (try (evo:record! arm kind why (hash "arm" arm) "" 0) (catch (e) #f))
-    row))
+    row)))
 
 (define (flush-notes! c)
   (let loop ((xs (reverse pending)))
@@ -109,43 +123,112 @@
     ((string=? arm "band-4") 4)
     (else 0)))
 
-(define (speed-for b)
+; Gravity, jump and slide ease with the band so a faster path stays
+; reachable. The step is one notch at a time: a new arm is added only
+; after the current one is being cleared.
+(define (feel-for b)
   (cond
-    ((= b 0) 5.0)
-    ((= b 1) 5.8)
-    ((= b 2) 6.6)
-    ((= b 3) 7.3)
-    (else 8.0)))
+    ((= b 0) (list 32.0 11.2 0.48 5.0))
+    ((= b 1) (list 31.4 11.4 0.50 5.8))
+    ((= b 2) (list 30.8 11.6 0.52 6.6))
+    ((= b 3) (list 30.4 11.8 0.54 7.3))
+    (else (list 30.0 12.0 0.56 8.0))))
+
+(define (arm-row name)
+  (list (cons "arm" name) (cons "n" 0) (cons "keeps" 0) (cons "mean" 0.0)))
 
 (define (make-policy)
   (let ((p (evo:policy "ucb" (quote ()))))
-    (hash-set! p "arms"
-               (list
-                 (list (cons "arm" "band-0") (cons "n" 0) (cons "keeps" 0) (cons "mean" 0.0))
-                 (list (cons "arm" "band-1") (cons "n" 0) (cons "keeps" 0) (cons "mean" 0.0))
-                 (list (cons "arm" "band-2") (cons "n" 0) (cons "keeps" 0) (cons "mean" 0.0))
-                 (list (cons "arm" "band-3") (cons "n" 0) (cons "keeps" 0) (cons "mean" 0.0))
-                 (list (cons "arm" "band-4") (cons "n" 0) (cons "keeps" 0) (cons "mean" 0.0))))
+    (hash-set! p "arms" (list (arm-row "band-0") (arm-row "band-1")))
     p))
+
+(define (row-get row key fallback)
+  (let loop ((xs row))
+    (if (or (not (pair? xs)) (null? xs))
+      fallback
+      (if (and (pair? (car xs)) (string? (car (car xs))) (string=? (car (car xs)) key))
+        (cdr (car xs))
+        (loop (cdr xs))))))
+
+(define (find-arm rows name)
+  (let loop ((xs rows))
+    (if (null? xs)
+      #f
+      (if (string=? (row-get (car xs) "arm" "") name)
+        (car xs)
+        (loop (cdr xs))))))
+
+(define (has-arm? rows name)
+  (if (find-arm rows name) #t #f))
+
+; Open the next band only after this one has been cleared more often
+; than not. A miss does not unlock a crueller arm.
+(define (open-next-arm!)
+  (if (>= band 4)
+    #f
+    (let ((rows (hash-ref policy "arms" (list)))
+          (nxt (arm-name (+ band 1))))
+      (if (has-arm? rows nxt)
+        #f
+        (let ((row (find-arm rows (arm-name band))))
+          (if (and row
+                   (>= (row-get row "n" 0) 2)
+                   (>= (row-get row "mean" 0.0) 0.5))
+            (hash-set! policy "arms" (append rows (list (arm-row nxt))))
+            #f))))))
 
 (define (choose-band)
   (if (< run-ms 30000.0)
     (begin (set! band 0) "tutorial")
-    (let ((sel (evo:policy-select policy)))
-      (let ((arm (if (pair? sel) (car sel) "band-0")))
-        (set! band (band-of (if (string? arm) arm "band-0")))
-        "ucb"))))
+    (begin
+      (open-next-arm!)
+      (let ((sel (evo:policy-select policy)))
+        (let ((arm (if (and (pair? sel) (string? (car sel))) (car sel) "band-0"))
+              (next (if (and (pair? sel) (pair? (cdr sel)) (hash? (car (cdr sel))))
+                      (car (cdr sel))
+                      #f)))
+          (if next (set! policy next) #f)
+          (set! band (band-of arm))
+          "ucb")))))
 
-(define (apply-band-speed! why)
-  (if speed-lock
-    why
-    (let ((want (speed-for band)))
-      (if (= want speed-now)
-        why
+(define (apply-feel! why)
+  (let ((f (feel-for band)))
+    (let ((ng (car f))
+          (nj (car (cdr f)))
+          (nsl (car (cdr (cdr f))))
+          (nv (car (cdr (cdr (cdr f)))))
+          (cue ""))
+      (if (not (= ng g-now))
         (begin
-          (set! speed-now want)
-          (publish-named! "rule-run-speed" speed-now)
-          why)))))
+          (set! g-now ng)
+          (publish-named! "rule-gravity" g-now)
+          (if (= (string-length cue) 0)
+            (set! cue (if (< ng 32.0) "Lighter steps" "A bit heavier"))
+            #f))
+        #f)
+      (if (not (= nj jump-now))
+        (begin
+          (set! jump-now nj)
+          (publish-named! "rule-jump-v" jump-now)
+          (if (= (string-length cue) 0) (set! cue "Higher jumps") #f))
+        #f)
+      (if (not (= nsl slide-now))
+        (begin
+          (set! slide-now nsl)
+          (publish-named! "rule-slide-s" slide-now)
+          (if (= (string-length cue) 0) (set! cue "Longer slides") #f))
+        #f)
+      (if (and (not speed-lock) (not (= nv speed-now)))
+        (begin
+          (let ((up (> nv speed-now)))
+            (set! speed-now nv)
+            (publish-named! "rule-run-speed" speed-now)
+            (set! cue (if up "A little faster" "A gentler pace"))))
+        #f)
+      (if (> (string-length cue) 0)
+        (begin (set! tuned #t) (note! "KEEP" why "rule" cue))
+        #f)
+      why)))
 
 (define (shift-onto pieces x0)
   (shift-pieces pieces x0))
@@ -165,7 +248,7 @@
 
 (define (spawn-chunk!)
   (let ((why (choose-band)))
-    (apply-band-speed! why)
+    (apply-feel! why)
     (if (and (pair? motif-pieces) (= (modulo next-id 3) 2))
       (add-chunk! "motif" motif-pieces motif-span band hue-now)
       (let ((ch (pattern-chunk seed next-id band)))
@@ -181,6 +264,19 @@
         (spawn-chunk!)
         (loop (+ guard 1))))))
 
+(define (sync-rules!)
+  (publish-named! "rule-gravity" g-now)
+  (publish-named! "rule-jump-v" jump-now)
+  (publish-named! "rule-slide-s" slide-now)
+  (publish-named! "rule-run-speed" speed-now)
+  (publish-named! "rule-hue" hue-now)
+  (let ((how (publish-rule! "motif-form"
+                            (string-append "(lambda () \"" motif-now "\")")
+                            (full-src))))
+    (set! publish-via how)
+    (set! rule-rev (+ rule-rev 1))
+    (set! rules-dirty #t)))
+
 (define (reset-run!)
   (set! player (make-player 1.2))
   (set! world (list))
@@ -193,7 +289,19 @@
   (set! acc 0.0)
   (set! last-ms 0)
   (set! cleared (list))
+  (set! g-now 32.0)
+  (set! jump-now 11.2)
+  (set! slide-now 0.48)
+  (set! hue-now 0.0)
+  (set! motif-now "")
+  (set! motif-pieces (list))
+  (set! motif-span 0.0)
+  (set! next-dream 1500.0)
+  (set! dream-phase 0)
   (if (not speed-lock) (set! speed-now 5.0) #f)
+  (if tuned
+    (begin (sync-rules!) (set! tuned #f))
+    #f)
   (ensure-ahead!))
 
 (define (parse-seed v)
@@ -236,7 +344,10 @@
         "lane" (player-lane player)
         "lx" (player-lx player)
         "band" band
+        "g" g-now
+        "jump" jump-now
         "speed" speed-now
+        "slide-dur" slide-now
         "rev" rule-rev
         "run" (floor run-ms)
         "hue" hue-now
@@ -348,37 +459,166 @@
            (note! "ROLLBACK" (if (and found (string? (hash-ref found "why")))
                                (hash-ref found "why")
                                "trial")
-                  "motif"))
+                  "motif" "That shape drifted away"))
           (else
-           (set! motif-now form)
-           (set! motif-pieces (hash-ref found "pieces"))
-           (set! motif-span (hash-ref found "x1"))
-           (set! hue-now (exact->inexact (modulo (+ (floor hue-now) 1) 6)))
-           (let ((ev (hash "status" "ok"
-                           "objectives" (hash "fair" 1.0)
-                           "constraints" (hash-ref found "violations")
-                           "behavior" (hash "band" (exact->inexact band))))
-                 (search (evo:search
-                           (hash "algo" "lumen" "seed" (floor seed) "budget" 8
-                                 "target" "motif-form"
-                                 "apply"
-                                 (lambda (s c)
-                                   (if (set-code (full-src))
-                                     (begin (eval-current) #t)
-                                     #f))))))
-             (evo:tell! search (list cand) (list ev))
-             (if (evo:commit! search cand)
-               (begin
-                 (set! publish-via "set-code")
-                 (set! rule-rev (+ rule-rev 1))
-                 (note! "KEEP" "fair" "motif"))
-               (note! "ROLLBACK" "commit" "motif")))))))))
+           (let ((prev-form motif-now)
+                 (prev-pieces motif-pieces)
+                 (prev-span motif-span)
+                 (prev-hue hue-now))
+             (set! motif-now form)
+             (set! motif-pieces (hash-ref found "pieces"))
+             (set! motif-span (hash-ref found "x1"))
+             (set! hue-now (exact->inexact (modulo (+ (floor hue-now) 1) 6)))
+             (let ((ev (hash "status" "ok"
+                             "objectives" (hash "fair" 1.0)
+                             "constraints" (hash-ref found "violations")
+                             "behavior" (hash "band" (exact->inexact band))))
+                   (search (evo:search
+                             (hash "algo" "lumen" "seed" (floor seed) "budget" 8
+                                   "target" "motif-form"
+                                   "apply"
+                                   (lambda (s c)
+                                     (let ((text (evo:candidate-genome c)))
+                                       (let ((body (string-append "(lambda () \""
+                                                                  (if (string? text) text "")
+                                                                  "\")")))
+                                         (let ((rb (mutate :rebind "motif-form" body "motif")))
+                                           (if (equal? rb #t)
+                                             (begin (eval-current) (set! publish-via "rebind") #t)
+                                             (if (set-code (full-src))
+                                               (begin (eval-current) (set! publish-via "set-code") #t)
+                                               #f))))))))))
+               (evo:tell! search (list cand) (list ev))
+               (if (evo:commit! search cand)
+                 (begin
+                   (publish-named! "rule-hue" hue-now)
+                   (note! "KEEP" "fair" "motif" "A new shape bloomed"))
+                 (begin
+                   (set! motif-now prev-form)
+                   (set! motif-pieces prev-pieces)
+                   (set! motif-span prev-span)
+                   (set! hue-now prev-hue)
+                   (note! "ROLLBACK" "commit" "motif" "That shape drifted away")))))))))))
+
+(define (lref xs i)
+  (if (<= i 0) (car xs) (lref (cdr xs) (- i 1))))
+
+; The slice already ran the autopilot. The trial records that verdict
+; and rebinds the kept phrase; it does not simulate the chunk again.
+(define (seal-sliced! cleared?)
+  (let ((form dream-form)
+        (pieces dream-pieces)
+        (span dream-span))
+    (let ((found #f))
+      (let* ((cand (evo:candidate form (hash "id" (string-append "d" (int-str next-id))
+                                            "target" "motif-form")))
+             (trial (evo:trial cand
+                               (hash "timeout-ms" 1500
+                                     "apply" (lambda (c) #t)
+                                     "evaluate"
+                                     (lambda (c)
+                                       (set! found (layout-form form (rules-hash)))
+                                       (hash "status" "ok"
+                                             "objectives"
+                                             (hash "fair" (if (and cleared? found
+                                                                   (<= (hash-ref found "geometry" 1.0) 0.0)
+                                                                   (<= (hash-ref found "budget" 1.0) 0.0))
+                                                            1.0 0.0))
+                                             "constraints"
+                                             (hash "budget" (if found (hash-ref found "budget" 1.0) 1.0)
+                                                   "geometry" (if found (hash-ref found "geometry" 1.0) 1.0)
+                                                   "reachable" (if cleared? 0.0 1.0)
+                                                   "safe" 0.0)
+                                             "behavior" (hash "band" (exact->inexact band))))))))
+        (if (or (not found) (not cleared?)
+                (> (hash-ref found "geometry" 1.0) 0.0)
+                (> (hash-ref found "budget" 1.0) 0.0)
+                (not (evo:trial-ok? trial)) (not (evo:feasible? trial)))
+          (note! "ROLLBACK" "reachable" "motif" "That shape drifted away")
+          (let ((prev-form motif-now)
+                (prev-pieces motif-pieces)
+                (prev-span motif-span)
+                (prev-hue hue-now))
+            (set! motif-now form)
+            (set! motif-pieces pieces)
+            (set! motif-span span)
+            (set! hue-now (exact->inexact (modulo (+ (floor hue-now) 1) 6)))
+            (let ((ev (hash "status" "ok"
+                            "objectives" (hash "fair" 1.0)
+                            "constraints" (hash "budget" 0.0 "geometry" 0.0 "reachable" 0.0 "safe" 0.0)
+                            "behavior" (hash "band" (exact->inexact band))))
+                  (search (evo:search
+                            (hash "algo" "lumen" "seed" (floor seed) "budget" 8
+                                  "target" "motif-form"
+                                  "apply"
+                                  (lambda (s c)
+                                    (let ((text (evo:candidate-genome c)))
+                                      (let ((body (string-append "(lambda () \""
+                                                                 (if (string? text) text "")
+                                                                 "\")")))
+                                        (let ((rb (mutate :rebind "motif-form" body "motif")))
+                                          (if (equal? rb #t)
+                                            (begin (eval-current) (set! publish-via "rebind") #t)
+                                            (if (set-code (full-src))
+                                              (begin (eval-current) (set! publish-via "set-code") #t)
+                                              #f))))))))))
+              (evo:tell! search (list cand) (list ev))
+              (if (evo:commit! search cand)
+                (begin
+                  (publish-named! "rule-hue" hue-now)
+                  (note! "KEEP" "fair" "motif" "A new shape bloomed"))
+                (begin
+                  (set! motif-now prev-form)
+                  (set! motif-pieces prev-pieces)
+                  (set! motif-span prev-span)
+                  (set! hue-now prev-hue)
+                  (note! "ROLLBACK" "commit" "motif" "That shape drifted away"))))))))))
+
+(define (begin-dream!)
+  (set! dream-phase 1)
+  (consider-form! "(seq (ground 4.0) (gap 5.5) (ground 4.0))")
+  (set! dream-form (pattern-form seed (+ next-id 1) band))
+  (let ((laid (layout-form dream-form (rules-hash))))
+    (if (or (not laid) (> (hash-ref laid "geometry" 1.0) 0.0))
+      (begin
+        (set! dream-phase 0)
+        (set! next-dream (+ run-ms 8000.0))
+        (note! "ROLLBACK" "geometry" "motif" "That shape drifted away"))
+      (begin
+        (set! dream-pieces (hash-ref laid "pieces"))
+        (set! dream-span (hash-ref laid "x1"))
+        (set! dream-sim dream-pieces)
+        (set! dream-body (make-player 0.4))
+        (set! dream-i 0)))))
+
+(define (step-dream!)
+  (let ((r (autopilot-slice dream-pieces (rules-hash) dream-body dream-sim dream-i 12)))
+    (set! dream-i (lref r 1))
+    (set! dream-body (lref r 2))
+    (set! dream-sim (lref r 3))
+    (if (lref r 0)
+      (begin
+        (set! dream-phase 0)
+        (set! next-dream (+ run-ms 22000.0))
+        (seal-sliced! (if (lref r 4) #t #f)))
+      #f)))
+
+; An in-progress slice keeps going after a fall so the verdict still lands.
+; A new dream starts only while the run is alive, a couple of seconds in.
+(define (maybe-dream!)
+  (cond
+    ((= dream-phase 1) (step-dream!))
+    ((and (player-alive? player) (>= run-ms next-dream))
+     (begin-dream!))
+    (else #f)))
 
 (define (llm-prompt)
   (string-append "Difficulty band " (number->string band)
                  ". Jump speed is " (num-src speed-now)
                  " m/s. Invent a different rhythm from a straight row of hurdles."))
 
+; channel:try-recv on an empty channel is #f on Aura v0.2.2 (measured;
+; #5161). A model reply is a hash, so that is what the loop accepts.
 (define (poll-llm! c)
   (if (not llm-on)
     #f
@@ -390,9 +630,10 @@
             (let ((form (extract-seq (hash-ref ans "content" ""))))
               (if form
                 (consider-form! form)
-                (note! "ROLLBACK" "no-seq" "llm")))
-            (note! "ROLLBACK" (hash-ref ans "error" "llm") "llm"))
-          (send c (rules-msg)))
+                (note! "ROLLBACK" "no-seq" "llm" "That shape drifted away")))
+            (note! "ROLLBACK" (hash-ref ans "error" "llm") "llm" "That shape drifted away"))
+          (send c (rules-msg))
+          (set! rules-dirty #f))
         #f)
       (if (and llm-on (not llm-busy) (>= next-id 3) (not (= asked-at next-id))
                (= (modulo next-id 3) 0))
@@ -434,9 +675,13 @@
     (set! player (press-lane player (hash-ref msg "lane" 0)))
     #f)
   (let ((ev (if (player-alive? player) (pump! (elapsed-ms)) "dead")))
+    (maybe-dream!)
     (ensure-ahead!)
     (poll-llm! c)
     (send-new-chunks c)
+    (if rules-dirty
+      (begin (send c (rules-msg)) (set! rules-dirty #f))
+      #f)
     (let ((st (state-msg)))
       (hash-set! st "event" ev)
       (send c st))
@@ -458,6 +703,7 @@
           ((string=? name "speed")
            (begin (set! speed-now (exact->inexact value)) (set! speed-lock #t)))
           ((string=? name "hue") (set! hue-now (exact->inexact value))))
+        (set! tuned #t)
         (publish-named! (cond
                           ((string=? name "gravity") "rule-gravity")
                           ((string=? name "jump") "rule-jump-v")
@@ -470,14 +716,22 @@
                           ((string=? name "slide") slide-now)
                           ((string=? name "speed") speed-now)
                           (else hue-now)))
-        (note! "KEEP" name "rule")
+        (note! "KEEP" name "rule"
+               (cond
+                 ((string=? name "gravity") (if (< value 32.0) "Lighter steps" "A bit heavier"))
+                 ((string=? name "jump") (if (> value 11.2) "Higher jumps" "Softer jumps"))
+                 ((string=? name "slide") "Longer slides")
+                 ((string=? name "speed") (if (> value 5.0) "A little faster" "A gentler pace"))
+                 (else "The light shifted")))
         (flush-notes! c)
-        (send c (rules-msg))))))
+        (send c (rules-msg))
+        (set! rules-dirty #f)))))
 
 (define (on-propose c msg)
   (consider-form! (hash-ref msg "form" ""))
   (flush-notes! c)
   (send c (rules-msg))
+  (set! rules-dirty #f)
   (send c (state-msg)))
 
 (define (on-audit c msg)

@@ -1,9 +1,9 @@
-; Fixed-step runner physics. The browser twin is web/sim.js.
-; Values are lists, and every step returns new lists. evo:trial's child
-; workspace denies vector-set! / hash-set! / set-car! (they are gated on
-; the AST mutate capability), so an in-place sim cannot run inside a
-; trial. set! on a local is allowed, but returning new lists keeps the
-; gate pure.
+; Fixed-step runner physics. The browser twin is web/sim.mjs.
+; Values are lists, and every step returns new lists. That keeps the
+; fairness autopilot referentially transparent and byte-compatible with
+; the golden trace. Aura v0.2.2 does allow vector-set! / hash-set! /
+; set-car! inside an evo:trial child (measured; #5163 is fixed), so the
+; lists are a choice of the gate, not a sandbox workaround.
 ;
 ; Every literal that participates in motion is inexact: Aura `/` on two
 ; exact integers truncates (docs/stdlib/division.md).

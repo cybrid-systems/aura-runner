@@ -12,7 +12,7 @@ mkdir -p "$work/out"
 
 echo "fresh install into $work (native $(uname -m))" >&2
 export AURA_FORCE_TOOLS=1
-out="$(install_aura "$work" 0.2.0)"
+out="$(install_aura "$work" 0.2.2)"
 lines="$(printf '%s\n' "$out" | grep -c .)"
 if [[ "$lines" -ne 1 ]]; then
   echo "install stdout was $lines lines, expected 1:" >&2
@@ -28,12 +28,12 @@ if [[ ! -x "$out" ]]; then
 fi
 ver="$("$out" --version 2>/dev/null || true)"
 case "$ver" in
-  *0.2.0*) ;;
+  *0.2.2*) ;;
   *) echo "unexpected version: $ver" >&2; exit 1 ;;
 esac
 
 echo "second call is idempotent" >&2
-out2="$(install_aura "$work" 0.2.0)"
+out2="$(install_aura "$work" 0.2.2)"
 if [[ "$out" != "$out2" ]]; then
   echo "second path differs: $out2" >&2
   exit 1
@@ -48,8 +48,8 @@ case "$host" in
   *) echo "skip cross-arch layout check on $host" >&2; other="" ;;
 esac
 if [[ -n "$other" ]]; then
-  tarball="aura-0.2.0-linux-${other}.tar.gz"
-  url="https://github.com/cybrid-systems/aura/releases/download/v0.2.0/${tarball}"
+  tarball="aura-0.2.2-linux-${other}.tar.gz"
+  url="https://github.com/cybrid-systems/aura/releases/download/v0.2.2/${tarball}"
   echo "checking ${other} release layout (not executed)" >&2
   curl -fsSL -o "$work/${tarball}" "$url"
   curl -fsSL -o "$work/${tarball}.sha256" "${url}.sha256"

@@ -4,6 +4,6 @@ preset = "dev"
 out = "out"
 
 # Pinned to the Aura release this game was built against.
-# .github/workflows/ci.yml runs ghcr.io/cybrid-systems/aura:0.2.0.
+# .github/workflows/ci.yml runs ghcr.io/cybrid-systems/aura:0.2.2.
 [dependencies]
-aura = "0.2.0"
+aura = "0.2.2"
