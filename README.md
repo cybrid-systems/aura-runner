@@ -14,14 +14,19 @@ That downloads the official Aura v0.2.2 release if you do not already have it (i
 
 The world code on the badge (`LUMEN-42`) is the seed. Open `http://127.0.0.1:8080/?seed=42` to share the same course. Tap the badge for the last few garden notes. Add `?stats=1` for frame-time numbers, `?bench=1` to drop a JSON summary into the page after 180 frames.
 
-An OpenAI-compatible model is optional. Without a key the offline generator in Aura builds every chunk, and the garden still tries one new phrase on its own.
+An OpenAI-compatible model is optional. `LLM_API_KEY` is required for that path. Without it the offline generator in Aura builds every chunk, and the garden still tries one new phrase on its own.
 
 ```bash
-export LLM_API_KEY=...
-export LLM_BASE_URL=https://api.openai.com/v1   # optional
-export LLM_MODEL=gpt-4o-mini                     # optional
+export LLM_API_KEY=...                           # required for a model; omit for offline generation
+export LLM_BASE_URL=https://api.minimaxi.com/v1  # MiniMax in China. https://api.minimax.io returns 401 for a China key
+export LLM_MODEL=MiniMax-M3.1-Flash
+# optional. Aura main (b4e0ce31 and later) defaults the HTTP budget to 120 seconds.
+# export LLM_TIMEOUT=120
+# export AURA_HTTP_TIMEOUT=120
 ./run.sh
 ```
+
+On Aura v0.2.2, `http-post` has a hard 30 second cap and returns void for a 200 response ([cybrid-systems/aura#5267](https://github.com/cybrid-systems/aura/issues/5267), [#5268](https://github.com/cybrid-systems/aura/issues/5268)). That is fixed on Aura main and is not in the v0.2.2 release. `llm:chat` on v0.2.2 takes only the system and user strings. A newer runtime also accepts an extra hash; this game then sends `reasoning_effort` `minimal` and `max_tokens` 2048, and otherwise keeps the two-argument call. A restart clears the in-flight flag, so the next run can ask again.
 
 The model is asked for one s-expression. Aura checks it before it can appear. A rejected phrase is rolled back and the seeded course continues. The call runs on a fiber, so the run does not wait for it.
 
