@@ -52,7 +52,7 @@ jobs:
           source scripts/aura-path.sh
           bin="$(install_aura "$RUNNER_TEMP")"
           echo "$(dirname "$bin")" >> "$GITHUB_PATH"
-          aura --version
+          "$bin" --version
       - name: First install from an empty tools directory
         run: bash scripts/check-install.sh
       - name: Seeded end-to-end run
