@@ -2,7 +2,7 @@ rebind-before 1
 trial-good 1 1
 trial-bad 1 0
 live-before 
-rebind-after 0
+rebind-after 1
 keep-unfair 0
 keep-fair 1
 motif 1

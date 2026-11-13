@@ -205,12 +205,28 @@
 ; Violation magnitudes follow std/evo-core: 0 means the constraint holds.
 (define (constraint-hash pieces rules)
   (let ((budget (budget-violation pieces))
-        (geom (geom-violation pieces rules))
-        (auto (if (autopilot-clear? pieces rules) 0.0 1.0)))
-    (hash "budget" budget
-          "geometry" geom
-          "reachable" auto
-          "safe" 0.0)))
+        (geom (geom-violation pieces rules)))
+    ; A shape that already fails the jump envelope does not need the
+    ; autopilot. Measured on v0.2.2: a full fair autopilot is about a
+    ; second, so the dream slices that work across ticks instead.
+    (let ((auto (if (> geom 0.0) 1.0 (if (autopilot-clear? pieces rules) 0.0 1.0))))
+      (hash "budget" budget
+            "geometry" geom
+            "reachable" auto
+            "safe" 0.0))))
+
+; Run `budget` autopilot steps. Returns
+; (done? step-index player pieces cleared?)
+(define (autopilot-slice pieces rules p sim i budget)
+  (let ((x-end (chunk-end pieces)))
+    (let loop ((n 0) (k i) (pp p) (ss sim))
+      (if (or (>= n budget) (>= k 900) (not (player-alive? pp)) (>= (player-x pp) x-end))
+        (list (or (>= k 900) (not (player-alive? pp)) (>= (player-x pp) x-end))
+              k pp ss
+              (and (player-alive? pp) (>= (player-x pp) (- x-end 0.05))))
+        (let* ((p1 (autopilot-press pp ss rules))
+               (r (step p1 ss rules PHYS-DT)))
+          (loop (+ n 1) (+ k 1) (car r) (car (cdr r))))))))
 
 (define (budget-violation pieces)
   (let ((n (length pieces)))
@@ -436,3 +452,44 @@
 (define (make-chunk id x0 band origin hue pieces x1)
   (hash "id" id "x0" x0 "x1" x1 "band" band "origin" origin
         "hue" hue "pieces" pieces))
+
+(define (token-num n)
+  (let ((s (number->string (exact->inexact n))))
+    (if (string-contains? s ".") s (string-append s ".0"))))
+
+(define (spec-src sp)
+  (let loop ((xs (cdr sp)) (b (string-append "(" (car sp))))
+    (if (null? xs)
+      (string-append b ")")
+      (loop (cdr xs) (string-append b " " (token-num (car xs)))))))
+
+(define (specs-src specs)
+  (let loop ((ss specs) (b ""))
+    (if (null? ss)
+      b
+      (loop (cdr ss) (string-append b " " (spec-src (car ss)))))))
+
+; Layout and the numeric envelope only. The autopilot is separate so a
+; running game can spread it across ticks.
+(define (layout-form text rules)
+  (let ((form (sexp-parse text)))
+    (if (or (not form) (not (symbols-allowed? form)))
+      #f
+      (let ((specs (specs-of-form form)))
+        (if (not specs)
+          #f
+          (let ((laid (layout-specs specs 0.0)))
+            (if (not laid)
+              #f
+              (let ((pieces (car laid)))
+                (hash "pieces" pieces
+                      "x1" (car (cdr laid))
+                      "geometry" (geom-violation pieces rules)
+                      "budget" (budget-violation pieces))))))))))
+
+; The same seeded pattern the offline chunk lays out, as one s-expression
+; the fairness gate can trial.
+(define (pattern-form seed index band)
+  (let* ((rng (make-random (modulo (+ seed (* index 9973) (* band 13)) 2147483646)))
+         (picked (pick-pattern band rng)))
+    (string-append "(seq" (specs-src (car picked)) ")")))

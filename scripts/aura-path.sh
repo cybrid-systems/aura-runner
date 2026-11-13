@@ -1,15 +1,15 @@
-# Resolve an Aura v0.2.0 binary. The only stdout is the executable path.
+# Resolve an Aura v0.2.2 binary. The only stdout is the executable path.
 # Progress and checksum lines go to stderr so command substitution stays clean.
 
 install_aura() {
   local root="$1"
-  local version="${2:-0.2.0}"
+  local version="${2:-0.2.2}"
   local force="${AURA_FORCE_TOOLS:-}"
 
   if [[ -z "$force" ]] && command -v aura >/dev/null 2>&1; then
     local v
     v="$(aura --version 2>/dev/null || true)"
-    if [[ "$v" == *"0.2.0"* ]]; then
+    if [[ "$v" == *"0.2.2"* ]]; then
       command -v aura
       return 0
     fi
