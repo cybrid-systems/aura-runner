@@ -31,7 +31,7 @@ function flowerPair(kind) {
 // Sky, ground, flowers and light come from the kept garden phrase.
 // Hue still warms the hills a little when an obstacle phrase is kept.
 // Obstacle colors stay put so a hurdle, a gate and a pot stay readable.
-function palette(h, scene) {
+export function palette(h, scene) {
   const t = Math.max(0, Math.min(1, (h || 0) / 5));
   const sky = (scene && scene.sky) || [0.55, 0.72, 0.95];
   const ground = (scene && scene.ground) || [0.42, 0.68, 0.38];
@@ -41,7 +41,8 @@ function palette(h, scene) {
   return {
     sky0: mul(sky, skyLift),
     sky1: mix3(mul(sky, skyLift), [1.0, 0.72, 0.48], 0.42),
-    fog: mix3(mul(sky, 0.9), [1.0, 0.78, 0.58], 0.35),
+    fog: mix3(mix3(mul(sky, 0.92), [1, 1, 1], 0.42), [1.0, 0.86, 0.72], 0.18),
+    fogAmt: scene && typeof scene.fog === "number" ? scene.fog : 0.22,
     hill: mix3([0.55, 0.66, 0.74], [0.32, 0.28, 0.48], t),
     hill2: mix3([0.40, 0.55, 0.62], [0.24, 0.22, 0.38], t),
     soil: mix3([0.45, 0.32, 0.22], [0.28, 0.20, 0.22], t),
@@ -52,13 +53,13 @@ function palette(h, scene) {
     hedge: mix3([0.22, 0.46, 0.28], [0.14, 0.32, 0.26], t),
     water: [0.18, 0.55, 0.62],
     lily: [0.55, 0.78, 0.42],
-    hurdle: [0.33, 0.58, 0.90],
-    hurdleTop: [0.62, 0.82, 0.98],
-    gate: [0.96, 0.66, 0.28],
+    hurdle: [0.28, 0.62, 0.98],
+    hurdleTop: [0.72, 0.90, 1.0],
+    gate: [1.0, 0.72, 0.18],
     coin: [1.0, 0.84, 0.32],
     spring: [0.92, 0.42, 0.62],
-    pot: [0.86, 0.46, 0.30],
-    potRim: [0.96, 0.72, 0.48],
+    pot: [0.98, 0.48, 0.16],
+    potRim: [1.0, 0.86, 0.55],
     trunk: [0.46, 0.32, 0.22],
     leaf: [0.30, 0.66, 0.40],
     leaf2: [0.42, 0.74, 0.46],
@@ -146,6 +147,25 @@ function lookAt(out, eye, at, up) {
 
 function laneX(lane) {
   return lane < 0 ? 0 : (lane - 1) * 1.8;
+}
+
+export const FOG_CAP = 0.38;
+
+// Same curve as the mesh shader: haze tops out at 0.38, and emissive
+// obstacles keep most of their colour instead of dissolving into it.
+export function fogStrength(dist, requested = 0.22) {
+  const cap = Math.min(FOG_CAP, Math.max(0, Number(requested) || 0));
+  const base = 1 - Math.exp(-Math.max(0, dist) * 0.011);
+  return Math.max(0, Math.min(cap, base));
+}
+
+export function obstacleFog(dist, requested, emit) {
+  const punch = Math.max(0, Math.min(1, emit));
+  return fogStrength(dist, requested) * (1 - 0.82 * punch);
+}
+
+export function mixRgb(a, b, t) {
+  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 }
 
 export function worldX(simX) {
@@ -250,7 +270,7 @@ precision highp float;
 in vec3 vN; in vec3 vW; in vec3 vC; in vec3 vL;
 flat in vec3 vCenter; flat in vec3 vHalf; flat in float vShape;
 flat in float vRough; flat in float vEmit;
-uniform vec3 uEye; uniform vec3 uFog; uniform vec3 uLight; uniform float uTime;
+uniform vec3 uEye; uniform vec3 uFog; uniform float uFogAmt; uniform vec3 uLight; uniform float uTime;
 out vec4 o;
 void main() {
   vec3 n = normalize(vN);
@@ -290,8 +310,10 @@ void main() {
   float pulse = 0.85 + 0.15 * sin(uTime * 3.0 + vCenter.z);
   col += vC * vEmit * pulse;
   float dist = length(vW - uEye);
-  float fog = 1.0 - exp(-dist * 0.028);
-  fog = clamp(fog + smoothstep(28.0, 58.0, dist) * 0.35, 0.0, 1.0);
+  float cap = min(max(uFogAmt, 0.0), 0.38);
+  float fog = 1.0 - exp(-dist * 0.011);
+  fog = clamp(fog, 0.0, cap);
+  fog *= (1.0 - 0.82 * clamp(vEmit, 0.0, 1.0));
   o = vec4(mix(col, uFog, fog), 1.0);
 }`;
 
@@ -347,6 +369,7 @@ export function createRenderer(canvas) {
     view: gl.getUniformLocation(mesh, "uView"),
     eye: gl.getUniformLocation(mesh, "uEye"),
     fog: gl.getUniformLocation(mesh, "uFog"),
+    fogAmt: gl.getUniformLocation(mesh, "uFogAmt"),
     light: gl.getUniformLocation(mesh, "uLight"),
     mtime: gl.getUniformLocation(mesh, "uTime"),
   };
@@ -539,12 +562,14 @@ export function createRenderer(canvas) {
         const wide = lane < 0;
         const cx = wx(laneX(lane));
         const span = (wide ? 5.15 : 1.28) * (wide ? 1 : sc);
-        push(cx, hh * 0.42, zc, wide ? span : 1.22 * sc, hh, depth * sc, 0, pal.hurdle, 0.48, glow);
-        push(cx, hh * 0.92, zc, (wide ? span * 0.98 : 1.28 * sc), Math.max(0.12, hh * 0.22), depth * 0.9 * sc, 0, pal.hurdleTop, 0.4, 0.08 + glow);
+        push(cx, hh * 0.42, zc, (wide ? span : 1.22 * sc) * 1.14, hh * 1.18, depth * sc * 1.1, 0, [1, 0.98, 0.9], 0.2, 0.92);
+        push(cx, hh * 0.42, zc, wide ? span : 1.22 * sc, hh, depth * sc, 0, pal.hurdle, 0.4, 0.42 + glow);
+        push(cx, hh * 0.92, zc, (wide ? span * 0.98 : 1.28 * sc), Math.max(0.12, hh * 0.22), depth * 0.9 * sc, 0, pal.hurdleTop, 0.35, 0.28 + glow);
       } else if (k === 4) {
         const bottom = q[4];
         const bar = q[3];
-        push(0, (bottom + bar * 0.5) * sc + (1 - sc) * 0.2, zc, 5.2 * sc, bar * sc, Math.max(0.22, depth * 0.35), 0, pal.gate, 0.32, 0.45 + glow);
+        push(0, (bottom + bar * 0.5) * sc + (1 - sc) * 0.2, zc, 5.45 * sc, bar * sc * 1.45, Math.max(0.28, depth * 0.5), 0, [1, 0.97, 0.86], 0.18, 0.95);
+        push(0, (bottom + bar * 0.5) * sc + (1 - sc) * 0.2, zc, 5.2 * sc, bar * sc, Math.max(0.22, depth * 0.35), 0, pal.gate, 0.28, 0.78 + glow);
         push(wx(-2.35), bottom * 0.5 * sc, zc, 0.28, bottom * sc, 0.28, 0, pal.gate, 0.4, 0.12);
         push(wx(2.35), bottom * 0.5 * sc, zc, 0.28, bottom * sc, 0.28, 0, pal.gate, 0.4, 0.12);
       } else if (k === 5) {
@@ -557,7 +582,8 @@ export function createRenderer(canvas) {
       } else if (k === 7) {
         const cx = wx(laneX(lane < 0 ? 1 : lane));
         const pot = 1.05 * sc;
-        push(cx, 0.28 * sc, zc, pot, 0.5 * sc, pot, 0, pal.pot, 0.42, glow);
+        push(cx, 0.28 * sc, zc, pot * 1.16, 0.58 * sc, pot * 1.16, 0, [1, 0.96, 0.84], 0.2, 0.9);
+        push(cx, 0.28 * sc, zc, pot, 0.5 * sc, pot, 0, pal.pot, 0.38, 0.48 + glow);
         push(cx, 0.62 * sc, zc, pot * 1.05, 0.16 * sc, pot * 1.05, 0, pal.potRim, 0.35, 0.05);
         push(cx, 0.95 * sc, zc, 0.55 * sc, 0.42 * sc, 0.55 * sc, 1, pal.leaf, 0.55, 0.08);
       }
@@ -633,6 +659,7 @@ export function createRenderer(canvas) {
     gl.uniformMatrix4fv(u.view, false, view);
     gl.uniform3f(u.eye, eye[0], eye[1], eye[2]);
     gl.uniform3fv(u.fog, pal.fog);
+    gl.uniform1f(u.fogAmt, pal.fogAmt);
     const lift = floaty + pulse * 0.15;
     const sun = 0.55 + 0.55 * pal.lightAmt;
     gl.uniform3f(u.light, 0.42 * sun + pulse * 0.1, (0.78 + lift) * sun, 0.28 * sun);

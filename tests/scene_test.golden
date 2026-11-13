@@ -4,6 +4,9 @@ wild 0 flower
 dim 0 light
 blood 0 ground
 packed 0 density
+dusk 0 light
+haze 0 fog
+soft 1 fair The sky turned rosy
 trial-rosy 1 1
 trial-dark 1 0
 keep-dark 0
