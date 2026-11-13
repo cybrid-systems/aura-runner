@@ -1,0 +1,30 @@
+; A run that never ends must drop chunks the runner has left behind.
+(require "lib/gen")
+
+(define (chunk i)
+  (make-chunk i (* i 10.0) 0 "offline" 0.0 (list) (+ (* i 10.0) 10.0)))
+
+(define cs (list))
+(let loop ((i 0))
+  (if (>= i 40)
+    #t
+    (begin
+      (set! cs (append cs (list (chunk i))))
+      (loop (+ i 1)))))
+
+(define kept (prune-chunks cs 250.0))
+(display "before ")
+(display (length cs))
+(newline)
+(display "kept ")
+(display (length kept))
+(newline)
+(display "first ")
+(display (hash-ref (car kept) "id"))
+(newline)
+(display "last ")
+(display (hash-ref (car (reverse kept)) "id"))
+(newline)
+(display "dropped ")
+(display (if (< (hash-ref (car kept) "x0") 220.0) 0 1))
+(newline)

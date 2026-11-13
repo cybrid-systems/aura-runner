@@ -10,4 +10,5 @@
 (define (rule-forgive) 0.12)
 (define (rule-hue) 0.0)
 (define (motif-form) "")
+(define (scene-form) "(garden (sky 0.55 0.72 0.95) (ground 0.42 0.68 0.38) (flower daisy 0.45) (light 0.82))")
 0

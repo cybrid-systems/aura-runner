@@ -6,13 +6,13 @@ import { createAudio } from "./audio.mjs";
 const canvas = document.getElementById("view");
 const scoreEl = document.getElementById("score");
 const replayEl = document.getElementById("replay");
-const deadEl = document.getElementById("dead");
 const statsEl = document.getElementById("stats");
 const motionBtn = document.getElementById("motion");
 const muteBtn = document.getElementById("mute");
 const benchEl = document.getElementById("bench");
 const hintEl = document.getElementById("hint");
 const toastEl = document.getElementById("toast");
+const flashEl = document.getElementById("flash");
 const comboEl = document.getElementById("combo");
 const badgeEl = document.getElementById("badge");
 const notesEl = document.getElementById("notes");
@@ -35,6 +35,23 @@ const player = makePlayer(1.2);
 let rules = rulesOf(32, 11.2, 5, 0.48, 0.12, 0.12);
 let pieces = [];
 let hue = 0;
+const sceneTarget = {
+  sky: [0.55, 0.72, 0.95],
+  ground: [0.42, 0.68, 0.38],
+  flower: "daisy",
+  density: 0.45,
+  light: 0.82,
+};
+const sceneView = {
+  sky: sceneTarget.sky.slice(),
+  ground: sceneTarget.ground.slice(),
+  flower: "daisy",
+  density: 0.45,
+  light: 0.82,
+};
+let stumble = 0;
+let lastCue = "";
+let lastCueAt = 0;
 let alive = true;
 let seed = 1;
 let serverScore = 0;
@@ -67,6 +84,19 @@ function num(v, fallback) {
   return typeof v === "number" ? v : fallback;
 }
 
+function takeColor(v, fallback) {
+  if (!Array.isArray(v) || v.length < 3) return fallback;
+  return [num(v[0], fallback[0]), num(v[1], fallback[1]), num(v[2], fallback[2])];
+}
+
+function applyScene(msg) {
+  if (Array.isArray(msg.sky)) sceneTarget.sky = takeColor(msg.sky, sceneTarget.sky);
+  if (Array.isArray(msg.ground)) sceneTarget.ground = takeColor(msg.ground, sceneTarget.ground);
+  if (typeof msg.flower === "string" && msg.flower) sceneTarget.flower = msg.flower;
+  if (typeof msg.density === "number") sceneTarget.density = msg.density;
+  if (typeof msg.light === "number") sceneTarget.light = msg.light;
+}
+
 function applyRules(msg) {
   const slide = typeof msg["slide-dur"] === "number" ? msg["slide-dur"] : msg.slide;
   rules = rulesOf(
@@ -78,6 +108,18 @@ function applyRules(msg) {
     num(msg.forgive, rules.forgive),
   );
   if (typeof msg.hue === "number") hue = msg.hue;
+  applyScene(msg);
+}
+
+function lerpScene(dt) {
+  const k = 1 - Math.exp(-Math.max(0, dt) * 3.2);
+  for (let i = 0; i < 3; i++) {
+    sceneView.sky[i] += (sceneTarget.sky[i] - sceneView.sky[i]) * k;
+    sceneView.ground[i] += (sceneTarget.ground[i] - sceneView.ground[i]) * k;
+  }
+  sceneView.density += (sceneTarget.density - sceneView.density) * k;
+  sceneView.light += (sceneTarget.light - sceneView.light) * k;
+  if (Math.abs(sceneTarget.density - sceneView.density) < 0.04) sceneView.flower = sceneTarget.flower;
 }
 
 function paintNotes() {
@@ -98,6 +140,10 @@ function paintNotes() {
 
 function showCue(text) {
   if (!text) return;
+  const now = performance.now();
+  if (text === lastCue && now - lastCueAt < 1200) return;
+  lastCue = text;
+  lastCueAt = now;
   toastQ.push(text);
 }
 
@@ -150,20 +196,18 @@ function resetLocal() {
   combo = 0;
   comboEl.hidden = true;
   nearSeen.clear();
-  deadEl.hidden = true;
+  stumble = 0;
+  flashEl.hidden = true;
+  flashEl.classList.remove("on");
 }
 
 function reconcile(st) {
   if (typeof st.g === "number") applyRules(st);
   serverScore = st.score;
-  if (!st.alive && alive) {
-    alive = false;
-    player[5] = 0;
-    audio.die();
-    deadEl.hidden = false;
-    replayEl.textContent = "LUMEN-" + Math.floor(seed);
-  }
-  if (st.alive && alive) {
+  alive = true;
+  player[5] = 1;
+  if (typeof st.grace === "number" && st.grace > 0) stumble = Math.max(stumble, st.grace * 1000);
+  if (st.alive !== false) {
     const lead = player[0] - st.x;
     if (lead < -0.4) player[0] += (-lead) * 0.35;
     else if (lead > 3.5) player[0] = st.x;
@@ -191,14 +235,29 @@ function connect() {
       replayEl.textContent = msg.replay;
     } else if (msg.op === "rules") {
       applyRules(msg);
+      window.__lumen = Object.assign(window.__lumen || {}, {
+        motif: msg.motif || "",
+        scene: msg.scene || "",
+        via: msg.via || "",
+        flower: msg.flower,
+        sky: msg.sky,
+      });
     } else if (msg.op === "chunk") {
       addChunk(msg);
     } else if (msg.op === "state") {
       reconcile(msg);
+      applyScene(msg);
+      window.__lumen = Object.assign(window.__lumen || {}, {
+        chunks: msg.chunks,
+        motif: msg.motif || (window.__lumen && window.__lumen.motif),
+        scene: msg.scene || (window.__lumen && window.__lumen.scene),
+        alive: true,
+      });
     } else if (msg.op === "decision") {
       remember(msg);
-      if (msg.kind === "KEEP" && msg.arm === "motif") audio.keep();
+      if (msg.kind === "KEEP" && (msg.arm === "motif" || msg.arm === "scene")) audio.keep();
       if (msg.kind === "ROLLBACK") rejectSpark = true;
+      if (msg.kind === "BUMP") stumble = Math.max(stumble, 1500);
     }
   };
   ws.onclose = () => {
@@ -222,6 +281,28 @@ function restart() {
   }
 }
 
+function publishProbe() {
+  const root = document.documentElement;
+  root.dataset.sky = sceneView.sky.map((n) => n.toFixed(2)).join(",");
+  root.dataset.flower = sceneView.flower;
+  root.dataset.alive = "1";
+  root.dataset.light = sceneView.light.toFixed(2);
+  window.__lumen = {
+    sky: sceneTarget.sky.slice(),
+    ground: sceneTarget.ground.slice(),
+    flower: sceneTarget.flower,
+    density: sceneTarget.density,
+    light: sceneTarget.light,
+    viewSky: sceneView.sky.slice(),
+    alive: true,
+    motif: window.__lumen && window.__lumen.motif,
+    scene: window.__lumen && window.__lumen.scene,
+    via: window.__lumen && window.__lumen.via,
+    chunks: window.__lumen && window.__lumen.chunks,
+    cues: gardenNotes.map((row) => row.cue),
+  };
+}
+
 function frame(now) {
   const dt = Math.min(0.05, (now - lastNow) / 1000);
   lastNow = now;
@@ -236,7 +317,6 @@ function frame(now) {
       localStorage.setItem("lumen-hint", "off");
     }
   }
-  if (!alive && (inp.jump || inp.restart || inp.slide)) restart();
   if (alive) {
     if (inp.jump) { pressJump(player); jumpQ = 1; audio.jump(); }
     if (inp.slide) { pressSlide(player); slideQ = 1; audio.slide(); }
@@ -258,14 +338,15 @@ function frame(now) {
         comboUntil = now + 2200;
       }
       if (ev === "spring") { audio.spring(); spark = "spring"; }
+      if (ev === "bump" || ev === "oops") {
+        stumble = 1500;
+        player[5] = 1;
+        showCue(ev === "oops" ? "Back on the path" : "Oops! Keep going");
+        audio.near();
+      }
       if (wasY > 0.2 && player[1] <= 0.001 && player[5] > 0) audio.land();
       if (scanNear(now)) { nearSpark = true; audio.near(); }
-      if (ev === "dead" || player[5] <= 0) {
-        alive = false;
-        audio.die();
-        deadEl.hidden = false;
-        replayEl.textContent = "LUMEN-" + Math.floor(seed);
-      }
+      player[5] = 1;
       acc -= DT;
       guard++;
     }
@@ -276,14 +357,25 @@ function frame(now) {
     sendTick();
     sendAcc = 0;
   }
+  stumble = Math.max(0, stumble - dt * 1000);
+  if (stumble > 0) {
+    flashEl.hidden = false;
+    if (!flashEl.classList.contains("on")) flashEl.classList.add("on");
+  } else if (!flashEl.hidden) {
+    flashEl.hidden = true;
+    flashEl.classList.remove("on");
+  }
+  lerpScene(dt);
+  publishProbe();
   audio.music(reduced);
   if (renderer) {
     renderer.resize();
     renderer.frame({
       x: player[0], y: player[1], vy: player[2], lx: player[10],
       slide: player[3], hue, time: now / 1000, now, reduced, pieces,
-      event: spark, alive, speed: rules.speed, g: rules.g,
+      event: spark, alive: true, speed: rules.speed, g: rules.g,
       near: nearSpark, reject: rejectSpark,
+      scene: sceneView, stumble: stumble / 1500,
     });
     spark = "";
     nearSpark = false;
@@ -373,7 +465,6 @@ muteBtn.addEventListener("click", () => {
   audio.setMuted(next);
   muteBtn.setAttribute("aria-pressed", next ? "true" : "false");
 });
-deadEl.addEventListener("click", restart);
 badgeEl.addEventListener("click", () => {
   const open = notesEl.hidden;
   notesEl.hidden = !open;

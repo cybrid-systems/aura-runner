@@ -8,7 +8,7 @@ jobs:
   aura:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/cybrid-systems/aura:0.2.2
+      image: ghcr.io/cybrid-systems/aura:e7d85162c
     steps:
       - uses: actions/checkout@v4
       - name: Aura core tests
@@ -32,6 +32,7 @@ jobs:
           node --check scripts/smoke.mjs
           node --check scripts/check-sim.mjs
           node --check scripts/check-lanes.mjs
+          node --check scripts/mock-llm-e2e.mjs
       - name: Physics parity with the Aura golden
         run: node scripts/check-sim.mjs
       - name: Left moves toward screen-left
@@ -44,22 +45,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Install Aura v0.2.2
+      - name: Install pinned Aura
         run: |
           set -euo pipefail
-          arch="$(uname -m)"
-          case "$arch" in
-            x86_64) arch=x86_64 ;;
-            aarch64|arm64) arch=arm64 ;;
-          esac
-          tarball="aura-0.2.2-linux-${arch}.tar.gz"
-          curl -fsSL -o "/tmp/${tarball}" "https://github.com/cybrid-systems/aura/releases/download/v0.2.2/${tarball}"
-          curl -fsSL -o "/tmp/${tarball}.sha256" "https://github.com/cybrid-systems/aura/releases/download/v0.2.2/${tarball}.sha256"
-          (cd /tmp && sha256sum -c "${tarball}.sha256")
-          mkdir -p "$RUNNER_TEMP/aura"
-          tar -xzf "/tmp/${tarball}" -C "$RUNNER_TEMP/aura" --strip-components=1
-          echo "$RUNNER_TEMP/aura/bin" >> "$GITHUB_PATH"
+          # shellcheck disable=SC1091
+          source scripts/aura-path.sh
+          bin="$(install_aura "$RUNNER_TEMP")"
+          echo "$(dirname "$bin")" >> "$GITHUB_PATH"
+          aura --version
       - name: First install from an empty tools directory
         run: bash scripts/check-install.sh
       - name: Seeded end-to-end run
         run: node scripts/smoke.mjs
+      - name: Mock LLM rebind
+        run: node scripts/mock-llm-e2e.mjs

@@ -215,10 +215,25 @@
             "reachable" auto
             "safe" 0.0))))
 
+; The playing run stumbles and continues. The gate still has to fail a
+; phrase the autopilot cannot finish, so the check uses strict rules.
+(define (strict-rules rules)
+  (hash "g" (hash-ref rules "g")
+        "jump" (hash-ref rules "jump")
+        "speed" (hash-ref rules "speed")
+        "slide" (hash-ref rules "slide")
+        "coyote" (hash-ref rules "coyote")
+        "forgive" (hash-ref rules "forgive")
+        "ph" (hash-ref rules "ph")
+        "pw" (hash-ref rules "pw")
+        "sh" (hash-ref rules "sh")
+        "strict" #t))
+
 ; Run `budget` autopilot steps. Returns
 ; (done? step-index player pieces cleared?)
 (define (autopilot-slice pieces rules p sim i budget)
-  (let ((x-end (chunk-end pieces)))
+  (let ((rules (strict-rules rules))
+        (x-end (chunk-end pieces)))
     (let loop ((n 0) (k i) (pp p) (ss sim))
       (if (or (>= n budget) (>= k 900) (not (player-alive? pp)) (>= (player-x pp) x-end))
         (list (or (>= k 900) (not (player-alive? pp)) (>= (player-x pp) x-end))
@@ -262,7 +277,8 @@
 (define (autopilot-clear? pieces rules)
   (if (null? pieces)
     #f
-    (let ((x-end (chunk-end pieces))
+    (let ((rules (strict-rules rules))
+          (x-end (chunk-end pieces))
           (limit 900))
       (let loop ((i 0) (p (make-player 0.4)) (sim pieces))
         (if (or (>= i limit) (not (player-alive? p)) (>= (player-x p) x-end))
@@ -452,6 +468,17 @@
 (define (make-chunk id x0 band origin hue pieces x1)
   (hash "id" id "x0" x0 "x1" x1 "band" band "origin" origin
         "hue" hue "pieces" pieces))
+
+; Drop chunks the runner has left behind so a run that never ends does
+; not keep the whole trail. `x` is the runner's position.
+(define (prune-chunks cs x)
+  (let ((cut (- x 24.0)))
+    (let loop ((ys cs) (acc (list)))
+      (if (null? ys)
+        (reverse acc)
+        (if (< (hash-ref (car ys) "x1") cut)
+          (loop (cdr ys) acc)
+          (loop (cdr ys) (cons (car ys) acc)))))))
 
 (define (token-num n)
   (let ((s (number->string (exact->inexact n))))

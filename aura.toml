@@ -3,7 +3,8 @@ entry = "core/main.aura"
 preset = "dev"
 out = "out"
 
-# Pinned to the Aura release this game was built against.
-# .github/workflows/ci.yml runs ghcr.io/cybrid-systems/aura:0.2.2.
+# Pinned to Aura main e7d85162c7cafcdac779e27c453c63d44b03a91d
+# (includes b4e0ce31: http-post returns a body, timeout is configurable).
+# .github/workflows/ci.yml runs ghcr.io/cybrid-systems/aura:e7d85162c.
 [dependencies]
-aura = "0.2.2"
+aura = "e7d85162c7cafcdac779e27c453c63d44b03a91d"

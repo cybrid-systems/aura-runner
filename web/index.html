@@ -20,6 +20,7 @@
     <p class="hint-foot">Left is the left of the screen.</p>
   </div>
   <p id="toast" hidden aria-live="polite"></p>
+  <div id="flash" hidden></div>
   <div id="score" aria-hidden="true">0</div>
   <p id="combo" hidden aria-hidden="true"></p>
   <button id="badge" type="button" aria-expanded="false" aria-controls="notes">
@@ -32,13 +33,6 @@
   </div>
   <button id="motion" type="button" aria-label="Reduce motion" aria-pressed="false">◎</button>
   <button id="mute" type="button" aria-label="Mute" aria-pressed="false">♪</button>
-  <button id="dead" type="button" hidden aria-label="Run again">
-    <span class="card">
-      <span class="seedling" aria-hidden="true"></span>
-      <span class="rest">The light rested</span>
-      <span class="again">Run again</span>
-    </span>
-  </button>
   <p id="stats" hidden></p>
   <pre id="bench" hidden></pre>
   <script type="module" src="main.mjs"></script>

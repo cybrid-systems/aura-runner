@@ -9,7 +9,10 @@
   (let ((s (number->string (exact->inexact n))))
     (if (string-contains? s ".") s (string-append s ".0"))))
 
-(define (hot-source g jump slide speed coyote forgive hue motif)
+(define default-scene
+  "(garden (sky 0.55 0.72 0.95) (ground 0.42 0.68 0.38) (flower daisy 0.45) (light 0.82))")
+
+(define (hot-source g jump slide speed coyote forgive hue motif scene)
   (string-append
     "(define (rule-gravity) " (num-src g) ")\n"
     "(define (rule-jump-v) " (num-src jump) ")\n"
@@ -19,6 +22,7 @@
     "(define (rule-forgive) " (num-src forgive) ")\n"
     "(define (rule-hue) " (num-src hue) ")\n"
     "(define (motif-form) \"" motif "\")\n"
+    "(define (scene-form) \"" (if (and (string? scene) (> (string-length scene) 0)) scene default-scene) "\")\n"
     "0"))
 
 ; hot.aura writes (define (motif-form) "…"). The live workspace stores
@@ -30,6 +34,9 @@
 (define (motif-body text)
   (string-append "(lambda () \"" (if (string? text) text "") "\")"))
 
+(define (scene-body text)
+  (string-append "(lambda () \"" (if (string? text) text "") "\")"))
+
 ; Returns "rebind" or "set-code".
 (define (publish-rule! name body full-src)
   (let ((rb (mutate :rebind name body "tune")))
@@ -39,10 +46,10 @@
         (begin (eval-current) "set-code")
         "fail"))))
 
-(define (extract-seq s)
+(define (extract-balanced s mark)
   (if (not (string? s))
     #f
-    (let ((i (string-find s "(seq")))
+    (let ((i (string-find s mark)))
       (if (< i 0)
         #f
         (let ((n (string-length s)))
@@ -58,6 +65,12 @@
                      (substring s i (+ k 1))
                      (loop (+ k 1) (- depth 1))))
                   (else (loop (+ k 1) depth)))))))))))
+
+(define (extract-seq s)
+  (extract-balanced s "(seq"))
+
+(define (extract-garden s)
+  (extract-balanced s "(garden"))
 
 (define (one-line s)
   (string-replace (string-replace s "\n" " ") "\r" " "))

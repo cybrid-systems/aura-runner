@@ -1,0 +1,88 @@
+; A garden phrase is scored inside evo:trial. A bright, in-range
+; garden is kept and scene-form is rebound. A dark sky, an unknown
+; flower, a night light, a red ground and a density past 1 are not.
+(require "std/evo-core" all:)
+(require "lib/scene")
+(require "lib/live")
+
+(set-code (read-file "core/hot.aura"))
+(eval-current)
+
+(define rosy "(garden (sky 0.95 0.45 0.55) (ground 0.35 0.72 0.32) (flower tulip 0.85) (light 0.9))")
+(define dark "(garden (sky 0.05 0.05 0.08) (ground 0.35 0.72 0.32) (flower tulip 0.85) (light 0.9))")
+(define wild "(garden (sky 0.95 0.45 0.55) (ground 0.35 0.72 0.32) (flower nightshade 0.85) (light 0.9))")
+(define dim "(garden (sky 0.95 0.45 0.55) (ground 0.35 0.72 0.32) (flower tulip 0.85) (light 0.05))")
+(define blood "(garden (sky 0.95 0.45 0.55) (ground 0.80 0.15 0.15) (flower daisy 0.40) (light 0.80))")
+(define packed "(garden (sky 0.95 0.45 0.55) (ground 0.35 0.72 0.32) (flower tulip 4.0) (light 0.9))")
+
+(define (report name text)
+  (let ((r (check-scene text)))
+    (display name)
+    (display " ")
+    (display (if (hash-ref r "ok") 1 0))
+    (display " ")
+    (display (hash-ref r "why"))
+    (if (and (hash-ref r "ok") (> (string-length (hash-ref r "cue" "")) 0))
+      (begin (display " ") (display (hash-ref r "cue")))
+      #f)
+    (newline)))
+
+(report "rosy" rosy)
+(report "dark" dark)
+(report "wild" wild)
+(report "dim" dim)
+(report "blood" blood)
+(report "packed" packed)
+
+(define (score-scene text)
+  (let ((chk (check-scene text)))
+    (hash "status" "ok"
+          "objectives" (hash "fair" (if (hash-ref chk "ok") 1.0 0.0))
+          "constraints" (hash-ref chk "violations")
+          "behavior" (hash "band" 0.0))))
+
+(define (trial-of text id)
+  (let ((cand (evo:candidate text (hash "id" id "target" "scene-form"))))
+    (evo:trial cand
+               (hash "timeout-ms" 4000
+                     "apply" (lambda (c) #t)
+                     "evaluate" (lambda (c) (score-scene (evo:candidate-genome c)))))))
+
+(define good (trial-of rosy "scene-rosy"))
+(define bad (trial-of dark "scene-dark"))
+
+(display "trial-rosy ")
+(display (if (evo:trial-ok? good) 1 0))
+(display " ")
+(display (if (evo:feasible? good) 1 0))
+(newline)
+(display "trial-dark ")
+(display (if (evo:trial-ok? bad) 1 0))
+(display " ")
+(display (if (evo:feasible? bad) 1 0))
+(newline)
+
+(define search
+  (evo:search
+    (hash "algo" "lumen" "seed" 1 "budget" 4 "target" "scene-form"
+          "apply"
+          (lambda (s c)
+            (let ((body (scene-body (evo:candidate-genome c))))
+              (if (equal? (mutate :rebind "scene-form" body "scene") #t)
+                (begin (eval-current) #t)
+                #f))))))
+
+(define rosy-c (evo:candidate rosy (hash "id" "scene-rosy" "target" "scene-form")))
+(define dark-c (evo:candidate dark (hash "id" "scene-dark" "target" "scene-form")))
+(evo:tell! search (list rosy-c) (list good))
+(evo:tell! search (list dark-c) (list bad))
+
+(display "keep-dark ")
+(display (if (evo:commit! search dark-c) 1 0))
+(newline)
+(display "keep-rosy ")
+(display (if (evo:commit! search rosy-c) 1 0))
+(newline)
+(display "scene ")
+(display (if (string=? (scene-form) rosy) 1 0))
+(newline)
