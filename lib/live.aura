@@ -1,6 +1,8 @@
-; Rebuild the live rule workspace. mutate:rebind is preferred; after
-; evo:trial the parent layer answers cow-refused (read-only), and set-code
-; is the path that still installs the defines.
+; Rebuild the live rule workspace.
+; On Aura v0.2.2, (mutate :rebind) succeeds before and after evo:trial
+; (measured: the parent stays writable, #5162). set-code is only the
+; fallback if a rebind refuses. A second set-code replaces the workspace
+; the running modules were compiled against, so it is not the keep path.
 (require "std/string" all:)
 
 (define (num-src n)
@@ -21,7 +23,7 @@
 
 ; Returns "rebind" or "set-code".
 (define (publish-rule! name body full-src)
-  (let ((rb (mutate:rebind name body "tune")))
+  (let ((rb (mutate :rebind name body "tune")))
     (if (equal? rb #t)
       (begin (eval-current) "rebind")
       (if (set-code full-src)

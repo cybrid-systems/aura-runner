@@ -54,6 +54,9 @@
         (list n (floor (+ (* acc 1000.0) 0.5)))
         (loop (cdr xs) (+ n 1) (+ acc (piece-x (car xs)) (piece-w (car xs))))))))
 
+(define shaped (check-source (pattern-form 42 0 0) rules))
+(line "form" (if (and shaped (hash-ref shaped "ok")) 1 0))
+
 (display "replay ")
 (display (if (equal? (sig a) (sig b)) 1 0))
 (display " ")

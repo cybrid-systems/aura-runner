@@ -19,7 +19,7 @@
           "behavior" (hash "band" 0.0))))
 
 (display "rebind-before ")
-(display (if (equal? (mutate:rebind "rule-gravity" "(lambda () 30.0)" "g") #t) 1 0))
+(display (if (equal? (mutate :rebind "rule-gravity" "(lambda () 30.0)" "g") #t) 1 0))
 (newline)
 (eval-current)
 
@@ -47,11 +47,10 @@
 (display (motif-form))
 (newline)
 
-; After evo:trial the parent workspace stays a read-only COW layer, so
-; mutate:rebind is refused even though preset=dev granted mutate.
-; set-code still installs the kept motif. See the Aura bug note in README.
+; Aura v0.2.2 keeps the parent writable after evo:trial (#5162).
+; The keep path rebinds motif-form. set-code is no longer required.
 (display "rebind-after ")
-(display (if (equal? (mutate:rebind "rule-gravity" "(lambda () 28.0)" "g2") #t) 1 0))
+(display (if (equal? (mutate :rebind "rule-gravity" "(lambda () 28.0)" "g2") #t) 1 0))
 (newline)
 
 (define search
@@ -59,10 +58,8 @@
     (hash "algo" "lumen" "seed" 1 "budget" 4 "target" "motif-form"
           "apply"
           (lambda (s c)
-            (let ((src (string-append "(define (motif-form) \""
-                                      (evo:candidate-genome c)
-                                      "\")\n(define (rule-gravity) 30.0)\n0")))
-              (if (set-code src)
+            (let ((body (string-append "(lambda () \"" (evo:candidate-genome c) "\")")))
+              (if (equal? (mutate :rebind "motif-form" body "keep") #t)
                 (begin (eval-current) #t)
                 #f))))))
 

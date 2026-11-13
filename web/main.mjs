@@ -12,6 +12,11 @@ const motionBtn = document.getElementById("motion");
 const muteBtn = document.getElementById("mute");
 const benchEl = document.getElementById("bench");
 const hintEl = document.getElementById("hint");
+const toastEl = document.getElementById("toast");
+const comboEl = document.getElementById("combo");
+const badgeEl = document.getElementById("badge");
+const notesEl = document.getElementById("notes");
+const noteList = document.getElementById("note-list");
 
 const params = new URLSearchParams(location.search);
 const reducedPref = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -46,19 +51,74 @@ let inputAt = 0;
 let latency = 0;
 let lastShown = "0";
 let spark = "";
+let nearSpark = false;
+let rejectSpark = false;
+let combo = 0;
+let comboUntil = 0;
+const nearSeen = new Set();
+const toastQ = [];
+let toastUntil = 0;
+const gardenNotes = [];
 if (localStorage.getItem("lumen-hint") === "off") hintEl.hidden = true;
 let ws;
 let connected = false;
 
+function num(v, fallback) {
+  return typeof v === "number" ? v : fallback;
+}
+
 function applyRules(msg) {
-  rules = rulesOf(msg.g, msg.jump, msg.speed, msg.slide, msg.coyote, msg.forgive);
+  const slide = typeof msg["slide-dur"] === "number" ? msg["slide-dur"] : msg.slide;
+  rules = rulesOf(
+    num(msg.g, rules.g),
+    num(msg.jump, rules.jump),
+    num(msg.speed, rules.speed),
+    num(slide, rules.slide),
+    num(msg.coyote, rules.coyote),
+    num(msg.forgive, rules.forgive),
+  );
   if (typeof msg.hue === "number") hue = msg.hue;
+}
+
+function paintNotes() {
+  noteList.replaceChildren();
+  for (const row of gardenNotes) {
+    const li = document.createElement("li");
+    const title = document.createElement("strong");
+    title.textContent = row.cue;
+    li.append(title);
+    if (row.why) {
+      const sub = document.createElement("span");
+      sub.textContent = row.why;
+      li.append(sub);
+    }
+    noteList.append(li);
+  }
+}
+
+function showCue(text) {
+  if (!text) return;
+  toastQ.push(text);
+}
+
+function remember(msg) {
+  const cue = msg.cue || "";
+  if (!cue) return;
+  gardenNotes.unshift({ cue, why: msg.why || "" });
+  if (gardenNotes.length > 6) gardenNotes.pop();
+  if (!notesEl.hidden) paintNotes();
+  showCue(cue);
 }
 
 function addChunk(msg) {
   if (seenChunks.has(msg.id)) return;
   seenChunks.add(msg.id);
-  for (const q of msg.pieces) pieces.push(q.slice());
+  const born = msg.origin === "motif" ? performance.now() : 0;
+  for (const q of msg.pieces) {
+    const copy = q.slice();
+    if (born) copy.born = born;
+    pieces.push(copy);
+  }
 }
 
 function prune() {
@@ -87,10 +147,14 @@ function resetLocal() {
   seenChunks = new Set();
   alive = true;
   acc = 0;
+  combo = 0;
+  comboEl.hidden = true;
+  nearSeen.clear();
   deadEl.hidden = true;
 }
 
 function reconcile(st) {
+  if (typeof st.g === "number") applyRules(st);
   serverScore = st.score;
   if (!st.alive && alive) {
     alive = false;
@@ -131,8 +195,10 @@ function connect() {
       addChunk(msg);
     } else if (msg.op === "state") {
       reconcile(msg);
-    } else if (msg.op === "decision" && msg.kind === "KEEP" && msg.arm === "motif") {
-      audio.keep();
+    } else if (msg.op === "decision") {
+      remember(msg);
+      if (msg.kind === "KEEP" && msg.arm === "motif") audio.keep();
+      if (msg.kind === "ROLLBACK") rejectSpark = true;
     }
   };
   ws.onclose = () => {
@@ -179,14 +245,21 @@ function frame(now) {
     let guard = 0;
     while (acc >= DT && guard < 4) {
       const before = player[2];
+      const wasY = player[1];
       const ev = step(player, pieces, rules, DT);
       if (inputAt && before <= 0 && player[2] > 0) {
         latency = now - inputAt;
         inputAt = 0;
       }
-      if (ev === "coin") { audio.coin(); spark = "coin"; }
+      if (ev === "coin") {
+        audio.coin();
+        spark = "coin";
+        combo = now < comboUntil ? combo + 1 : 1;
+        comboUntil = now + 2200;
+      }
       if (ev === "spring") { audio.spring(); spark = "spring"; }
-      if (inp.lane) spark = "lane";
+      if (wasY > 0.2 && player[1] <= 0.001 && player[5] > 0) audio.land();
+      if (scanNear(now)) { nearSpark = true; audio.near(); }
       if (ev === "dead" || player[5] <= 0) {
         alive = false;
         audio.die();
@@ -208,9 +281,30 @@ function frame(now) {
     renderer.resize();
     renderer.frame({
       x: player[0], y: player[1], vy: player[2], lx: player[10],
-      slide: player[3], hue, time: now / 1000, reduced, pieces, event: spark,
+      slide: player[3], hue, time: now / 1000, now, reduced, pieces,
+      event: spark, alive, speed: rules.speed, g: rules.g,
+      near: nearSpark, reject: rejectSpark,
     });
     spark = "";
+    nearSpark = false;
+    rejectSpark = false;
+  }
+  if (toastQ.length && now >= toastUntil) {
+    toastEl.hidden = false;
+    toastEl.textContent = toastQ.shift();
+    toastEl.classList.remove("show");
+    void toastEl.offsetWidth;
+    toastEl.classList.add("show");
+    toastUntil = now + 1700;
+  } else if (!toastQ.length && toastUntil && now > toastUntil + 200) {
+    toastEl.hidden = true;
+    toastUntil = 0;
+  }
+  if (combo > 1 && now < comboUntil) {
+    comboEl.hidden = false;
+    comboEl.textContent = "×" + combo;
+  } else if (comboEl.textContent) {
+    comboEl.hidden = true;
   }
   const shown = Math.max(0, Math.floor(scoreNow(player)), serverScore | 0);
   if (scoreEl.textContent !== String(shown)) {
@@ -223,6 +317,31 @@ function frame(now) {
   if (showStats && frameN % 20 === 0) paintStats();
   if (benchMode && frameN === 180) finishBench();
   requestAnimationFrame(frame);
+}
+
+function scanNear(nowMs) {
+  const x = player[0];
+  const y = player[1];
+  const lane = bodyLane(player);
+  for (let i = 0; i < pieces.length; i++) {
+    const q = pieces[i];
+    const k = q[0];
+    if (k !== 3 && k !== 7) continue;
+    const end = q[1] + q[2];
+    if (x < end - 0.05 || x > end + 0.35) continue;
+    const key = q[1].toFixed(2) + ":" + k + ":" + (q[5] ?? -1);
+    if (nearSeen.has(key)) continue;
+    const pl = q.length > 5 ? q[5] : -1;
+    const skimPot = k === 7 && pl >= 0 && Math.abs(pl - lane) === 1;
+    const skimHurdle = k === 3 && (pl < 0 || pl === lane) && y > q[3] && y < q[3] + 0.55;
+    if (skimPot || skimHurdle) {
+      nearSeen.add(key);
+      if (nearSeen.size > 80) nearSeen.clear();
+      void nowMs;
+      return true;
+    }
+  }
+  return false;
 }
 
 function paintStats() {
@@ -255,6 +374,12 @@ muteBtn.addEventListener("click", () => {
   muteBtn.setAttribute("aria-pressed", next ? "true" : "false");
 });
 deadEl.addEventListener("click", restart);
+badgeEl.addEventListener("click", () => {
+  const open = notesEl.hidden;
+  notesEl.hidden = !open;
+  badgeEl.setAttribute("aria-expanded", open ? "true" : "false");
+  if (open) paintNotes();
+});
 window.addEventListener("keydown", (e) => {
   if (e.key === "F3") {
     showStats = !showStats;
