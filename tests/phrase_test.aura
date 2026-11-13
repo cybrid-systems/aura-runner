@@ -1,0 +1,36 @@
+; The system prompt's example has to pass the same gate as a model
+; phrase. Placeholder words from that prompt are not numbers, so the
+; gate refuses them before they can be laid out.
+(require "lib/gen")
+(require "std/string" all:)
+
+(define rules (rules-of 32.0 11.2 5.0 0.48 0.12 0.12))
+
+(define (example-from src)
+  (let ((mark "Example: "))
+    (let ((i (string-find src mark)))
+      (if (< i 0)
+        ""
+        (let ((rest (substring src (+ i (string-length mark)) (string-length src))))
+          (let ((j (string-find rest "\"")))
+            (if (< j 0)
+              ""
+              (substring rest 0 j))))))))
+
+(define (report name text)
+  (let ((r (check-source text rules)))
+    (display name)
+    (display " ")
+    (display (if (hash-ref r "ok") 1 0))
+    (display " ")
+    (display (hash-ref r "why"))
+    (newline)))
+
+(define example (example-from (read-file "core/main.aura")))
+
+(report "example" example)
+(report "bottom" "(seq (ground 6) (gate BOTTOM 0.7) (ground 5))")
+(report "w" "(seq (ground W) (ground 4))")
+(report "h" "(seq (ground 6) (hurdle H 0.7) (ground 4))")
+(report "lane" "(seq (ground 6) (block LANE 1) (ground 4))")
+(report "depth" "(seq (ground 6) (block 0 DEPTH) (ground 4))")
