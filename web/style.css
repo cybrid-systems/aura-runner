@@ -207,50 +207,27 @@ html, body {
 #motion { right: max(16px, env(safe-area-inset-right)); }
 #mute { right: max(78px, calc(env(safe-area-inset-right) + 62px)); }
 #motion[aria-pressed="true"], #mute[aria-pressed="true"] { background: #ffe08a; }
-#motion:focus-visible, #mute:focus-visible, #dead:focus-visible, #badge:focus-visible {
+#motion:focus-visible, #mute:focus-visible, #badge:focus-visible {
   outline: 3px solid white;
   outline-offset: 3px;
 }
-#dead[hidden] { display: none; }
-#dead {
+#flash[hidden] { display: none; }
+#flash {
   position: fixed;
   inset: 0;
-  margin: 0;
-  border: 0;
-  background: rgba(255, 176, 110, 0.42);
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-  color: var(--ink);
+  pointer-events: none;
+  background: rgba(255, 244, 214, 0.0);
 }
-#dead .card {
-  display: grid;
-  justify-items: center;
-  gap: 8px;
-  padding: 28px 40px 24px;
-  border-radius: 36px;
-  background: rgba(255, 246, 232, 0.96);
-  box-shadow: 0 18px 40px rgba(92, 52, 20, 0.2);
+#flash.on {
+  display: block;
+  animation: stumble 1.5s linear both;
 }
-.seedling {
-  width: 84px;
-  height: 84px;
-  border-radius: 50%;
-  background:
-    radial-gradient(circle at 38% 34%, #fff4d2, #f0a04b 58%, #e07a4c);
-  box-shadow: 0 0 0 12px rgba(255, 228, 176, 0.45);
-}
-.rest {
-  font-size: clamp(28px, 5vw, 44px);
-  font-weight: 800;
-  letter-spacing: -0.03em;
-}
-.again {
-  font-size: 22px;
-  font-weight: 800;
-  padding: 8px 18px;
-  border-radius: 999px;
-  background: var(--cream);
+@keyframes stumble {
+  0% { background: rgba(255, 244, 214, 0.55); }
+  18% { background: rgba(255, 244, 214, 0.0); }
+  36% { background: rgba(255, 228, 186, 0.42); }
+  54% { background: rgba(255, 244, 214, 0.0); }
+  100% { background: rgba(255, 244, 214, 0.0); }
 }
 #stats {
   position: fixed;

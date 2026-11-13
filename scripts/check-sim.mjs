@@ -52,6 +52,29 @@ const coined = [[1, 0, 20, 0.45, 0], [5, 3, 0.42, 0.42, 0.4]];
 const cp = makePlayer(1);
 for (let i = 0; i < 80; i++) step(cp, coined, rules, DT);
 
+const hurdled = [[1, 0, 30, 0.45, 0], [5, 2.2, 0.42, 0.42, 0.4], [3, 4.2, 0.7, 0.55, 0]];
+const hp = makePlayer(1);
+let bumpGrace = 0;
+let sawBump = 0;
+for (let i = 0; i < 220; i++) {
+  const ev = step(hp, hurdled, rules, DT);
+  if (ev === "bump") {
+    sawBump = 1;
+    bumpGrace = hp[11];
+  }
+}
+const pit = [[1, 0, 4, 0.45, 0], [2, 4, 5, 1.2, -1.2], [1, 9, 20, 0.45, 0]];
+const pp = makePlayer(1);
+let pitGrace = 0;
+let sawOops = 0;
+for (let i = 0; i < 220; i++) {
+  const ev = step(pp, pit, rules, DT);
+  if (ev === "oops") {
+    sawOops = 1;
+    pitGrace = pp[11];
+  }
+}
+
 const golden = readFileSync(new URL("../tests/phys_test.golden", import.meta.url), "utf8").trim().split("\n");
 const got = [
   ...lines,
@@ -61,6 +84,11 @@ const got = [
   `slide-alive ${sp[5] > 0 && sp[0] > 9.2 ? 1 : 0}`,
   `stand-alive ${stand[5] > 0 ? 1 : 0}`,
   `coins ${cp[6].toFixed(1)}`,
+  `bump-alive ${sawBump === 1 && hp[5] > 0 && hp[0] > 6 ? 1 : 0}`,
+  `bump-score ${hp[6].toFixed(1)}`,
+  `bump-grace ${bumpGrace > 1 ? 1 : 0}`,
+  `pit-alive ${sawOops === 1 && pp[5] > 0 && pp[0] > 12 && pp[1] <= 0.001 ? 1 : 0}`,
+  `pit-grace ${pitGrace > 1 ? 1 : 0}`,
 ];
 // apex/air are analytic and already in the golden; compare the sim lines.
 const simGolden = golden.filter((l) => !l.startsWith("apex ") && !l.startsWith("air "));
