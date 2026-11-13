@@ -1,0 +1,140 @@
+; Garden scene proposals. A model may suggest sky colour, ground colour,
+; one flower and a light level. The form is data, checked here, then
+; rebound. Nothing in this file calls eval.
+(require "lib/sexp")
+(require "lib/gen")
+
+(define scene-flowers (list "daisy" "tulip" "blossom" "buttercup"))
+
+(define (scene-flower? name)
+  (let loop ((xs scene-flowers))
+    (if (null? xs)
+      #f
+      (if (string=? (car xs) name) #t (loop (cdr xs))))))
+
+(define (scene-clause form name)
+  (let loop ((xs (if (pair? form) (cdr form) (list))))
+    (if (null? xs)
+      #f
+      (let ((sp (car xs)))
+        (if (and (pair? sp) (string? (car sp)) (string=? (car sp) name))
+          sp
+          (loop (cdr xs)))))))
+
+(define (scene-nums sp n)
+  (let loop ((xs (if (pair? sp) (cdr sp) (list))) (k 0) (acc (list)))
+    (if (= k n)
+      (if (null? xs) (reverse acc) #f)
+      (if (or (null? xs) (not (number? (car xs))))
+        #f
+        (loop (cdr xs) (+ k 1) (cons (exact->inexact (car xs)) acc))))))
+
+(define (scene-in? v lo hi)
+  (and (number? v) (>= v lo) (<= v hi)))
+
+(define (scene-luma r g b)
+  (+ (* 0.25 r) (* 0.50 g) (* 0.25 b)))
+
+(define (scene-cue flower r g b)
+  (cond
+    ((and (> r 0.8) (> r b)) "The sky turned rosy")
+    ((and (> b 0.75) (> b r)) "A blue sky opened")
+    ((string=? flower "tulip") "Tulips opened up")
+    ((string=? flower "blossom") "Blossoms in the garden")
+    ((string=? flower "buttercup") "Buttercups in the grass")
+    ((string=? flower "daisy") "Daisies in the grass")
+    (else "The garden changed color")))
+
+(define (scene-viol ok?)
+  (hash "budget" 0.0 "geometry" 0.0 "reachable" (if ok? 0.0 1.0) "safe" 0.0))
+
+(define (scene-refuse why)
+  (hash "ok" #f "why" why "cue" ""
+        "sky-r" 0.0 "sky-g" 0.0 "sky-b" 0.0
+        "ground-r" 0.0 "ground-g" 0.0 "ground-b" 0.0
+        "flower" "" "density" 0.0 "light" 0.0
+        "violations" (scene-viol #f)))
+
+(define (scene-head? s)
+  (or (string=? s "sky") (string=? s "ground") (string=? s "flower") (string=? s "light")))
+
+(define (scene-heads-ok? form)
+  (let loop ((xs (cdr form)))
+    (if (null? xs)
+      #t
+      (let ((sp (car xs)))
+        (if (or (not (pair? sp)) (not (string? (car sp))) (not (scene-head? (car sp))))
+          #f
+          (loop (cdr xs)))))))
+
+(define (scene-ok r g b grr gg gb kind density lv)
+  (hash "ok" #t "why" "fair"
+        "cue" (scene-cue kind r g b)
+        "sky-r" r "sky-g" g "sky-b" b
+        "ground-r" grr "ground-g" gg "ground-b" gb
+        "flower" kind "density" density "light" lv
+        "violations" (scene-viol #t)))
+
+(define (flower-kind sp)
+  (if (and (pair? sp) (pair? (cdr sp)) (string? (car (cdr sp)))
+           (pair? (cdr (cdr sp))) (number? (car (cdr (cdr sp))))
+           (null? (cdr (cdr (cdr sp)))))
+    (car (cdr sp))
+    #f))
+
+(define (flower-density sp)
+  (exact->inexact (car (cdr (cdr sp)))))
+
+; (garden (sky R G B) (ground R G B) (flower KIND DENSITY) (light L))
+; Channels stay bright. The ground stays green. Flowers are a short
+; allowlist. Light never drops into night.
+(define (check-scene text)
+  (if (or (not (string? text)) (= (string-length text) 0))
+    (scene-refuse "empty")
+    (if (banned? text)
+      (scene-refuse "banned")
+      (let ((form (sexp-parse text)))
+        (if (or (not form) (not (pair? form)) (not (string? (car form)))
+                (not (string=? (car form) "garden")))
+          (scene-refuse "shape")
+          (if (not (scene-heads-ok? form))
+            (scene-refuse "symbol")
+            (let ((sky (scene-clause form "sky"))
+                  (ground (scene-clause form "ground"))
+                  (flower (scene-clause form "flower"))
+                  (light (scene-clause form "light")))
+              (if (or (not sky) (not ground) (not flower) (not light))
+                (scene-refuse "shape")
+                (let ((sr (scene-nums sky 3))
+                      (gr (scene-nums ground 3))
+                      (lr (scene-nums light 1))
+                      (kind (flower-kind flower)))
+                  (if (or (not sr) (not gr) (not lr) (not kind))
+                    (scene-refuse "shape")
+                    (if (not (scene-flower? kind))
+                      (scene-refuse "flower")
+                      (let ((r (car sr))
+                            (g (car (cdr sr)))
+                            (b (car (cdr (cdr sr))))
+                            (grr (car gr))
+                            (gg (car (cdr gr)))
+                            (gb (car (cdr (cdr gr))))
+                            (density (flower-density flower))
+                            (lv (car lr)))
+                        (cond
+                          ((or (not (scene-in? r 0.25 1.0))
+                               (not (scene-in? g 0.25 1.0))
+                               (not (scene-in? b 0.25 1.0))
+                               (< (scene-luma r g b) 0.55))
+                           (scene-refuse "dark"))
+                          ((or (not (scene-in? grr 0.15 0.85))
+                               (not (scene-in? gg 0.30 0.90))
+                               (not (scene-in? gb 0.12 0.75))
+                               (< gg grr)
+                               (< (+ gg 0.05) gb))
+                           (scene-refuse "ground"))
+                          ((not (scene-in? density 0.15 1.0))
+                           (scene-refuse "density"))
+                          ((not (scene-in? lv 0.40 1.0))
+                           (scene-refuse "light"))
+                          (else (scene-ok r g b grr gg gb kind density lv)))))))))))))))

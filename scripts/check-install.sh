@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # First install from an empty .tools must print exactly one executable path.
-# sha256sum -c writes "tarball: OK" to stdout; that line must not leak.
+# Fetch progress stays on stderr.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=scripts/aura-path.sh
@@ -12,7 +12,7 @@ mkdir -p "$work/out"
 
 echo "fresh install into $work (native $(uname -m))" >&2
 export AURA_FORCE_TOOLS=1
-out="$(install_aura "$work" 0.2.2)"
+out="$(install_aura "$work")"
 lines="$(printf '%s\n' "$out" | grep -c .)"
 if [[ "$lines" -ne 1 ]]; then
   echo "install stdout was $lines lines, expected 1:" >&2
@@ -20,7 +20,7 @@ if [[ "$lines" -ne 1 ]]; then
   exit 1
 fi
 case "$out" in
-  *OK*|*tar.gz*) echo "install stdout is polluted: $out" >&2; exit 1 ;;
+  *OK*|*tar.gz*|*ghcr*) echo "install stdout is polluted: $out" >&2; exit 1 ;;
 esac
 if [[ ! -x "$out" ]]; then
   echo "not executable: $out" >&2
@@ -28,19 +28,19 @@ if [[ ! -x "$out" ]]; then
 fi
 ver="$("$out" --version 2>/dev/null || true)"
 case "$ver" in
-  *0.2.2*) ;;
+  *"$AURA_COMMIT"*) ;;
   *) echo "unexpected version: $ver" >&2; exit 1 ;;
 esac
 
 echo "second call is idempotent" >&2
-out2="$(install_aura "$work" 0.2.2)"
+out2="$(install_aura "$work")"
 if [[ "$out" != "$out2" ]]; then
   echo "second path differs: $out2" >&2
   exit 1
 fi
 
-# The other architecture's release is checked for layout only. This host
-# cannot execute it.
+# The other architecture's image is checked for layout and the pinned
+# commit. This host does not execute it.
 host="$(uname -m)"
 case "$host" in
   x86_64) other="arm64" ;;
@@ -48,15 +48,16 @@ case "$host" in
   *) echo "skip cross-arch layout check on $host" >&2; other="" ;;
 esac
 if [[ -n "$other" ]]; then
-  tarball="aura-0.2.2-linux-${other}.tar.gz"
-  url="https://github.com/cybrid-systems/aura/releases/download/v0.2.2/${tarball}"
-  echo "checking ${other} release layout (not executed)" >&2
-  curl -fsSL -o "$work/${tarball}" "$url"
-  curl -fsSL -o "$work/${tarball}.sha256" "${url}.sha256"
-  (cd "$work" && sha256sum -c "${tarball}.sha256") >&2
-  listing="$(tar -tzf "$work/${tarball}")"
-  if ! printf '%s\n' "$listing" | grep -q '/bin/aura$'; then
-    echo "${other} tarball has no bin/aura" >&2
+  echo "checking ${other} image layout (not executed)" >&2
+  listing="$(inspect_aura_arch "$other")"
+  if ! printf '%s\n' "$listing" | grep -q 'bin/aura$'; then
+    echo "${other} image has no bin/aura" >&2
+    printf '%s\n' "$listing" >&2
+    exit 1
+  fi
+  if ! printf '%s\n' "$listing" | grep -q "$AURA_COMMIT"; then
+    echo "${other} image is not ${AURA_COMMIT}" >&2
+    printf '%s\n' "$listing" >&2
     exit 1
   fi
 fi

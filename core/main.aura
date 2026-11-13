@@ -8,9 +8,13 @@
 (require "std/evo-core" all:)
 (require "lib/gen")
 (require "lib/live")
+(require "lib/scene")
 
 (define SYS
   "You design one obstacle phrase for a children's 3D endless runner called Lumen Run. The runner has three lanes (0 left, 1 centre, 2 right), jumps, and slides. Reply with ONLY one s-expression and no markdown. Allowed pieces: (seq (ground W) (gap W) (hurdle H W) (gate BOTTOM W) (coin Y) (spring W) (block LANE DEPTH) (coin-lane LANE Y)). Every parameter is a number; never write the words BOTTOM, W, H, LANE, DEPTH or other placeholders. Ranges in meters: spring W 0.45-1.6, hurdle W 0.35-2.2 and H 0.15-0.9, gate W 0.35-2.0 and BOTTOM 0.58-0.85, coin Y 0.4-2.4, coin-lane LANE 0, 1 or 2 and Y 0.4-2.4, ground W 0.8-18, gap W 0.4-2.0, block LANE 0, 1 or 2 and DEPTH 0.5-2.2. Start and end with ground. Leave at least one lane open beside every block. No violence, fear, weapons, or scary words. Bright garden, friendly shapes. Example: (seq (ground 6) (block 0 1) (hurdle 0.4 0.7) (ground 4) (gap 1.1) (ground 5))")
+
+(define SCENE-SYS
+  "You redesign the garden backdrop for a children's 3D endless runner called Lumen Run. Reply with ONLY one s-expression and no markdown. Form: (garden (sky R G B) (ground R G B) (flower KIND DENSITY) (light L)). KIND is one of daisy, tulip, blossom, buttercup. Sky channels are 0.25 to 1 and the sky stays bright. Ground is green: G is at least 0.30 and at least as large as R, and not much smaller than B. Density is 0.15 to 1. Light is 0.40 to 1, never night. No violence, fear, weapons, or scary words. Make it look different from a plain blue sky and daisies. Example: (garden (sky 0.95 0.45 0.55) (ground 0.35 0.72 0.32) (flower tulip 0.85) (light 0.9))")
 
 (define g-now 32.0)
 (define jump-now 11.2)
@@ -22,6 +26,16 @@
 (define motif-now "")
 (define motif-pieces (list))
 (define motif-span 0.0)
+(define scene-now default-scene)
+(define sky-r 0.55)
+(define sky-g 0.72)
+(define sky-b 0.95)
+(define ground-r 0.42)
+(define ground-g 0.68)
+(define ground-b 0.38)
+(define flower-now "daisy")
+(define density-now 0.45)
+(define light-now 0.82)
 (define speed-lock #f)
 (define rule-rev 1)
 (define publish-via "set-code")
@@ -41,7 +55,6 @@
 (define policy #f)
 (define cleared (list))
 (define llm-busy #f)
-(define asked-at -1)
 ; 0 unknown, 1 the runtime accepts an extra hash, 2 two-argument llm:chat.
 (define llm-chat-mode 0)
 (define llm-extra (hash "reasoning_effort" "minimal" "max_tokens" 2048))
@@ -56,7 +69,7 @@
   (rules-of g-now jump-now speed-now slide-now coyote-now forgive-now))
 
 (define (full-src)
-  (hot-source g-now jump-now slide-now speed-now coyote-now forgive-now hue-now motif-now))
+  (hot-source g-now jump-now slide-now speed-now coyote-now forgive-now hue-now motif-now scene-now))
 
 (define (rule-body n)
   (string-append "(lambda () " (num-src n) ")"))
@@ -141,9 +154,29 @@
 (define (arm-row name)
   (list (cons "arm" name) (cons "n" 0) (cons "keeps" 0) (cons "mean" 0.0)))
 
+; #5274: a long run can refuse hash-set! while another fiber holds the
+; mutation boundary. The tick path builds hashes instead of mutating
+; them. Policy updates are skipped when a trial is open or the write
+; is refused, so the core keeps serving.
+(define trial-open #f)
+(define llm-kind "motif")
+(define motif-next 2500.0)
+(define scene-next 5000.0)
+
+(define (hash-put! h k v)
+  (try (begin (hash-set! h k v) #t) (catch (e) #f)))
+
+(define (open-trial cand spec)
+  (set! trial-open #t)
+  (let ((trial (try (evo:trial cand spec) (catch (e) #f))))
+    (set! trial-open #f)
+    trial))
+
 (define (make-policy)
   (let ((p (evo:policy "ucb" (quote ()))))
-    (hash-set! p "arms" (list (arm-row "band-0") (arm-row "band-1")))
+    (if (not (hash-put! p "arms" (list (arm-row "band-0") (arm-row "band-1"))))
+      #f
+      #f)
     p))
 
 (define (row-get row key fallback)
@@ -172,13 +205,13 @@
     #f
     (let ((rows (hash-ref policy "arms" (list)))
           (nxt (arm-name (+ band 1))))
-      (if (has-arm? rows nxt)
+      (if (or (has-arm? rows nxt) trial-open llm-busy)
         #f
         (let ((row (find-arm rows (arm-name band))))
           (if (and row
                    (>= (row-get row "n" 0) 2)
                    (>= (row-get row "mean" 0.0) 0.5))
-            (hash-set! policy "arms" (append rows (list (arm-row nxt))))
+            (hash-put! policy "arms" (append rows (list (arm-row nxt))))
             #f))))))
 
 (define (choose-band)
@@ -282,7 +315,6 @@
 (define (reset-run!)
   ; A death used to leave llm-busy set, so the next run never asked again.
   (set! llm-busy #f)
-  (set! asked-at -1)
   (set! player (make-player 1.2))
   (set! world (list))
   (set! chunks (list))
@@ -302,6 +334,8 @@
   (set! motif-pieces (list))
   (set! motif-span 0.0)
   (set! next-dream 1500.0)
+  (set! motif-next 2500.0)
+  (set! scene-next 5000.0)
   (set! dream-phase 0)
   (if (not speed-lock) (set! speed-now 5.0) #f)
   (if tuned
@@ -328,7 +362,11 @@
         "g" g-now "jump" jump-now "speed" speed-now
         "slide" slide-now "coyote" coyote-now "forgive" forgive-now
         "hue" hue-now "ph" 1.05 "pw" 0.56 "sh" 0.46
-        "via" publish-via))
+        "via" publish-via
+        "sky" (list sky-r sky-g sky-b)
+        "ground" (list ground-r ground-g ground-b)
+        "flower" flower-now "density" density-now "light" light-now
+        "motif" motif-now "scene" scene-now))
 
 (define (welcome-msg)
   (hash "op" "welcome" "seed" seed
@@ -336,14 +374,20 @@
         "rev" rule-rev "via" publish-via
         "g" g-now "jump" jump-now "speed" speed-now
         "slide" slide-now "coyote" coyote-now "forgive" forgive-now
-        "hue" hue-now "ph" 1.05 "pw" 0.56 "sh" 0.46))
+        "hue" hue-now "ph" 1.05 "pw" 0.56 "sh" 0.46
+        "sky" (list sky-r sky-g sky-b)
+        "ground" (list ground-r ground-g ground-b)
+        "flower" flower-now "density" density-now "light" light-now
+        "motif" motif-now "scene" scene-now))
 
-(define (state-msg)
+; The event is part of the hash when it is built. A later hash-set! on
+; this value is the site cybrid-systems/aura #5274 exits from.
+(define (state-msg ev)
   (hash "op" "state"
         "x" (player-x player)
         "y" (player-y player)
         "vy" (player-vy player)
-        "alive" (if (player-alive? player) #t #f)
+        "alive" #t
         "score" (floor (score-now player))
         "slide" (if (> (pxs player 3) 0.0) 1 0)
         "lane" (player-lane player)
@@ -356,7 +400,17 @@
         "rev" rule-rev
         "run" (floor run-ms)
         "hue" hue-now
-        "seed" seed))
+        "seed" seed
+        "event" ev
+        "grace" (player-grace player)
+        "chunks" (length chunks)
+        "sky" (list sky-r sky-g sky-b)
+        "ground" (list ground-r ground-g ground-b)
+        "flower" flower-now
+        "density" density-now
+        "light" light-now
+        "motif" motif-now
+        "scene" scene-now))
 
 (define (chunk-msg c)
   (hash "op" "chunk"
@@ -400,19 +454,16 @@
       (if (= (car ys) id) #t (loop (cdr ys))))))
 
 (define (one-step!)
-  (if (player-alive? player)
-    (let ((r (step player world (rules-hash) PHYS-DT)))
-      (set! player (car r))
-      (set! world (prune-world (car (cdr r)) (player-x player)))
-      (set! run-ms (+ run-ms (* PHYS-DT 1000.0)))
-      (if (not (player-alive? player))
-        (begin
-          (set! policy (evo:policy-report policy (arm-name band) #f))
-          "dead")
-        (begin
-          (mark-cleared!)
-          (car (cdr (cdr r))))))
-    "dead"))
+  (let ((r (step player world (rules-hash) PHYS-DT)))
+    (set! player (car r))
+    (set! world (prune-world (car (cdr r)) (player-x player)))
+    (set! chunks (prune-chunks chunks (player-x player)))
+    (if (> (length cleared) 32)
+      (set! cleared (take-n cleared 32))
+      #f)
+    (set! run-ms (+ run-ms (* PHYS-DT 1000.0)))
+    (mark-cleared!)
+    (car (cdr (cdr r)))))
 
 (define (prune-world ps x)
   (let loop ((ys ps) (acc (list)))
@@ -424,14 +475,21 @@
           (loop (cdr ys) acc)
           (loop (cdr ys) (cons q acc)))))))
 
+(define (keep-event cur next)
+  (cond
+    ((or (string=? next "bump") (string=? next "oops")) next)
+    ((or (string=? cur "bump") (string=? cur "oops")) cur)
+    ((string=? next "ok") cur)
+    (else next)))
+
 (define (pump! dt-ms)
   (set! acc (+ acc (min 0.1 (/ (exact->inexact dt-ms) 1000.0))))
   (let loop ((n 0) (ev "ok"))
-    (if (or (< acc PHYS-DT) (>= n 6) (not (player-alive? player)))
+    (if (or (< acc PHYS-DT) (>= n 6))
       ev
       (begin
         (set! acc (- acc PHYS-DT))
-        (loop (+ n 1) (one-step!))))))
+        (loop (+ n 1) (keep-event ev (one-step!)))))))
 
 (define (elapsed-ms)
   (let ((now (monotonic-ms)))
@@ -444,7 +502,7 @@
     (let ((found #f))
       (let* ((cand (evo:candidate form (hash "id" (string-append "m" (int-str next-id))
                                             "target" "motif-form")))
-             (trial (evo:trial cand
+             (trial (open-trial cand
                                (hash "timeout-ms" 4000
                                      "apply" (lambda (c) #t)
                                      "evaluate"
@@ -460,7 +518,7 @@
                                              "behavior" (hash "band" (exact->inexact band))))))))
         (cond
           ((or (not found) (not (hash-ref found "ok"))
-               (not (evo:trial-ok? trial)) (not (evo:feasible? trial)))
+               (not trial) (not (evo:trial-ok? trial)) (not (evo:feasible? trial)))
            (note! "ROLLBACK" (if (and found (string? (hash-ref found "why")))
                                (hash-ref found "why")
                                "trial")
@@ -514,7 +572,7 @@
     (let ((found #f))
       (let* ((cand (evo:candidate form (hash "id" (string-append "d" (int-str next-id))
                                             "target" "motif-form")))
-             (trial (evo:trial cand
+             (trial (open-trial cand
                                (hash "timeout-ms" 1500
                                      "apply" (lambda (c) #t)
                                      "evaluate"
@@ -535,7 +593,7 @@
         (if (or (not found) (not cleared?)
                 (> (hash-ref found "geometry" 1.0) 0.0)
                 (> (hash-ref found "budget" 1.0) 0.0)
-                (not (evo:trial-ok? trial)) (not (evo:feasible? trial)))
+                (not trial) (not (evo:trial-ok? trial)) (not (evo:feasible? trial)))
           (note! "ROLLBACK" "reachable" "motif" "That shape drifted away")
           (let ((prev-form motif-now)
                 (prev-pieces motif-pieces)
@@ -611,35 +669,136 @@
      (begin-dream!))
     (else #f)))
 
-(define (llm-prompt)
-  (string-append "Difficulty band " (number->string band)
-                 ". Jump speed is " (num-src speed-now)
-                 " m/s. Invent a different rhythm from a straight row of hurdles."))
+(define (apply-scene! found form)
+  (set! scene-now form)
+  (set! sky-r (hash-ref found "sky-r"))
+  (set! sky-g (hash-ref found "sky-g"))
+  (set! sky-b (hash-ref found "sky-b"))
+  (set! ground-r (hash-ref found "ground-r"))
+  (set! ground-g (hash-ref found "ground-g"))
+  (set! ground-b (hash-ref found "ground-b"))
+  (set! flower-now (hash-ref found "flower"))
+  (set! density-now (hash-ref found "density"))
+  (set! light-now (hash-ref found "light")))
+
+(define (consider-scene! text)
+  (let ((form (one-line (if (string? text) text ""))))
+    (let ((found #f))
+      (let* ((cand (evo:candidate form (hash "id" (string-append "s" (int-str next-id))
+                                            "target" "scene-form")))
+             (trial (open-trial cand
+                                (hash "timeout-ms" 4000
+                                      "apply" (lambda (c) #t)
+                                      "evaluate"
+                                      (lambda (c)
+                                        (set! found (check-scene form))
+                                        (hash "status" "ok"
+                                              "objectives"
+                                              (hash "fair" (if (and found (hash-ref found "ok")) 1.0 0.0))
+                                              "constraints"
+                                              (if (and found (hash? (hash-ref found "violations")))
+                                                (hash-ref found "violations")
+                                                (hash "reachable" 1.0))
+                                              "behavior" (hash "band" (exact->inexact band))))))))
+        (if (or (not found) (not (hash-ref found "ok"))
+                (not trial) (not (evo:trial-ok? trial)) (not (evo:feasible? trial)))
+          (note! "ROLLBACK" (if (and found (string? (hash-ref found "why")))
+                              (hash-ref found "why")
+                              "trial")
+                 "scene" "The garden stayed")
+          (let ((prev-form scene-now)
+                (prev-sky (list sky-r sky-g sky-b))
+                (prev-ground (list ground-r ground-g ground-b))
+                (prev-flower flower-now)
+                (prev-density density-now)
+                (prev-light light-now))
+            (apply-scene! found form)
+            (let ((ev (hash "status" "ok"
+                            "objectives" (hash "fair" 1.0)
+                            "constraints" (hash-ref found "violations")
+                            "behavior" (hash "band" (exact->inexact band))))
+                  (search (evo:search
+                            (hash "algo" "lumen" "seed" (floor seed) "budget" 8
+                                  "target" "scene-form"
+                                  "apply"
+                                  (lambda (s c)
+                                    (let ((body (scene-body (evo:candidate-genome c))))
+                                      (let ((rb (mutate :rebind "scene-form" body "scene")))
+                                        (if (equal? rb #t)
+                                          (begin (eval-current) (set! publish-via "rebind") #t)
+                                          (if (set-code (full-src))
+                                            (begin (eval-current) (set! publish-via "set-code") #t)
+                                            #f)))))))))
+              (evo:tell! search (list cand) (list ev))
+              (if (evo:commit! search cand)
+                (begin
+                  (set! rule-rev (+ rule-rev 1))
+                  (set! rules-dirty #t)
+                  (note! "KEEP" "fair" "scene" (hash-ref found "cue" "The garden changed color")))
+                (begin
+                  (set! scene-now prev-form)
+                  (set! sky-r (car prev-sky))
+                  (set! sky-g (car (cdr prev-sky)))
+                  (set! sky-b (car (cdr (cdr prev-sky))))
+                  (set! ground-r (car prev-ground))
+                  (set! ground-g (car (cdr prev-ground)))
+                  (set! ground-b (car (cdr (cdr prev-ground))))
+                  (set! flower-now prev-flower)
+                  (set! density-now prev-density)
+                  (set! light-now prev-light)
+                  (note! "ROLLBACK" "commit" "scene" "The garden stayed"))))))))))
+
+(define (llm-prompt kind)
+  (if (string=? kind "scene")
+    (string-append "Flowers now: " flower-now
+                   ". Sky is " (num-src sky-r) " " (num-src sky-g) " " (num-src sky-b)
+                   ". Suggest a different bright garden.")
+    (string-append "Difficulty band " (number->string band)
+                   ". Jump speed is " (num-src speed-now)
+                   " m/s. Invent a different rhythm from a straight row of hurdles.")))
+
+(define (ask-llm! kind)
+  (set! llm-kind kind)
+  (set! llm-busy #t)
+  (channel:send req-ch (hash "kind" kind "user" (llm-prompt kind))))
 
 ; channel:try-recv on an empty channel is #f on Aura v0.2.2 (measured;
 ; #5161). A model reply is a hash, so that is what the loop accepts.
 (define (poll-llm! c)
   (if (not llm-on)
     #f
-    (let ((ans (channel:try-recv res-ch)))
-      (if (hash? ans)
-        (begin
-          (set! llm-busy #f)
-          (if (hash-ref ans "ok")
-            (let ((form (extract-seq (hash-ref ans "content" ""))))
-              (if form
-                (consider-form! form)
-                (note! "ROLLBACK" "no-seq" "llm" "That shape drifted away")))
-            (note! "ROLLBACK" (hash-ref ans "error" "llm") "llm" "That shape drifted away"))
-          (send c (rules-msg))
-          (set! rules-dirty #f))
-        #f)
-      (if (and llm-on (not llm-busy) (>= next-id 3) (not (= asked-at next-id))
-               (= (modulo next-id 3) 0))
-        (begin
-          (set! asked-at next-id)
-          (set! llm-busy #t)
-          (channel:send req-ch (llm-prompt)))
+    (begin
+      (let ((ans (channel:try-recv res-ch)))
+        (if (hash? ans)
+          (begin
+            (set! llm-busy #f)
+            (if (hash-ref ans "ok")
+              (if (string=? llm-kind "scene")
+                (let ((form (extract-garden (hash-ref ans "content" ""))))
+                  (if form
+                    (consider-scene! form)
+                    (note! "ROLLBACK" "no-garden" "scene" "The garden stayed")))
+                (let ((form (extract-seq (hash-ref ans "content" ""))))
+                  (if form
+                    (consider-form! form)
+                    (note! "ROLLBACK" "no-seq" "llm" "That shape drifted away"))))
+              (note! "ROLLBACK" (hash-ref ans "error" "llm")
+                     (if (string=? llm-kind "scene") "scene" "llm")
+                     (if (string=? llm-kind "scene") "The garden stayed" "That shape drifted away")))
+            (send c (rules-msg))
+            (set! rules-dirty #f))
+          #f))
+      (if (and llm-on (not llm-busy))
+        (cond
+          ((>= run-ms scene-next)
+           (begin
+             (set! scene-next (+ run-ms 12000.0))
+             (ask-llm! "scene")))
+          ((>= run-ms motif-next)
+           (begin
+             (set! motif-next (+ run-ms 16000.0))
+             (ask-llm! "motif")))
+          (else #f))
         #f))))
 
 (define (on-hello c msg)
@@ -650,7 +809,7 @@
     (reset-run!)
     (send c (welcome-msg))
     (send-new-chunks c)
-    (send c (state-msg))
+    (send c (state-msg "ok"))
     (flush-notes! c)))
 
 (define (on-restart c msg)
@@ -659,7 +818,7 @@
     (reset-run!)
     (send c (welcome-msg))
     (send-new-chunks c)
-    (send c (state-msg))
+    (send c (state-msg "ok"))
     (flush-notes! c)))
 
 (define (on-tick c msg)
@@ -673,7 +832,11 @@
            (not (= (hash-ref msg "lane" 0) 0)))
     (set! player (press-lane player (hash-ref msg "lane" 0)))
     #f)
-  (let ((ev (if (player-alive? player) (pump! (elapsed-ms)) "dead")))
+  (let ((ev (pump! (elapsed-ms))))
+    (if (or (string=? ev "bump") (string=? ev "oops"))
+      (note! "BUMP" ev "run"
+             (if (string=? ev "oops") "Back on the path" "Oops! Keep going"))
+      #f)
     (maybe-dream!)
     (ensure-ahead!)
     (poll-llm! c)
@@ -681,9 +844,7 @@
     (if rules-dirty
       (begin (send c (rules-msg)) (set! rules-dirty #f))
       #f)
-    (let ((st (state-msg)))
-      (hash-set! st "event" ev)
-      (send c st))
+    (send c (state-msg ev))
     (flush-notes! c)))
 
 (define (on-rebind c msg)
@@ -731,7 +892,7 @@
   (flush-notes! c)
   (send c (rules-msg))
   (set! rules-dirty #f)
-  (send c (state-msg)))
+  (send c (state-msg "ok")))
 
 (define (on-audit c msg)
   (send c (hash "op" "audit" "items" audit "via" publish-via "rev" rule-rev)))
@@ -793,25 +954,31 @@
         ; two-argument call. A hash result means the extra argument was
         ; accepted, including an API error hash.
         (set! llm-reply
-          (lambda (user)
+          (lambda (sys user)
             (cond
-              ((= llm-chat-mode 2) (llm:chat SYS user))
-              ((= llm-chat-mode 1) (llm:chat SYS user llm-extra))
+              ((= llm-chat-mode 2) (llm:chat sys user))
+              ((= llm-chat-mode 1) (llm:chat sys user llm-extra))
               (else
-               (let ((tried (try (llm:chat SYS user llm-extra) (catch (e) #f))))
+               (let ((tried (try (llm:chat sys user llm-extra) (catch (e) #f))))
                  (if (hash? tried)
                    (begin (set! llm-chat-mode 1) tried)
-                   (begin (set! llm-chat-mode 2) (llm:chat SYS user))))))))
+                   (begin (set! llm-chat-mode 2) (llm:chat sys user))))))))
         (set! req-ch (channel:create 1))
         (set! res-ch (channel:create 1))
         (fiber:spawn (lambda ()
                        (let loop ()
-                         (let ((prompt (channel:recv req-ch)))
-                           (let ((ans (llm-reply (if (string? prompt) prompt ""))))
-                             (channel:send res-ch
-                                           (if (hash? ans)
-                                             ans
-                                             (hash "ok" #f "error" "bad" "content" ""))))
+                         (let ((job (channel:recv req-ch)))
+                           (let ((sys (if (and (hash? job) (string=? (hash-ref job "kind" "") "scene"))
+                                        SCENE-SYS
+                                        SYS))
+                                 (user (if (hash? job)
+                                         (hash-ref job "user" "")
+                                         (if (string? job) job ""))))
+                             (let ((ans (llm-reply sys user)))
+                               (channel:send res-ch
+                                             (if (hash? ans)
+                                               ans
+                                               (hash "ok" #f "error" "bad" "content" "")))))
                            (loop))))))
       #f)))
 

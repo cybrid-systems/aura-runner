@@ -1,0 +1,11 @@
+rosy 1 fair The sky turned rosy
+dark 0 dark
+wild 0 flower
+dim 0 light
+blood 0 ground
+packed 0 density
+trial-rosy 1 1
+trial-dark 1 0
+keep-dark 0
+keep-rosy 1
+scene 1

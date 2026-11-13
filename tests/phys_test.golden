@@ -7,7 +7,12 @@ air 3500.0
 55 5583.0 0.0 0.0 1
 alive 1
 gap-clear 1 1
-wide-alive 0
+wide-alive 1
 slide-alive 1
-stand-alive 0
+stand-alive 1
 coins 25.0
+bump-alive 1
+bump-score 10.0
+bump-grace 1
+pit-alive 1
+pit-grace 1

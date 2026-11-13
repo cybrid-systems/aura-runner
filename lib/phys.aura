@@ -9,7 +9,11 @@
 ; exact integers truncates (docs/stdlib/division.md).
 ;
 ; Player: (x y vy slide-left coyote alive score jump-buffer slide-buffer
-;          lane lx)
+;          lane lx grace drag)
+;   grace is seconds of invulnerability after a bump or a gap.
+;   drag is seconds of a slower pace after the same stumble.
+;   A run does not end. strict rules (the fairness autopilot) still
+;   treat a hit or a gap as dead, so an unfair phrase stays unfair.
 ;   lane is 0 left, 1 centre, 2 right. lx eases toward that lane.
 ;   Forward x is the track axis (rendered as world Z). lx is world X.
 ; Piece:  (kind x w h y lane)
@@ -20,7 +24,12 @@
 (define LANE-W 1.8)
 
 (define (make-player x)
-  (list x 0.0 0.0 0.0 0.12 1.0 0.0 0.0 0.0 1.0 0.0))
+  (list x 0.0 0.0 0.0 0.12 1.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0))
+
+(define GRACE-S 1.5)
+(define DRAG-S 1.15)
+(define DRAG-SCALE 0.45)
+(define BUMP-COST 15.0)
 
 (define (pxs p i)
   (if (= i 0) (car p) (pxs (cdr p) (- i 1))))
@@ -47,6 +56,46 @@
 
 (define (player-lane p) (pxs p 9))
 (define (player-lx p) (pxs p 10))
+(define (player-grace p) (pxs p 11))
+(define (player-drag p) (pxs p 12))
+
+(define (tick-timers p dt)
+  (pset (pset p 11 (max 0.0 (- (player-grace p) dt)))
+        12 (max 0.0 (- (player-drag p) dt))))
+
+(define (pay-bump p)
+  (pset (pset (pset p 11 GRACE-S) 12 DRAG-S)
+        6 (max 0.0 (- (player-score p) BUMP-COST))))
+
+(define (run-speed speed p)
+  (if (> (player-drag p) 0.0) (* speed DRAG-SCALE) speed))
+
+(define (strict? rules)
+  (equal? (hash-ref rules "strict" #f) #t))
+
+; Far edge of the gap the body is standing in, or #f.
+(define (gap-far-edge x lane pieces)
+  (let loop ((ps pieces) (edge #f))
+    (if (null? ps)
+      edge
+      (let ((q (car ps)))
+        (if (and (= (piece-k q) 2.0) (hits-lane? q lane))
+          (let ((x1 (piece-x q))
+                (x2 (+ x1 (piece-w q))))
+            (if (and (< x (+ x2 0.02)) (>= x (- x1 0.02)))
+              (loop (cdr ps) (if (or (not edge) (> x2 edge)) x2 edge))
+              (loop (cdr ps) edge)))
+          (loop (cdr ps) edge))))))
+
+; Set the runner down just past the hole, on the ground, still moving.
+(define (lift-out p pieces)
+  (let loop ((pp p) (n 0))
+    (if (>= n 4)
+      pp
+      (let ((edge (gap-far-edge (player-x pp) (body-lane pp) pieces)))
+        (if (not edge)
+          pp
+          (loop (pset (pset (pset pp 0 (+ edge 0.08)) 1 0.0) 2 0.0) (+ n 1)))))))
 
 (define (piece k x w h y . rest)
   (list k x w h y (if (null? rest) -1.0 (exact->inexact (car rest)))))
@@ -103,20 +152,20 @@
 (define (rects-overlap? ax1 ay1 ax2 ay2 bx1 by1 bx2 by2)
   (and (< ax1 bx2) (> ax2 bx1) (< ay1 by2) (> ay2 by1)))
 
-; Returns (list player pieces event). event is "ok" "coin" "spring" "dead".
+; Returns (list player pieces event).
+; event is "ok" "coin" "spring" "bump" "oops" "dead".
+; "dead" happens only under strict rules. A playing run stumbles:
+; "bump" is an obstacle, "oops" is a gap the runner was set past.
 (define (step p pieces rules dt)
   (if (<= (pxs p 5) 0.0)
     (list p pieces "dead")
     (let* ((g (hash-ref rules "g"))
            (jump (hash-ref rules "jump"))
-           (speed (hash-ref rules "speed"))
+           (speed (run-speed (hash-ref rules "speed") p))
            (slide-dur (hash-ref rules "slide"))
            (coyote-max (hash-ref rules "coyote"))
-           (forgive (hash-ref rules "forgive"))
-           (ph (hash-ref rules "ph"))
-           (pw (hash-ref rules "pw"))
-           (sh (hash-ref rules "sh"))
-           (p1 (if (> (pxs p 7) 0.0) (pset p 7 (max 0.0 (- (pxs p 7) dt))) p))
+           (p0 (tick-timers p dt))
+           (p1 (if (> (pxs p0 7) 0.0) (pset p0 7 (max 0.0 (- (pxs p0 7) dt))) p0))
            (p2 (if (> (pxs p1 8) 0.0) (pset p1 8 (max 0.0 (- (pxs p1 8) dt))) p1))
            (grounded (and (<= (player-y p2) 0.0001)
                           (not (over-gap? (player-x p2) (body-lane p2) pieces))))
@@ -139,13 +188,25 @@
            (y (+ (player-y p6) (* vy dt)))
            (x (+ (player-x p6) (* speed dt)))
            (p7 (pset (pset (pset p6 0 x) 1 y) 2 vy)))
-      (let ((done
-             (if (<= (player-y p7) 0.0)
-               (if (over-gap? (player-x p7) (body-lane p7) pieces)
-                 (list (pset p7 5 0.0) pieces "dead")
-                 (collide (pset (pset p7 1 0.0) 2 0.0) pieces rules))
-               (collide p7 pieces rules))))
+      (let ((done (finish-step p7 pieces rules)))
         (list (ease-lane (car done) dt) (car (cdr done)) (car (cdr (cdr done))))))))
+
+(define (finish-step p7 pieces rules)
+  (if (and (<= (player-y p7) 0.0)
+           (over-gap? (player-x p7) (body-lane p7) pieces))
+    (if (strict? rules)
+      (list (pset p7 5 0.0) pieces "dead")
+      (let* ((fresh (<= (player-grace p7) 0.0))
+             (lifted (lift-out p7 pieces))
+             (next (if fresh (pay-bump lifted) lifted))
+             (hit (collide next pieces rules)))
+        (list (car hit) (car (cdr hit))
+              (let ((ev (car (cdr (cdr hit)))))
+                (if (string=? ev "bump") "bump" (if fresh "oops" ev))))))
+    (let ((landed (if (<= (player-y p7) 0.0)
+                    (pset (pset p7 1 0.0) 2 0.0)
+                    p7)))
+      (collide landed pieces rules))))
 
 (define (collide p pieces rules)
   (let* ((forgive (hash-ref rules "forgive"))
@@ -172,7 +233,11 @@
                          (rects-overlap? left bottom right top x1 y1 x2 y2))))
           (cond
             ((and hit (or (= k 3.0) (= k 4.0) (= k 7.0)))
-             (loop (cdr ps) (cons q acc) (pset player 5 0.0) "dead" #t))
+             (if (strict? rules)
+               (loop (cdr ps) (cons q acc) (pset player 5 0.0) "dead" #t)
+               (if (> (player-grace player) 0.0)
+                 (loop (cdr ps) (cons q acc) player event #f)
+                 (loop (cdr ps) (cons q acc) (pay-bump player) "bump" #f))))
             ((and hit (= k 5.0))
              (loop (cdr ps)
                    (cons (piece 0.0 x1 (piece-w q) (piece-h q) y1 (piece-lane q)) acc)

@@ -76,7 +76,8 @@
 (display (if (player-alive? gp) 1 0))
 (newline)
 
-; A gap wider than the jump is fatal.
+; A gap wider than the jump used to end the run. The runner is lifted
+; past it and stays in the race.
 (define wide
   (list (piece 1.0 0.0 6.0 0.45 0.0)
         (piece 2.0 6.0 6.0 1.2 -1.2)))
@@ -98,7 +99,7 @@
 (display (if (player-alive? wp) 1 0))
 (newline)
 
-; Slide under a gate; standing into it is fatal.
+; Slide under a gate. Standing into it stumbles and continues.
 (define gated
   (list (piece 1.0 0.0 30.0 0.45 0.0)
         (piece 4.0 8.0 0.7 0.34 0.66)))
@@ -147,4 +148,64 @@
       (loop (+ i 1)))))
 (display "coins ")
 (display (player-score cp))
+(newline)
+
+; A hurdle bumps. The runner stays alive, keeps the distance, loses one
+; coin's worth of points, and is briefly invulnerable.
+(define hurdled
+  (list (piece 1.0 0.0 30.0 0.45 0.0)
+        (piece 5.0 2.2 0.42 0.42 0.4)
+        (piece 3.0 4.2 0.7 0.55 0.0)))
+(define hp (make-player 1.0))
+(define hpieces hurdled)
+(define bump-grace 0.0)
+(define saw-bump 0)
+(let loop ((i 0))
+  (if (>= i 220)
+    #t
+    (let ((r (step hp hpieces rules PHYS-DT)))
+      (set! hp (car r))
+      (set! hpieces (car (cdr r)))
+      (if (string=? (car (cdr (cdr r))) "bump")
+        (begin
+          (set! saw-bump 1)
+          (set! bump-grace (player-grace hp)))
+        #f)
+      (loop (+ i 1)))))
+(display "bump-alive ")
+(display (if (and (= saw-bump 1) (player-alive? hp) (> (player-x hp) 6.0)) 1 0))
+(newline)
+(display "bump-score ")
+(display (player-score hp))
+(newline)
+(display "bump-grace ")
+(display (if (> bump-grace 1.0) 1 0))
+(newline)
+
+; Falling in a pit sets the runner on the ground ahead. No end state.
+(define pit
+  (list (piece 1.0 0.0 4.0 0.45 0.0)
+        (piece 2.0 4.0 5.0 1.2 -1.2)
+        (piece 1.0 9.0 20.0 0.45 0.0)))
+(define pp (make-player 1.0))
+(define ppieces pit)
+(define saw-oops 0)
+(define pit-grace 0.0)
+(let loop ((i 0))
+  (if (>= i 220)
+    #t
+    (let ((r (step pp ppieces rules PHYS-DT)))
+      (set! pp (car r))
+      (set! ppieces (car (cdr r)))
+      (if (string=? (car (cdr (cdr r))) "oops")
+        (begin
+          (set! saw-oops 1)
+          (set! pit-grace (player-grace pp)))
+        #f)
+      (loop (+ i 1)))))
+(display "pit-alive ")
+(display (if (and (= saw-oops 1) (player-alive? pp) (> (player-x pp) 12.0) (<= (player-y pp) 0.001)) 1 0))
+(newline)
+(display "pit-grace ")
+(display (if (> pit-grace 1.0) 1 0))
 (newline)

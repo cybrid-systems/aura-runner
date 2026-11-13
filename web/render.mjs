@@ -17,21 +17,37 @@ function mul(rgb, s) {
   return [rgb[0] * s, rgb[1] * s, rgb[2] * s];
 }
 
-// One garden, from late golden hour toward a luminous dusk, as kept
-// phrases shift the hue. Obstacle colors stay put so a hurdle, a gate
-// and a pot stay readable.
-function palette(h) {
+const FLOWERS = {
+  daisy: [[0.98, 0.98, 0.94], [1.0, 0.86, 0.42]],
+  tulip: [[0.93, 0.28, 0.42], [0.98, 0.55, 0.68]],
+  blossom: [[0.98, 0.62, 0.78], [0.74, 0.46, 0.86]],
+  buttercup: [[1.0, 0.88, 0.22], [0.98, 0.7, 0.28]],
+};
+
+function flowerPair(kind) {
+  return FLOWERS[kind] || FLOWERS.daisy;
+}
+
+// Sky, ground, flowers and light come from the kept garden phrase.
+// Hue still warms the hills a little when an obstacle phrase is kept.
+// Obstacle colors stay put so a hurdle, a gate and a pot stay readable.
+function palette(h, scene) {
   const t = Math.max(0, Math.min(1, (h || 0) / 5));
+  const sky = (scene && scene.sky) || [0.55, 0.72, 0.95];
+  const ground = (scene && scene.ground) || [0.42, 0.68, 0.38];
+  const light = scene && typeof scene.light === "number" ? scene.light : 0.82;
+  const bloom = flowerPair(scene && scene.flower);
+  const skyLift = 0.78 + 0.22 * light;
   return {
-    sky0: mix3([0.55, 0.70, 0.92], [0.28, 0.20, 0.48], t),
-    sky1: mix3([1.0, 0.58, 0.34], [0.90, 0.40, 0.48], t),
-    fog: mix3([1.0, 0.78, 0.58], [0.70, 0.48, 0.58], t),
+    sky0: mul(sky, skyLift),
+    sky1: mix3(mul(sky, skyLift), [1.0, 0.72, 0.48], 0.42),
+    fog: mix3(mul(sky, 0.9), [1.0, 0.78, 0.58], 0.35),
     hill: mix3([0.55, 0.66, 0.74], [0.32, 0.28, 0.48], t),
     hill2: mix3([0.40, 0.55, 0.62], [0.24, 0.22, 0.38], t),
     soil: mix3([0.45, 0.32, 0.22], [0.28, 0.20, 0.22], t),
-    grass: mix3([0.42, 0.68, 0.38], [0.26, 0.46, 0.36], t),
-    grassL: mix3([0.48, 0.70, 0.46], [0.30, 0.50, 0.42], t),
-    grassR: mix3([0.36, 0.60, 0.40], [0.22, 0.42, 0.36], t),
+    grass: ground,
+    grassL: mix3(ground, [1, 1, 1], 0.14),
+    grassR: mix3(ground, [0.1, 0.15, 0.08], 0.12),
     path: mix3([0.93, 0.78, 0.52], [0.62, 0.46, 0.40], t),
     hedge: mix3([0.22, 0.46, 0.28], [0.14, 0.32, 0.26], t),
     water: [0.18, 0.55, 0.62],
@@ -46,13 +62,15 @@ function palette(h) {
     trunk: [0.46, 0.32, 0.22],
     leaf: [0.30, 0.66, 0.40],
     leaf2: [0.42, 0.74, 0.46],
-    flower: [0.98, 0.55, 0.62],
-    flower2: [1.0, 0.86, 0.46],
+    flower: bloom[0],
+    flower2: bloom[1],
+    lightAmt: light,
+    density: scene && typeof scene.density === "number" ? scene.density : 0.45,
     body: [0.95, 0.48, 0.42],
     bodyDeep: [0.78, 0.32, 0.38],
     head: [1.0, 0.90, 0.78],
     cape: [1.0, 0.78, 0.38],
-    sun: mix3([1.0, 0.92, 0.72], [1.0, 0.62, 0.55], t),
+    sun: mix3(mul(sky, skyLift), [1.0, 0.92, 0.72], 0.35),
     sunUv: [0.74 - t * 0.08, 0.78 - t * 0.22],
   };
 }
@@ -409,7 +427,7 @@ export function createRenderer(canvas) {
   }
 
   function frame(st) {
-    const pal = palette(st.hue || 0);
+    const pal = palette(st.hue || 0, st.scene);
     const px = st.lx || 0;
     const py = st.y || 0;
     const pz = st.x || 0;
@@ -495,9 +513,14 @@ export function createRenderer(canvas) {
           push(tx + sway, 1.2, cz, 1.05, 0.95, 1.05, nearTree ? 1 : 0, side < 0 ? pal.leaf : pal.leaf2, 0.72, 0.02);
         }
       }
-      if (dist < 24 && ((z / 2) | 0) % 4 === 2) {
-        const bloom = ((z / 2) | 0) % 8 === 2 ? pal.flower : pal.flower2;
-        push(wx(((z / 2) | 0) % 8 === 2 ? -2.55 : 2.55), 0.2, cz, 0.2, 0.2, 0.2, 1, bloom, 0.35, 0.3);
+      const stride = pal.density >= 0.75 ? 2 : pal.density >= 0.4 ? 4 : 8;
+      if (dist < 24 && ((z / 2) | 0) % stride === 0) {
+        const bloom = ((z / 2) | 0) % 4 === 0 ? pal.flower : pal.flower2;
+        const side = ((z / 2) | 0) % 8 === 0 ? -1 : 1;
+        push(wx(side * 2.55), 0.22, cz, 0.22, 0.22, 0.22, 1, bloom, 0.35, 0.35);
+        if (pal.density >= 0.75) {
+          push(wx(-side * 2.15), 0.18, cz + 0.4, 0.16, 0.28, 0.16, 1, pal.flower2, 0.3, 0.4);
+        }
       }
     }
 
@@ -554,7 +577,8 @@ export function createRenderer(canvas) {
     const squash = !alive ? 1 : air ? 1.14 : 1 - land * 0.16;
     const widen = !alive ? 1 : air ? 0.9 : 1 + land * 0.12;
     const leanX = reduced ? 0 : lean * 0.35;
-    if (alive) {
+    const blink = st.stumble > 0.05 && !reduced && Math.sin((st.time || 0) * 28) > 0.15;
+    if (alive && !blink) {
       push(rx, 0.02, pz, sliding ? 0.95 : 0.62, 0.025, sliding ? 0.9 : 0.5, 0, [0.18, 0.12, 0.08], 1, 0);
       if (!sliding) {
         const leg = air ? -0.12 : swing * 0.32;
@@ -578,7 +602,7 @@ export function createRenderer(canvas) {
         const s = 0.12 * fade;
         push(rx - lean * 0.1 * t, 0.35 + fade * 0.15, pz - 0.45 - t * (0.28 + speed * 0.02), s, s, s, 2, pal.cape, 0.15, 0.35 + fade * 0.5);
       }
-    } else {
+    } else if (!alive) {
       const rest = 0.22 + (reduced ? 0 : Math.sin(st.time * 2) * 0.03);
       push(rx, 0.04, pz, 0.7, 0.03, 0.55, 0, [0.15, 0.1, 0.08], 1, 0);
       push(rx, rest, pz, 0.36, 0.36, 0.36, 1, pal.cape, 0.2, 0.9);
@@ -610,7 +634,8 @@ export function createRenderer(canvas) {
     gl.uniform3f(u.eye, eye[0], eye[1], eye[2]);
     gl.uniform3fv(u.fog, pal.fog);
     const lift = floaty + pulse * 0.15;
-    gl.uniform3f(u.light, 0.42 + pulse * 0.1, 0.78 + lift, 0.24 + (1 - Math.min(1, (st.hue || 0) / 5)) * 0.15);
+    const sun = 0.55 + 0.55 * pal.lightAmt;
+    gl.uniform3f(u.light, 0.42 * sun + pulse * 0.1, (0.78 + lift) * sun, 0.28 * sun);
     gl.uniform1f(u.mtime, st.time || 0);
     gl.bindVertexArray(vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, inst);
