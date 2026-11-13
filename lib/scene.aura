@@ -56,7 +56,8 @@
         "violations" (scene-viol #f)))
 
 (define (scene-head? s)
-  (or (string=? s "sky") (string=? s "ground") (string=? s "flower") (string=? s "light")))
+  (or (string=? s "sky") (string=? s "ground") (string=? s "flower")
+      (string=? s "light") (string=? s "fog")))
 
 (define (scene-heads-ok? form)
   (let loop ((xs (cdr form)))
@@ -67,12 +68,12 @@
           #f
           (loop (cdr xs)))))))
 
-(define (scene-ok r g b grr gg gb kind density lv)
+(define (scene-ok r g b grr gg gb kind density lv fog)
   (hash "ok" #t "why" "fair"
         "cue" (scene-cue kind r g b)
         "sky-r" r "sky-g" g "sky-b" b
         "ground-r" grr "ground-g" gg "ground-b" gb
-        "flower" kind "density" density "light" lv
+        "flower" kind "density" density "light" lv "fog" fog
         "violations" (scene-viol #t)))
 
 (define (flower-kind sp)
@@ -85,9 +86,18 @@
 (define (flower-density sp)
   (exact->inexact (car (cdr (cdr sp)))))
 
-; (garden (sky R G B) (ground R G B) (flower KIND DENSITY) (light L))
-; Channels stay bright. The ground stays green. Flowers are a short
-; allowlist. Light never drops into night.
+; Missing fog is a light haze. A present clause must be one number.
+(define (scene-fog-value form)
+  (let ((sp (scene-clause form "fog")))
+    (if (not sp)
+      0.22
+      (let ((nums (scene-nums sp 1)))
+        (if nums (car nums) #f)))))
+
+; (garden (sky R G B) (ground R G B) (flower KIND DENSITY) (light L) (fog F))
+; Fog is optional. Channels stay bright. The ground stays green. Flowers
+; are a short allowlist. Light never drops into night. Fog stays a light
+; haze: above 0.38 the phrase is refused so a pink garden cannot bury the course.
 (define (check-scene text)
   (if (or (not (string? text)) (= (string-length text) 0))
     (scene-refuse "empty")
@@ -120,7 +130,8 @@
                             (gg (car (cdr gr)))
                             (gb (car (cdr (cdr gr))))
                             (density (flower-density flower))
-                            (lv (car lr)))
+                            (lv (car lr))
+                            (fog (scene-fog-value form)))
                         (cond
                           ((or (not (scene-in? r 0.25 1.0))
                                (not (scene-in? g 0.25 1.0))
@@ -135,6 +146,8 @@
                            (scene-refuse "ground"))
                           ((not (scene-in? density 0.15 1.0))
                            (scene-refuse "density"))
-                          ((not (scene-in? lv 0.40 1.0))
+                          ((not (scene-in? lv 0.50 1.0))
                            (scene-refuse "light"))
-                          (else (scene-ok r g b grr gg gb kind density lv)))))))))))))))
+                          ((not (scene-in? fog 0.0 0.38))
+                           (scene-refuse "fog"))
+                          (else (scene-ok r g b grr gg gb kind density lv fog)))))))))))))))

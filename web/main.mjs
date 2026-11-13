@@ -41,6 +41,7 @@ const sceneTarget = {
   flower: "daisy",
   density: 0.45,
   light: 0.82,
+  fog: 0.22,
 };
 const sceneView = {
   sky: sceneTarget.sky.slice(),
@@ -48,6 +49,7 @@ const sceneView = {
   flower: "daisy",
   density: 0.45,
   light: 0.82,
+  fog: 0.22,
 };
 let stumble = 0;
 let lastCue = "";
@@ -79,6 +81,7 @@ const gardenNotes = [];
 if (localStorage.getItem("lumen-hint") === "off") hintEl.hidden = true;
 let ws;
 let connected = false;
+let booted = false;
 
 function num(v, fallback) {
   return typeof v === "number" ? v : fallback;
@@ -95,6 +98,7 @@ function applyScene(msg) {
   if (typeof msg.flower === "string" && msg.flower) sceneTarget.flower = msg.flower;
   if (typeof msg.density === "number") sceneTarget.density = msg.density;
   if (typeof msg.light === "number") sceneTarget.light = msg.light;
+  if (typeof msg.fog === "number") sceneTarget.fog = Math.min(0.38, Math.max(0, msg.fog));
 }
 
 function applyRules(msg) {
@@ -119,6 +123,7 @@ function lerpScene(dt) {
   }
   sceneView.density += (sceneTarget.density - sceneView.density) * k;
   sceneView.light += (sceneTarget.light - sceneView.light) * k;
+  sceneView.fog += (sceneTarget.fog - sceneView.fog) * k;
   if (Math.abs(sceneTarget.density - sceneView.density) < 0.04) sceneView.flower = sceneTarget.flower;
 }
 
@@ -223,16 +228,29 @@ function connect() {
   ws = new WebSocket(`${proto}://${location.host}/ws`);
   ws.onopen = () => {
     connected = true;
-    const seedParam = params.get("seed");
-    ws.send(JSON.stringify({ op: "hello", seed: seedParam ? Number(seedParam) : 42 }));
+    if (booted) {
+      // The local list has already been pruned. Ask the server for the
+      // chunks it still has instead of inventing an empty road.
+      pieces = [];
+      seenChunks = new Set();
+      ws.send(JSON.stringify({ op: "resync" }));
+    } else {
+      const seedParam = params.get("seed");
+      ws.send(JSON.stringify({ op: "hello", seed: seedParam ? Number(seedParam) : 42 }));
+    }
   };
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
     if (msg.op === "welcome") {
       resetLocal();
+      booted = true;
       seed = msg.seed;
       applyRules(msg);
       replayEl.textContent = msg.replay;
+    } else if (msg.op === "resync") {
+      pieces = [];
+      seenChunks = new Set();
+      booted = true;
     } else if (msg.op === "rules") {
       applyRules(msg);
       window.__lumen = Object.assign(window.__lumen || {}, {

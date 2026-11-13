@@ -1,0 +1,122 @@
+; Band 0 and 1 have to put a slide gate on the road, including in the
+; opening stretch, and a failed pattern must still advance with an obstacle.
+(require "lib/gen")
+(require "std/string" all:)
+
+(define rules (rules-of 32.0 11.2 5.0 0.48 0.12 0.12))
+(define rules1 (rules-of 31.4 11.4 5.8 0.50 0.12 0.12))
+
+(define (show k v)
+  (display k)
+  (display " ")
+  (display v)
+  (newline))
+
+(define (count-kind ps k)
+  (let loop ((xs ps) (n 0))
+    (if (null? xs)
+      n
+      (loop (cdr xs) (if (= (piece-k (car xs)) k) (+ n 1) n)))))
+
+(define (action? k)
+  (or (= k 2.0) (= k 3.0) (= k 4.0) (= k 7.0)))
+
+(define (action-xs ps origin acc)
+  (let loop ((ys ps) (out acc))
+    (if (null? ys)
+      out
+      (let ((q (car ys)))
+        (loop (cdr ys)
+              (if (action? (piece-k q))
+                (cons (+ origin (piece-x q)) out)
+                out))))))
+
+(define (max-delta xs)
+  (if (or (null? xs) (null? (cdr xs)))
+    0.0
+    (let loop ((ys (cdr xs)) (prev (car xs)) (m 0.0))
+      (if (null? ys)
+        m
+        (let ((d (- (car ys) prev)))
+          (loop (cdr ys) (car ys) (if (> d m) d m)))))))
+
+(define (ordered-actions seed band n)
+  (let loop ((i 0) (origin 0.0) (acc (list)))
+    (if (>= i n)
+      (reverse acc)
+      (let ((ch (pattern-chunk seed i band)))
+        (if (not ch)
+          (list)
+          (loop (+ i 1)
+                (+ origin (hash-ref ch "x1"))
+                (action-xs (hash-ref ch "pieces") origin acc)))))))
+
+(define (gap-ok? seed band)
+  (let ((xs (ordered-actions seed band 6)))
+    (if (not (pair? xs))
+      #f
+      (if (not (pair? (cdr xs)))
+        #f
+        (let ((d (max-delta xs)))
+          (and (> d 0.0) (<= d 30.0)))))))
+
+(define (stretch-gates seed metres)
+  (let loop ((i 0) (x 0.0) (gates 0))
+    (if (or (>= i 8) (>= x metres))
+      gates
+      (let ((ch (pattern-chunk seed i 0)))
+        (if (not ch)
+          -1
+          (loop (+ i 1)
+                (+ x (hash-ref ch "x1"))
+                (+ gates (count-kind (hash-ref ch "pieces") 4.0))))))))
+
+(define (first-gate-x seed)
+  (let ((ch (pattern-chunk seed 0 0)))
+    (if (not ch)
+      999.0
+      (let loop ((ps (hash-ref ch "pieces")))
+        (if (null? ps)
+          999.0
+          (if (= (piece-k (car ps)) 4.0)
+            (piece-x (car ps))
+            (loop (cdr ps))))))))
+
+(define (example-from src)
+  (let ((mark "Example: "))
+    (let ((i (string-find src mark)))
+      (if (< i 0)
+        ""
+        (let ((rest (substring src (+ i (string-length mark)) (string-length src))))
+          (let ((j (string-find rest "\"")))
+            (if (< j 0) "" (substring rest 0 j))))))))
+
+(show "gates0" (patterns-with-gate 0))
+(show "gates1" (patterns-with-gate 1))
+(show "early" (if (and (> (stretch-gates 1 150.0) 0)
+                       (> (stretch-gates 42 150.0) 0)
+                       (> (stretch-gates 99 150.0) 0))
+                1 0))
+(show "soon" (if (and (< (first-gate-x 1) 16.0)
+                      (< (first-gate-x 42) 16.0)
+                      (< (first-gate-x 99) 16.0))
+               1 0))
+(show "spacing" (if (and (gap-ok? 1 0) (gap-ok? 42 0) (gap-ok? 7 1) (gap-ok? 42 1))
+                  1 0))
+
+(define fb (chunk-or-fallback #f))
+(define fb-ps (if fb (hash-ref fb "pieces") (list)))
+(show "fallback" (if (and fb
+                          (> (hash-ref fb "x1" 0.0) 0.0)
+                          (> (+ (count-kind fb-ps 3.0) (count-kind fb-ps 4.0)) 0))
+                   1 0))
+
+(define example (example-from (read-file "core/main.aura")))
+(define ex (check-source example rules))
+(show "example" (if (and (string-contains? example "(gate ")
+                         ex
+                         (hash-ref ex "ok"))
+                  1 0))
+
+(define b1 (offline-chunk 42 0 1 rules1))
+(show "band1" (if b1 1 0))
