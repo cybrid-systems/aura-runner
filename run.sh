@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One command: Aura v0.2.2 game core + the browser.
+# One command: pinned Aura game core + the browser.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
@@ -8,11 +8,10 @@ mkdir -p out .tools
 # shellcheck source=scripts/aura-path.sh
 source "$ROOT/scripts/aura-path.sh"
 
-AURA_VERSION="${AURA_VERSION:-0.2.2}"
 WEB_PORT="${AURA_RUNNER_WEB:-8080}"
 AURA_PORT="${AURA_RUNNER_PORT:-8765}"
 
-AURA_BIN="$(install_aura "$ROOT" "$AURA_VERSION")"
+AURA_BIN="$(install_aura "$ROOT")"
 if [[ "$(printf '%s\n' "$AURA_BIN" | wc -l)" -ne 1 || ! -x "$AURA_BIN" ]]; then
   echo "Aura binary path is not a single executable: [$AURA_BIN]" >&2
   exit 1
