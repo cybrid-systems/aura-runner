@@ -1,37 +1,60 @@
-// Third-person WebGL2 renderer. One instanced draw of unit cubes covers the
-// road, crates, gates, coins and the runner. The sim's forward axis is Z
-// and its lane offset is X.
+// Third-person WebGL2 view of the Lumen garden. One instanced draw of
+// unit cubes, shaded as beveled toys, spheres and seeds. The sim's
+// forward axis is Z and its lane offset is X.
+//
+// The camera looks down +Z, so world +X is screen-left. The sim stores
+// lane 0 (left) at negative X, and the renderer negates lateral positions.
+// Input still sends lane -1 for Left.
 
-const MAX = 480;
+const MAX = 520;
 const STRIDE = 12;
-
-const HUES = [
-  { sky0: [0.45, 0.72, 1], sky1: [1, 0.84, 0.62], fog: [0.72, 0.84, 0.98], ground: [0.34, 0.62, 0.4], edge: [0.24, 0.48, 0.32], hurdle: [0.28, 0.4, 0.92], gate: [0.98, 0.58, 0.18], coin: [1, 0.82, 0.28], spring: [0.56, 0.36, 0.95], block: [0.93, 0.55, 0.38], player: [1, 0.42, 0.58], pit: [0.12, 0.22, 0.38] },
-  { sky0: [0.98, 0.55, 0.48], sky1: [1, 0.82, 0.7], fog: [1, 0.78, 0.7], ground: [0.32, 0.66, 0.52], edge: [0.22, 0.5, 0.42], hurdle: [0.86, 0.32, 0.52], gate: [0.25, 0.42, 0.86], coin: [1, 0.9, 0.45], spring: [0.3, 0.7, 0.48], block: [0.95, 0.7, 0.4], player: [1, 0.55, 0.32], pit: [0.2, 0.28, 0.45] },
-  { sky0: [0.16, 0.18, 0.38], sky1: [0.42, 0.32, 0.62], fog: [0.28, 0.3, 0.48], ground: [0.18, 0.32, 0.4], edge: [0.12, 0.22, 0.3], hurdle: [0.95, 0.72, 0.32], gate: [0.62, 0.78, 1], coin: [1, 0.86, 0.45], spring: [0.4, 0.85, 0.72], block: [0.45, 0.4, 0.7], player: [1, 0.78, 0.38], pit: [0.05, 0.08, 0.16] },
-  { sky0: [0.42, 0.78, 0.92], sky1: [0.9, 0.95, 1], fog: [0.75, 0.88, 0.95], ground: [0.4, 0.68, 0.58], edge: [0.28, 0.52, 0.48], hurdle: [0.18, 0.5, 0.58], gate: [0.95, 0.42, 0.38], coin: [1, 0.74, 0.3], spring: [0.9, 0.42, 0.55], block: [0.85, 0.55, 0.4], player: [0.35, 0.45, 0.92], pit: [0.12, 0.28, 0.4] },
-  { sky0: [1, 0.62, 0.32], sky1: [1, 0.88, 0.62], fog: [1, 0.78, 0.55], ground: [0.52, 0.58, 0.26], edge: [0.4, 0.42, 0.18], hurdle: [0.48, 0.28, 0.72], gate: [0.15, 0.42, 0.5], coin: [1, 0.55, 0.28], spring: [0.88, 0.3, 0.38], block: [0.72, 0.4, 0.22], player: [0.95, 0.35, 0.4], pit: [0.25, 0.18, 0.12] },
-  { sky0: [0.28, 0.7, 0.78], sky1: [0.72, 0.94, 0.9], fog: [0.62, 0.84, 0.82], ground: [0.22, 0.55, 0.48], edge: [0.14, 0.4, 0.38], hurdle: [0.92, 0.45, 0.25], gate: [0.52, 0.28, 0.72], coin: [1, 0.88, 0.4], spring: [0.95, 0.55, 0.7], block: [0.85, 0.78, 0.55], player: [0.96, 0.96, 0.98], pit: [0.08, 0.28, 0.38] },
-];
 
 function mix3(a, b, t) {
   return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 }
 
-function mixTone(rgb, s) {
+function mul(rgb, s) {
   return [rgb[0] * s, rgb[1] * s, rgb[2] * s];
 }
 
+// One garden, from late golden hour toward a luminous dusk, as kept
+// phrases shift the hue. Obstacle colors stay put so a hurdle, a gate
+// and a pot stay readable.
 function palette(h) {
-  const n = HUES.length;
-  const f = ((h % n) + n) % n;
-  const i = Math.floor(f);
-  const t = f - i;
-  const A = HUES[i];
-  const B = HUES[(i + 1) % n];
-  const out = {};
-  for (const k of Object.keys(A)) out[k] = mix3(A[k], B[k], t);
-  return out;
+  const t = Math.max(0, Math.min(1, (h || 0) / 5));
+  return {
+    sky0: mix3([0.55, 0.70, 0.92], [0.28, 0.20, 0.48], t),
+    sky1: mix3([1.0, 0.58, 0.34], [0.90, 0.40, 0.48], t),
+    fog: mix3([1.0, 0.78, 0.58], [0.70, 0.48, 0.58], t),
+    hill: mix3([0.55, 0.66, 0.74], [0.32, 0.28, 0.48], t),
+    hill2: mix3([0.40, 0.55, 0.62], [0.24, 0.22, 0.38], t),
+    soil: mix3([0.45, 0.32, 0.22], [0.28, 0.20, 0.22], t),
+    grass: mix3([0.42, 0.68, 0.38], [0.26, 0.46, 0.36], t),
+    grassL: mix3([0.48, 0.70, 0.46], [0.30, 0.50, 0.42], t),
+    grassR: mix3([0.36, 0.60, 0.40], [0.22, 0.42, 0.36], t),
+    path: mix3([0.93, 0.78, 0.52], [0.62, 0.46, 0.40], t),
+    hedge: mix3([0.22, 0.46, 0.28], [0.14, 0.32, 0.26], t),
+    water: [0.18, 0.55, 0.62],
+    lily: [0.55, 0.78, 0.42],
+    hurdle: [0.33, 0.58, 0.90],
+    hurdleTop: [0.62, 0.82, 0.98],
+    gate: [0.96, 0.66, 0.28],
+    coin: [1.0, 0.84, 0.32],
+    spring: [0.92, 0.42, 0.62],
+    pot: [0.86, 0.46, 0.30],
+    potRim: [0.96, 0.72, 0.48],
+    trunk: [0.46, 0.32, 0.22],
+    leaf: [0.30, 0.66, 0.40],
+    leaf2: [0.42, 0.74, 0.46],
+    flower: [0.98, 0.55, 0.62],
+    flower2: [1.0, 0.86, 0.46],
+    body: [0.95, 0.48, 0.42],
+    bodyDeep: [0.78, 0.32, 0.38],
+    head: [1.0, 0.90, 0.78],
+    cape: [1.0, 0.78, 0.38],
+    sun: mix3([1.0, 0.92, 0.72], [1.0, 0.62, 0.55], t),
+    sunUv: [0.74 - t * 0.08, 0.78 - t * 0.22],
+  };
 }
 
 function cube() {
@@ -46,9 +69,7 @@ function cube() {
   const out = [];
   const order = [0, 1, 2, 0, 2, 3];
   for (const f of faces) {
-    for (const i of order) {
-      out.push(f.p[i][0], f.p[i][1], f.p[i][2], f.n[0], f.n[1], f.n[2]);
-    }
+    for (const i of order) out.push(f.p[i][0], f.p[i][1], f.p[i][2], f.n[0], f.n[1], f.n[2]);
   }
   return new Float32Array(out);
 }
@@ -109,9 +130,6 @@ function laneX(lane) {
   return lane < 0 ? 0 : (lane - 1) * 1.8;
 }
 
-// The camera looks down +Z. With that view, world +X is the left side of
-// the screen. The sim stores lane 0 (left) at negative X, so the render
-// negates lateral positions. Input still sends lane -1 for Left.
 export function worldX(simX) {
   return -simX;
 }
@@ -153,21 +171,27 @@ void main() { gl_Position = vec4(a, 0.0, 1.0); }`;
 
 const SKY_FS = `#version 300 es
 precision highp float;
-uniform vec3 uSky0; uniform vec3 uSky1; uniform vec3 uHill; uniform vec2 uRes;
+uniform vec3 uSky0; uniform vec3 uSky1; uniform vec3 uHill; uniform vec3 uHill2;
+uniform vec3 uSunCol; uniform vec2 uSun; uniform vec2 uRes;
 uniform float uTime; uniform float uCamZ;
 out vec4 o;
 void main() {
   vec2 uv = gl_FragCoord.xy / uRes;
-  vec3 c = mix(uSky0, uSky1, smoothstep(0.0, 0.85, uv.y));
-  float parallax = uCamZ * 0.015;
-  float h1 = 0.34 + 0.05 * sin(uv.x * 9.0 + parallax);
-  float h2 = 0.24 + 0.04 * sin(uv.x * 16.0 + 1.7 + parallax * 1.6);
-  if (uv.y < h1) c = mix(c, uHill, 0.55);
-  if (uv.y < h2) c = mix(c, uHill * 0.78, 0.85);
-  vec2 sun = uv - vec2(0.78, 0.74);
+  float horizon = smoothstep(0.0, 0.72, uv.y);
+  vec3 c = mix(uSky1, uSky0, horizon);
+  float haze = exp(-max(uv.y - 0.18, 0.0) * 3.2);
+  c = mix(c, uSky1, haze * 0.35);
+  float parallax = uCamZ * 0.012;
+  float h1 = 0.30 + 0.045 * sin(uv.x * 7.0 + parallax);
+  float h2 = 0.22 + 0.035 * sin(uv.x * 15.0 + 1.4 + parallax * 1.7);
+  if (uv.y < h1) c = mix(c, uHill, smoothstep(h1, h1 - 0.08, uv.y));
+  if (uv.y < h2) c = mix(c, uHill2, 0.9);
+  float cloud = sin(uv.x * 5.0 + parallax);
+  c = mix(c, vec3(1.0, 0.95, 0.88), smoothstep(0.2, 0.9, cloud) * smoothstep(0.4, 0.75, uv.y) * 0.22);
+  vec2 sun = uv - uSun;
   float sd = length(sun);
-  c += vec3(1.0, 0.95, 0.75) * smoothstep(0.28, 0.0, sd);
-  c += vec3(1.0, 0.85, 0.55) * smoothstep(0.08, 0.0, sd);
+  c += uSunCol * smoothstep(0.14, 0.0, sd) * 0.5;
+  c += vec3(1.0, 0.97, 0.9) * smoothstep(0.035, 0.0, sd);
   o = vec4(c, 1.0);
 }`;
 
@@ -187,6 +211,8 @@ out vec3 vL;
 flat out vec3 vCenter;
 flat out vec3 vHalf;
 flat out float vShape;
+flat out float vRough;
+flat out float vEmit;
 void main() {
   vec3 world = aPos * iSize.xyz + iPos.xyz;
   vL = aPos;
@@ -196,6 +222,8 @@ void main() {
   vCenter = iPos.xyz;
   vHalf = iSize.xyz * 0.5;
   vShape = iPos.w;
+  vRough = iSize.w;
+  vEmit = iColor.a;
   gl_Position = uProj * uView * vec4(world, 1.0);
 }`;
 
@@ -203,7 +231,8 @@ const MESH_FS = `#version 300 es
 precision highp float;
 in vec3 vN; in vec3 vW; in vec3 vC; in vec3 vL;
 flat in vec3 vCenter; flat in vec3 vHalf; flat in float vShape;
-uniform vec3 uEye; uniform vec3 uFog; uniform vec3 uLight;
+flat in float vRough; flat in float vEmit;
+uniform vec3 uEye; uniform vec3 uFog; uniform vec3 uLight; uniform float uTime;
 out vec4 o;
 void main() {
   vec3 n = normalize(vN);
@@ -217,25 +246,34 @@ void main() {
     vec3 hit = uEye + rd * (-b - sqrt(h));
     n = normalize(hit - vCenter);
   } else if (vShape > 1.5 && vShape < 2.5) {
-    if (abs(vL.x) + abs(vL.y) + abs(vL.z) > 0.78) discard;
+    if (abs(vL.x) + abs(vL.y) + abs(vL.z) > 0.82) discard;
     n = normalize(vec3(sign(vL.x), sign(vL.y), sign(vL.z)));
   } else {
     float edge = min(min(0.5 - abs(vL.x), 0.5 - abs(vL.y)), 0.5 - abs(vL.z));
-    n = normalize(vN + vL * smoothstep(0.12, 0.0, edge));
+    n = normalize(vN + vL * smoothstep(0.16, 0.0, edge) * 0.85);
   }
   vec3 viewDir = normalize(uEye - vW);
   float ndl = max(dot(n, uLight), 0.0);
   float hemi = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);
-  vec3 col = vC * (0.24 + 0.36 * hemi + 0.62 * ndl);
-  float rim = pow(1.0 - max(dot(n, viewDir), 0.0), 2.4);
-  col += vec3(1.0, 0.95, 0.85) * rim * 0.28;
-  float spec = pow(max(dot(n, normalize(uLight + viewDir)), 0.0), vShape > 1.5 && vShape < 2.5 ? 48.0 : 28.0);
-  col += vec3(1.0, 0.96, 0.86) * spec * (vShape > 1.5 && vShape < 2.5 ? 0.85 : 0.22);
+  float wrap = clamp(dot(n, uLight) * 0.5 + 0.5, 0.0, 1.0);
+  vec3 col = vC * (0.22 + 0.28 * hemi + 0.55 * ndl + 0.12 * wrap);
+  float rim = pow(1.0 - max(dot(n, viewDir), 0.0), 2.2);
+  col += vec3(1.0, 0.93, 0.82) * rim * (0.18 + vEmit * 0.25);
+  float specPow = mix(56.0, 10.0, clamp(vRough, 0.0, 1.0));
+  float spec = pow(max(dot(n, normalize(uLight + viewDir)), 0.0), specPow);
+  col += vec3(1.0, 0.96, 0.88) * spec * mix(0.55, 0.08, clamp(vRough, 0.0, 1.0));
   if (vShape < 0.5) {
     float edge = min(min(0.5 - abs(vL.x), 0.5 - abs(vL.y)), 0.5 - abs(vL.z));
-    col *= 0.78 + 0.22 * smoothstep(0.0, 0.14, edge);
+    col *= 0.76 + 0.24 * smoothstep(0.0, 0.16, edge);
+    if (vHalf.y < 0.12) col *= 1.0 - 0.22 * smoothstep(0.32, 0.48, abs(vL.x));
   }
-  float fog = smoothstep(14.0, 52.0, length(vW - uEye));
+  float under = smoothstep(-0.15, -0.48, vL.y);
+  col *= 1.0 - 0.32 * under * (1.0 - vEmit);
+  float pulse = 0.85 + 0.15 * sin(uTime * 3.0 + vCenter.z);
+  col += vC * vEmit * pulse;
+  float dist = length(vW - uEye);
+  float fog = 1.0 - exp(-dist * 0.028);
+  fog = clamp(fog + smoothstep(28.0, 58.0, dist) * 0.35, 0.0, 1.0);
   o = vec4(mix(col, uFog, fog), 1.0);
 }`;
 
@@ -281,6 +319,9 @@ export function createRenderer(canvas) {
     sky0: gl.getUniformLocation(sky, "uSky0"),
     sky1: gl.getUniformLocation(sky, "uSky1"),
     hill: gl.getUniformLocation(sky, "uHill"),
+    hill2: gl.getUniformLocation(sky, "uHill2"),
+    sunCol: gl.getUniformLocation(sky, "uSunCol"),
+    sun: gl.getUniformLocation(sky, "uSun"),
     res: gl.getUniformLocation(sky, "uRes"),
     time: gl.getUniformLocation(sky, "uTime"),
     camZ: gl.getUniformLocation(sky, "uCamZ"),
@@ -289,13 +330,23 @@ export function createRenderer(canvas) {
     eye: gl.getUniformLocation(mesh, "uEye"),
     fog: gl.getUniformLocation(mesh, "uFog"),
     light: gl.getUniformLocation(mesh, "uLight"),
+    mtime: gl.getUniformLocation(mesh, "uTime"),
   };
   let w = 1;
   let h = 1;
   let camX = 0;
+  let camY = 2.15;
   let camZ = 0;
-  let camFov = 0.95;
-  const sparks = new Float32Array(28 * 5);
+  let camFov = 0.92;
+  let prevY = 0;
+  let prevLx = 0;
+  let lean = 0;
+  let land = 0;
+  let pulse = 0;
+  let prevSpeed = 5;
+  let prevG = 32;
+  let reject = 0;
+  const sparks = new Float32Array(36 * 8);
 
   function resize() {
     const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -309,12 +360,12 @@ export function createRenderer(canvas) {
   }
 
   let n = 0;
-  function push(x, y, z, sx, sy, sz, shape, rgb) {
+  function push(x, y, z, sx, sy, sz, shape, rgb, rough = 0.62, emit = 0) {
     if (n >= MAX) return;
     const o = n * STRIDE;
     data[o] = x; data[o + 1] = y; data[o + 2] = z; data[o + 3] = shape;
-    data[o + 4] = sx; data[o + 5] = sy; data[o + 6] = sz; data[o + 7] = 0;
-    data[o + 8] = rgb[0]; data[o + 9] = rgb[1]; data[o + 10] = rgb[2]; data[o + 11] = 1;
+    data[o + 4] = sx; data[o + 5] = sy; data[o + 6] = sz; data[o + 7] = rough;
+    data[o + 8] = rgb[0]; data[o + 9] = rgb[1]; data[o + 10] = rgb[2]; data[o + 11] = emit;
     n++;
   }
 
@@ -329,18 +380,32 @@ export function createRenderer(canvas) {
     return false;
   }
 
-  function burst(x, y, z, rgb) {
-    for (let i = 0; i < 28; i++) {
-      if (sparks[i * 5 + 4] > 0) continue;
-      const a = (i / 28) * Math.PI * 2;
-      sparks[i * 5] = x;
-      sparks[i * 5 + 1] = y;
-      sparks[i * 5 + 2] = z;
-      sparks[i * 5 + 3] = a;
-      sparks[i * 5 + 4] = 0.45;
-      break;
+  function burst(x, y, z, rgb, count, lift) {
+    let left = count;
+    for (let i = 0; i < 36 && left > 0; i++) {
+      const o = i * 8;
+      if (sparks[o + 6] > 0) continue;
+      const a = (i / 36) * Math.PI * 2;
+      sparks[o] = x;
+      sparks[o + 1] = y;
+      sparks[o + 2] = z;
+      sparks[o + 3] = Math.cos(a);
+      sparks[o + 4] = Math.sin(a);
+      sparks[o + 5] = lift;
+      sparks[o + 6] = 0.55;
+      sparks[o + 7] = i;
+      left--;
     }
     void rgb;
+  }
+
+  function sproutOf(q, pz) {
+    if (!q.born) return 1;
+    const dist = q[1] - pz;
+    if (dist <= 9) return 1;
+    if (dist >= 24) return 0.18;
+    const t = (24 - dist) / 15;
+    return 0.18 + 0.82 * (t * t * (3 - 2 * t));
   }
 
   function frame(st) {
@@ -348,23 +413,46 @@ export function createRenderer(canvas) {
     const px = st.lx || 0;
     const py = st.y || 0;
     const pz = st.x || 0;
+    const speed = st.speed || 5;
+    const grav = st.g || 32;
+    const alive = st.alive !== false;
     const rx = worldX(px);
-    const follow = st.reduced ? 1 : 0.14;
+    const reduced = !!st.reduced;
+    if (Math.abs(speed - prevSpeed) > 0.05 || Math.abs(grav - prevG) > 0.05) pulse = 1;
+    prevSpeed = speed;
+    prevG = grav;
+    if (py <= 0.02 && prevY > 0.18) land = 1;
+    prevY = py;
+    const lxDelta = px - prevLx;
+    prevLx = px;
+    lean += ((reduced ? 0 : -lxDelta * 6) - lean) * (reduced ? 1 : 0.2);
+    land = Math.max(0, land - (reduced ? 1 : 0.08));
+    pulse = Math.max(0, pulse - (reduced ? 1 : 0.015));
+    if (st.reject) reject = 1;
+    reject = Math.max(0, reject - 0.01);
+    const follow = reduced ? 1 : 0.12;
     camX += (rx - camX) * follow;
-    camZ += (pz - camZ) * (st.reduced ? 1 : 0.2);
-    const wantFov = py > 0.35 ? 1.05 : 0.92;
-    camFov += (wantFov - camFov) * (st.reduced ? 1 : 0.08);
-    const bob = st.reduced ? 0 : Math.sin(st.time * 8) * 0.025;
-    const eye = [camX * 0.55, 2.2 + bob, camZ - 4.6];
-    const at = [camX * 0.15, 1.0 + py * 0.15, camZ + 8.0];
-    perspective(proj, camFov, w / h, 0.08, 90);
+    camZ += (pz - camZ) * (reduced ? 1 : 0.18);
+    const floaty = Math.max(0, (32 - grav) * 0.03);
+    const wantY = 2.25 + floaty + (py > 0.4 ? 0.18 : 0) - land * 0.16;
+    camY += (wantY - camY) * (reduced ? 1 : 0.08);
+    const wantFov = (py > 0.35 ? 1.04 : 0.9) + Math.min(0.1, Math.max(0, speed - 5) * 0.025) + pulse * 0.04;
+    camFov += (wantFov - camFov) * (reduced ? 1 : 0.08);
+    const bob = reduced || !alive ? 0 : Math.sin(st.time * (8 + speed * 0.25)) * 0.02;
+    const eye = [camX * 0.62 + lean * 0.15, camY + bob, camZ - 4.7];
+    const at = [camX * 0.22, 0.95 + py * 0.18 + floaty * 0.4, camZ + 7.4];
+    perspective(proj, camFov, w / h, 0.08, 96);
     lookAt(view, eye, at, [0, 1, 0]);
+
     gl.disable(gl.DEPTH_TEST);
     gl.depthMask(false);
     gl.useProgram(sky);
     gl.uniform3fv(u.sky0, pal.sky0);
     gl.uniform3fv(u.sky1, pal.sky1);
-    gl.uniform3fv(u.hill, pal.hill || pal.fog);
+    gl.uniform3fv(u.hill, pal.hill);
+    gl.uniform3fv(u.hill2, pal.hill2);
+    gl.uniform3fv(u.sunCol, pal.sun);
+    gl.uniform2f(u.sun, pal.sunUv[0], pal.sunUv[1]);
     gl.uniform1f(u.time, st.time || 0);
     gl.uniform1f(u.camZ, camZ);
     gl.uniform2f(u.res, w, h);
@@ -380,26 +468,39 @@ export function createRenderer(canvas) {
     n = 0;
     const pieces = st.pieces;
     const z0 = pz - 8;
-    const z1 = pz + 46;
+    const z1 = pz + 42;
     const wx = worldX;
     for (let z = Math.floor(z0 / 2) * 2; z < z1; z += 2) {
+      const cz = z + 1;
+      const dist = cz - pz;
       for (let lane = 0; lane < 3; lane++) {
         const cx = wx(laneX(lane));
-        const cz = z + 1;
-        if (gapAt(pieces, cz, lane)) push(cx, -0.85, cz, 1.65, 0.55, 1.92, 0, pal.pit);
-        else push(cx, -0.06, cz, 1.65, 0.14, 1.92, 0, lane === 1 ? pal.ground : mixTone(pal.ground, 0.92));
-      }
-      push(wx(-3.6), -0.18, z + 1, 2.4, 0.28, 1.92, 0, pal.edge);
-      push(wx(3.6), -0.18, z + 1, 2.4, 0.28, 1.92, 0, pal.edge);
-      if (((z / 2) | 0) % 4 === 0) {
-        const sway = st.reduced ? 0 : Math.sin(st.time * 1.4 + z) * 0.08;
-        for (const side of [-1, 1]) {
-          const tx = wx(side * 6.2);
-          push(tx, 0.4, z + 1, 0.22, 0.8, 0.22, 0, [0.45, 0.32, 0.22]);
-          push(tx + sway, 1.15, z + 1, 0.9, 0.8, 0.9, 1, side < 0 ? [0.35, 0.72, 0.42] : [0.42, 0.78, 0.48]);
+        if (gapAt(pieces, cz, lane)) {
+          push(cx, -0.06, cz, 1.72, 0.1, 2.02, 0, pal.water, 0.12, 0.1);
+        } else {
+          const top = lane === 1 ? pal.path : lane === 0 ? pal.grassL : pal.grassR;
+          push(cx, 0.02, cz, 1.74, 0.12, 2.02, 0, top, lane === 1 ? 0.55 : 0.8, 0);
         }
       }
+      if (dist < 36 && ((z / 2) | 0) % 2 === 0) {
+        push(wx(-3.35), 0.1, cz, 0.72, 0.22, 4.06, 0, pal.hedge, 0.8, 0);
+        push(wx(3.35), 0.1, cz, 0.72, 0.22, 4.06, 0, pal.hedge, 0.8, 0);
+      }
+      if (dist < 30 && ((z / 2) | 0) % 6 === 0) {
+        const sway = reduced ? 0 : Math.sin(st.time * 1.2 + z * 0.2) * 0.05;
+        for (const side of [-1, 1]) {
+          const tx = wx(side * 5.4);
+          push(tx, 0.42, cz, 0.16, 0.84, 0.16, 0, pal.trunk, 0.8, 0);
+          const nearTree = dist < 16;
+          push(tx + sway, 1.2, cz, 1.05, 0.95, 1.05, nearTree ? 1 : 0, side < 0 ? pal.leaf : pal.leaf2, 0.72, 0.02);
+        }
+      }
+      if (dist < 24 && ((z / 2) | 0) % 4 === 2) {
+        const bloom = ((z / 2) | 0) % 8 === 2 ? pal.flower : pal.flower2;
+        push(wx(((z / 2) | 0) % 8 === 2 ? -2.55 : 2.55), 0.2, cz, 0.2, 0.2, 0.2, 1, bloom, 0.35, 0.3);
+      }
     }
+
     for (let i = 0; i < pieces.length; i++) {
       const q = pieces[i];
       const k = q[0];
@@ -407,68 +508,110 @@ export function createRenderer(canvas) {
       const zc = q[1] + q[2] * 0.5;
       if (zc < z0 || zc > z1) continue;
       const lane = q.length > 5 ? q[5] : -1;
+      const sc = sproutOf(q, pz);
       const depth = Math.max(0.45, q[2]);
+      const glow = q.born ? 0.16 : 0;
       if (k === 3) {
-        const h = q[3];
+        const hh = q[3] * sc;
         const wide = lane < 0;
         const cx = wx(laneX(lane));
-        const span = wide ? 5.2 : 1.35;
-        push(cx, h * 0.5, zc, wide ? span : 1.25, h, depth, 0, pal.hurdle);
+        const span = (wide ? 5.15 : 1.28) * (wide ? 1 : sc);
+        push(cx, hh * 0.42, zc, wide ? span : 1.22 * sc, hh, depth * sc, 0, pal.hurdle, 0.48, glow);
+        push(cx, hh * 0.92, zc, (wide ? span * 0.98 : 1.28 * sc), Math.max(0.12, hh * 0.22), depth * 0.9 * sc, 0, pal.hurdleTop, 0.4, 0.08 + glow);
       } else if (k === 4) {
         const bottom = q[4];
         const bar = q[3];
-        push(0, bottom + bar * 0.5, zc, 5.3, bar, Math.max(0.28, depth * 0.4), 0, pal.gate);
-        push(wx(-2.45), bottom * 0.5, zc, 0.28, bottom, 0.28, 0, pal.gate);
-        push(wx(2.45), bottom * 0.5, zc, 0.28, bottom, 0.28, 0, pal.gate);
+        push(0, (bottom + bar * 0.5) * sc + (1 - sc) * 0.2, zc, 5.2 * sc, bar * sc, Math.max(0.22, depth * 0.35), 0, pal.gate, 0.32, 0.45 + glow);
+        push(wx(-2.35), bottom * 0.5 * sc, zc, 0.28, bottom * sc, 0.28, 0, pal.gate, 0.4, 0.12);
+        push(wx(2.35), bottom * 0.5 * sc, zc, 0.28, bottom * sc, 0.28, 0, pal.gate, 0.4, 0.12);
       } else if (k === 5) {
-        const bobc = st.reduced ? 0 : Math.sin(st.time * 3 + q[1]) * 0.08;
-        push(wx(laneX(lane)), q[4] + bobc, zc, 0.4, 0.4, 0.4, 2, pal.coin);
+        const bobc = reduced ? 0 : Math.sin(st.time * 3.2 + q[1]) * 0.08;
+        const s = 0.34 * sc;
+        push(wx(laneX(lane)), (q[4] + bobc) * sc, zc, s, s, s, 2, pal.coin, 0.12, 0.95);
       } else if (k === 6) {
-        push(wx(laneX(lane)), 0.1, zc, Math.max(0.7, q[2]), 0.16, 0.7, 0, pal.spring);
-        push(wx(laneX(lane)), 0.32, zc, 0.36, 0.28, 0.36, 1, pal.spring);
+        push(wx(laneX(lane)), 0.06, zc, Math.max(0.7, q[2]) * sc, 0.1, 0.72 * sc, 0, pal.spring, 0.35, 0.2);
+        push(wx(laneX(lane)), 0.28 * sc, zc, 0.32 * sc, 0.32 * sc, 0.32 * sc, 1, pal.spring, 0.3, 0.55);
       } else if (k === 7) {
-        push(wx(laneX(lane < 0 ? 1 : lane)), q[3] * 0.5, zc, 1.2, q[3], depth, 0, pal.block);
+        const cx = wx(laneX(lane < 0 ? 1 : lane));
+        const pot = 1.05 * sc;
+        push(cx, 0.28 * sc, zc, pot, 0.5 * sc, pot, 0, pal.pot, 0.42, glow);
+        push(cx, 0.62 * sc, zc, pot * 1.05, 0.16 * sc, pot * 1.05, 0, pal.potRim, 0.35, 0.05);
+        push(cx, 0.95 * sc, zc, 0.55 * sc, 0.42 * sc, 0.55 * sc, 1, pal.leaf, 0.55, 0.08);
       }
     }
-    if (st.event === "coin" || st.event === "spring" || st.event === "lane") burst(rx, py + 0.8, pz);
+
+    if (st.event === "coin") burst(rx, py + 0.9, pz, pal.coin, 8, 0.05);
+    if (st.event === "spring") burst(rx, py + 0.4, pz, pal.spring, 8, 0.08);
+    if (st.near) burst(rx, py + 0.7, pz + 0.4, pal.sun, 6, 0.02);
+    if (land > 0.85) burst(rx, 0.15, pz, pal.path, 4, 0.01);
+    if (st.reject) burst(rx, 1.6, pz + 2, pal.flower, 10, 0.06);
+
     const air = py > 0.08;
     const sliding = st.slide > 0;
-    const swing = st.reduced || air || sliding ? 0 : Math.sin(st.time * 11);
-    const squash = air ? 1.12 : 1;
-    const bodyH = (sliding ? 0.48 : 0.86) * squash;
-    const bodyY = py + (sliding ? 0.32 : 0.55 * squash);
-    push(rx, 0.035, pz, 0.9, 0.04, 0.7, 0, [0.1, 0.12, 0.16]);
-    if (!sliding) {
-      push(wx(px - 0.16), 0.22, pz + swing * 0.22, 0.16, 0.4, 0.18, 0, [0.85, 0.3, 0.48]);
-      push(wx(px + 0.16), 0.22, pz - swing * 0.22, 0.16, 0.4, 0.18, 0, [0.85, 0.3, 0.48]);
-    }
-    push(rx, bodyY, pz, sliding ? 0.85 : 0.62, bodyH, sliding ? 0.7 : 0.48, 0, pal.player);
-    if (!sliding) {
-      const hy = py + 1.15 * squash;
-      push(rx, hy, pz + 0.06, 0.42, 0.38, 0.4, 1, [1, 0.9, 0.78]);
-      push(wx(px - 0.1), hy + 0.02, pz + 0.22, 0.09, 0.09, 0.06, 0, [0.16, 0.12, 0.22]);
-      push(wx(px + 0.1), hy + 0.02, pz + 0.22, 0.09, 0.09, 0.06, 0, [0.16, 0.12, 0.22]);
-      const flame = st.reduced ? 0 : Math.sin(st.time * 14) * 0.05;
-      push(rx, hy + 0.36 + flame, pz, 0.18, 0.32, 0.18, 1, [1, 0.72, 0.22]);
+    const freq = reduced || !alive ? 0 : (9.2 + speed * 0.35);
+    const swing = Math.sin((st.time || 0) * freq);
+    const stride = Math.cos((st.time || 0) * freq);
+    const squash = !alive ? 1 : air ? 1.14 : 1 - land * 0.16;
+    const widen = !alive ? 1 : air ? 0.9 : 1 + land * 0.12;
+    const leanX = reduced ? 0 : lean * 0.35;
+    if (alive) {
+      push(rx, 0.02, pz, sliding ? 0.95 : 0.62, 0.025, sliding ? 0.9 : 0.5, 0, [0.18, 0.12, 0.08], 1, 0);
+      if (!sliding) {
+        const leg = air ? -0.12 : swing * 0.32;
+        push(wx(px - 0.16) + leanX, py + 0.22, pz + leg, 0.14, 0.4, 0.15, 0, pal.bodyDeep, 0.45, 0.02);
+        push(wx(px + 0.16) + leanX, py + 0.22, pz - leg, 0.14, 0.4, 0.15, 0, pal.bodyDeep, 0.45, 0.02);
+      }
+      const torsoY = py + (sliding ? 0.3 : 0.5 * squash);
+      const torso = sliding ? 0.52 : 0.46 * widen;
+      push(rx + leanX, torsoY, pz, torso, sliding ? 0.3 : 0.42 * squash, sliding ? 0.62 : 0.4, 0, pal.body, 0.35, 0.14);
+      push(rx + (reduced ? 0 : stride * 0.04), torsoY - 0.02, pz - 0.28, 0.1, 0.08, 0.22, 0, pal.cape, 0.2, 0.9);
+      const hy = torsoY + (sliding ? 0.16 : 0.34 * squash);
+      const hz = pz + (sliding ? 0.16 : 0);
+      push(rx + leanX * 0.2, hy, hz, sliding ? 0.32 : 0.44, sliding ? 0.26 : 0.4, sliding ? 0.3 : 0.4, 1, pal.head, 0.2, 0.28);
+      if (!sliding) {
+        const flame = reduced ? 0 : Math.sin(st.time * 11) * 0.035;
+        push(rx + leanX * 0.15, hy + 0.32 + flame + pulse * 0.05, hz - 0.02, 0.13, 0.3, 0.13, 1, pal.cape, 0.12, 1);
+      }
+      const trailN = reduced ? 0 : Math.min(6, 3 + Math.floor(Math.max(0, speed - 5)));
+      for (let t = 1; t <= trailN; t++) {
+        const fade = 1 - t / (trailN + 1);
+        const s = 0.12 * fade;
+        push(rx - lean * 0.1 * t, 0.35 + fade * 0.15, pz - 0.45 - t * (0.28 + speed * 0.02), s, s, s, 2, pal.cape, 0.15, 0.35 + fade * 0.5);
+      }
     } else {
-      push(rx, py + 0.48, pz + 0.22, 0.36, 0.2, 0.28, 1, [1, 0.9, 0.78]);
+      const rest = 0.22 + (reduced ? 0 : Math.sin(st.time * 2) * 0.03);
+      push(rx, 0.04, pz, 0.7, 0.03, 0.55, 0, [0.15, 0.1, 0.08], 1, 0);
+      push(rx, rest, pz, 0.36, 0.36, 0.36, 1, pal.cape, 0.2, 0.9);
+      push(rx, rest + 0.28, pz, 0.14, 0.22, 0.14, 1, pal.sun, 0.15, 1);
     }
-    for (let i = 0; i < 28; i++) {
-      const life = sparks[i * 5 + 4];
+
+    for (let i = 0; i < 36; i++) {
+      const o = i * 8;
+      const life = sparks[o + 6];
       if (life <= 0) continue;
-      const a = sparks[i * 5 + 3];
-      sparks[i * 5] += Math.cos(a) * 0.04;
-      sparks[i * 5 + 1] += 0.03;
-      sparks[i * 5 + 2] += Math.sin(a) * 0.04;
-      sparks[i * 5 + 4] = life - 0.016;
-      push(sparks[i * 5], sparks[i * 5 + 1], sparks[i * 5 + 2], 0.1, 0.1, 0.1, 1, pal.coin);
+      sparks[o] += sparks[o + 3] * 0.045;
+      sparks[o + 1] += sparks[o + 5] + 0.012;
+      sparks[o + 2] += sparks[o + 4] * 0.045;
+      sparks[o + 5] *= 0.96;
+      sparks[o + 6] = life - 0.014;
+      const s = 0.08 + life * 0.08;
+      const tint = (sparks[o + 7] % 2) ? pal.coin : pal.flower;
+      push(sparks[o], sparks[o + 1], sparks[o + 2], s, s, s, 1, tint, 0.2, 0.7);
     }
+    if (reject > 0.2 && !reduced && (n < MAX - 4)) {
+      const petal = Math.sin(st.time * 3) * 0.4;
+      push(rx + petal, 1.8 + reject, pz + 1.5, 0.12, 0.08, 0.12, 1, pal.flower, 0.3, 0.4);
+      push(rx - petal, 2.1 + reject * 0.5, pz + 2.2, 0.1, 0.07, 0.1, 1, pal.flower2, 0.3, 0.35);
+    }
+
     gl.useProgram(mesh);
     gl.uniformMatrix4fv(u.proj, false, proj);
     gl.uniformMatrix4fv(u.view, false, view);
     gl.uniform3f(u.eye, eye[0], eye[1], eye[2]);
     gl.uniform3fv(u.fog, pal.fog);
-    gl.uniform3f(u.light, 0.32, 0.86, 0.28);
+    const lift = floaty + pulse * 0.15;
+    gl.uniform3f(u.light, 0.42 + pulse * 0.1, 0.78 + lift, 0.24 + (1 - Math.min(1, (st.hue || 0) / 5)) * 0.15);
+    gl.uniform1f(u.mtime, st.time || 0);
     gl.bindVertexArray(vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, inst);
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, data.subarray(0, n * STRIDE));

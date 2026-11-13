@@ -1,8 +1,8 @@
 # Lumen Run
 
-A 3D parkour runner for children. The game core is [Aura](https://github.com/cybrid-systems/aura) **v0.2.0** (`cf7353373ea276bc03e8364592814382ebd62539`). The browser is a WebGL2 view: a third-person camera sits behind the runner, and the course is three lanes of real boxes, gates, crates and gems.
+A 3D parkour runner for children. The game core is [Aura](https://github.com/cybrid-systems/aura) **v0.2.2** (`35d262bb62426774f0b5d4c181106275512d8ffd`). The browser is a WebGL2 view: a third-person camera sits behind a small light-keeper, and the course is three lanes through a golden-hour garden.
 
-The opening shows four hints: up jumps, down slides, left and right change lane. Left, A, a left swipe and a left stick all move the runner toward the left of the screen. The same edges work on a gamepad (A jump, B or down slide, d-pad lanes). The first stretch is a straight garden path, and a death is one tap to run the same seed again.
+The opening shows one hint card: up jumps, down slides, left and right change lane. Left, A, a left swipe and a left stick all move the runner toward the left of the screen. The same edges work on a gamepad (A jump, B or down slide, d-pad lanes). The first stretch is a straight garden path, and a death is one tap to run the same seed again. The hint card goes away after the first input.
 
 ## Play
 
@@ -10,11 +10,11 @@ The opening shows four hints: up jumps, down slides, left and right change lane.
 ./run.sh
 ```
 
-That downloads the official Aura v0.2.0 release if you do not already have it (it does not build LLVM), starts the core, and serves the page at <http://127.0.0.1:8080>.
+That downloads the official Aura v0.2.2 release if you do not already have it (it does not build LLVM), starts the core, and serves the page at <http://127.0.0.1:8080>. Checksums are printed on stderr. The only line on stdout is the executable path, from the installer; `./run.sh` itself prints the URL on stderr.
 
-The world code on screen (`LUMEN-42`) is the seed. Open `http://127.0.0.1:8080/?seed=42` to share the same course. Add `?stats=1` for frame-time numbers, `?bench=1` to drop a JSON summary into the page after 180 frames.
+The world code on the badge (`LUMEN-42`) is the seed. Open `http://127.0.0.1:8080/?seed=42` to share the same course. Tap the badge for the last few garden notes. Add `?stats=1` for frame-time numbers, `?bench=1` to drop a JSON summary into the page after 180 frames.
 
-An OpenAI-compatible model is optional. Without a key the offline generator in Aura builds every chunk.
+An OpenAI-compatible model is optional. Without a key the offline generator in Aura builds every chunk, and the garden still tries one new phrase on its own.
 
 ```bash
 export LLM_API_KEY=...
@@ -23,26 +23,30 @@ export LLM_MODEL=gpt-4o-mini                     # optional
 ./run.sh
 ```
 
-The model is asked for one s-expression. Aura checks it before it can appear. A rejected phrase is rolled back and the seeded course continues.
+The model is asked for one s-expression. Aura checks it before it can appear. A rejected phrase is rolled back and the seeded course continues. The call runs on a fiber, so the run does not wait for it.
 
-## DESIGN
+## What you feel
 
 The browser predicts the runner from the latest rule snapshot, so a slow server tick never changes how a jump feels. Aura remains the authority for the course, the score and a death.
 
 | What you see | Aura feature | Where |
 | --- | --- | --- |
-| Gravity, jump, slide time and speed can change while a run is going | `mutate:rebind` on the live defines in `core/hot.aura`, installed with `set-code` | `lib/live.aura`, `core/main.aura` |
-| A new obstacle phrase is tried without touching the run, then kept or thrown away | `evo:trial` (child workspace) and `evo:commit!` | `consider-form!` in `core/main.aura`, `check-source` in `lib/gen.aura` |
-| The check is executable: jump reach, gate height, a lane left open beside a crate, and an autopilot that has to finish the chunk | pure step in `lib/phys.aura` inside the trial | `constraint-hash`, `autopilot-clear?` |
-| Later chunks get a little harder when you are clearing them, and easier when you are not | `std/evo` UCB policy (`evo:policy`, `evo:policy-select`, `evo:policy-report`) plus `evo:record!` | `core/main.aura` |
-| The same seed is the same course | `std/random` seeded from the share code | `pattern-chunk` |
-| The model call does not pause the run | `fiber:spawn` and channels; the seeded generator fills the track immediately | `start-llm!`, `poll-llm!` |
-| Why a phrase was kept or rejected | the decision list, also written to `AURA_EVO_LOG` for `aura evo log` | `note!` |
+| The garden gets a little faster, lighter, and longer to slide as you clear chunks, and eases off if you do not. A short line names it ("A little faster", "A gentler pace"). The trail, the sun and the jump follow the new numbers on the next snapshot | `(mutate :rebind)` on the live defines in `core/hot.aura`, installed once with `set-code` | `lib/live.aura`, `apply-feel!` in `core/main.aura` |
+| A phrase that is too wide drifts away, then a fair one blooms into the course a moment later. The toast says which | `evo:trial` and `evo:commit!`. The autopilot is sliced across ticks so the check does not stall the run; geometry that already fails does not run it | `maybe-dream!`, `consider-form!`, `lib/gen.aura` |
+| The check is executable: jump reach, gate height, a lane left open beside a pot, and an autopilot that has to finish the chunk | pure step in `lib/phys.aura` | `constraint-hash`, `autopilot-slice` |
+| Later chunks open one notch at a time, and only after the current notch is being cleared. A fall does not unlock a crueller arm | `std/evo` UCB (`evo:policy`, `evo:policy-select`, `evo:policy-report`) plus `evo:record!` | `choose-band`, `open-next-arm!` |
+| The same seed is the same course. The badge is the share code | `std/random` seeded from the share code | `pattern-chunk` |
+| The model call does not pause the run. The seeded generator has already filled the track | `fiber:spawn` and channels | `start-llm!`, `poll-llm!` |
+| Why a phrase was kept or rejected | the decision list (tap the world badge) and `AURA_EVO_LOG` | `note!` |
 
-Two Aura v0.2.0 limits are worked around in this repo, and only here:
+On Aura v0.2.2 the four v0.2.0 workarounds were measured again and removed:
 
-- After `evo:trial`, `mutate:rebind` on the parent workspace returns `cow-refused` (read-only layer) even under `--preset dev`. Publishing a kept phrase uses `set-code` of the whole rule block, which still updates the live defines. Rebind works again on a fresh process, and the server tries it first.
-- Inside the trial, `vector-set!` and `hash-set!` are refused as mutate effects. The physics step returns new lists, so the fairness autopilot can actually run in the child workspace. `channel:try-recv` on an empty channel returns `""`, which is truthy, so the server only treats a hash as a model reply. `json-encode` of a vector is `null`, so pieces are lists.
+- After `evo:trial`, `(mutate :rebind)` on the parent returns `#t` and the define updates (`tests/trial_test.aura` prints `rebind-after 1`; a probe set gravity to 28.0). #5162 is fixed. A kept phrase is published with `(mutate :rebind)`, not `set-code`. `set-code` remains only if a rebind refuses.
+- Inside a trial, `vector-set!` and `hash-set!` succeed. #5163 is fixed. Physics still returns new lists so a step stays a pure value the browser twin can match; that is no longer required by the sandbox.
+- `channel:try-recv` on an empty channel is `#f`. #5161 is fixed. A model reply is still taken only when it is a hash.
+- `json-encode` of a vector is a JSON array (`[1,2.5]`, and `{"pieces":[[1,2]]}`). #5160 is fixed. Pieces stay lists because that is the physics value; lists encode as arrays too.
+
+No new Aura issue was filed.
 
 ## Layout
 
@@ -56,12 +60,13 @@ Two Aura v0.2.0 limits are worked around in this repo, and only here:
 ## Tests
 
 ```bash
-aura test                 # core, needs Aura v0.2.0
+aura test                 # core, needs Aura v0.2.2
 node scripts/check-sim.mjs
 node scripts/smoke.mjs    # seeded run, then a WebSocket hello
+node scripts/check-lanes.mjs
+bash scripts/check-install.sh
 ```
 
-GitHub Actions runs those three jobs. The Aura job uses `ghcr.io/cybrid-systems/aura:0.2.0`.
+GitHub Actions runs the Aura job on `ghcr.io/cybrid-systems/aura:0.2.2` and the smoke job from the official `aura-0.2.2-linux-<arch>.tar.gz`.
 
-On this VM (Linux x86_64, 4 cores, Chrome 156 headless, SwiftShader WebGL2, 1280×720) a warmed seeded run holds **60 fps**. Before the scenery pass, frame p50 was 16.7 ms and p95 was 16.8 ms. After it, p50 is still 16.7 ms and p95 is 33.4 ms: some frames miss one vsync under software GL. An Aura physics step is **174 µs** (3000 steps in 523 ms).
-
+On this VM (Linux x86_64, Chrome 157 headless, SwiftShader WebGL2, 1280×720 window) a warmed seeded run holds the same frame envelope as the previous scenery pass: **p50 16.7 ms, p95 33.4 ms**. Some frames still miss one vsync under software GL. The arm64 binary was checked for layout and not executed. A real GPU, a phone, a gamepad and a live model call were not tested.

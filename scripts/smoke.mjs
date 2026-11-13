@@ -99,6 +99,7 @@ try {
   const welcome = hello.find((m) => m.op === "welcome");
   const chunks = hello.filter((m) => m.op === "chunk");
   if (!welcome || welcome.replay !== "LUMEN-42") throw new Error("replay " + JSON.stringify(welcome));
+  if (welcome.via !== "rebind") throw new Error("rules were not rebound: " + welcome.via);
   if (chunks.length < 1) throw new Error("no chunks");
   const kinds = new Set();
   let lanes = 0;
@@ -127,7 +128,11 @@ try {
   if (!bad.some((m) => m.op === "decision" && m.kind === "ROLLBACK")) throw new Error("unfair form was kept");
   io.send({ op: "propose", form: "(seq (ground 6) (block 0 1) (hurdle 0.4 0.7) (ground 4) (gap 1.1) (ground 5))" });
   const fair = await readUntil(io, (m) => m.op === "state", 30);
-  if (!fair.some((m) => m.op === "decision" && m.kind === "KEEP")) throw new Error("fair 3D form rejected " + JSON.stringify(fair));
+  const kept = fair.find((m) => m.op === "decision" && m.kind === "KEEP");
+  if (!kept) throw new Error("fair 3D form rejected " + JSON.stringify(fair));
+  if (!kept.cue) throw new Error("keep had no cue " + JSON.stringify(kept));
+  const ruled = fair.find((m) => m.op === "rules");
+  if (!ruled || ruled.via !== "rebind") throw new Error("propose via " + JSON.stringify(ruled));
   io.send({ op: "bye" });
   sock.end();
 

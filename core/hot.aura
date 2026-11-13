@@ -1,6 +1,7 @@
-; Live rules. Installed with set-code + eval-current so mutate:rebind can
-; replace any of these while a run is in progress. The trailing 0 keeps
-; eval-current from warning about an uncalled procedure on stdout.
+; Live rules. Installed once with set-code + eval-current. After that,
+; (mutate :rebind) replaces any of these while a run is in progress.
+; The trailing 0 keeps eval-current from warning about an uncalled
+; procedure on stdout.
 (define (rule-gravity) 32.0)
 (define (rule-jump-v) 11.2)
 (define (rule-slide-s) 0.48)
