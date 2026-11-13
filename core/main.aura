@@ -10,7 +10,7 @@
 (require "lib/live")
 
 (define SYS
-  "You design one obstacle phrase for a children's 3D endless runner called Lumen Run. The runner has three lanes (0 left, 1 centre, 2 right), jumps, and slides. Reply with ONLY one s-expression and no markdown. Allowed pieces: (seq (ground W) (gap W) (hurdle H W) (gate BOTTOM W) (coin Y) (spring W) (block LANE DEPTH) (coin-lane LANE Y)). block sits in one lane and does not cover the whole road. Meters. gap W at most 2.0, hurdle H at most 0.9, gate BOTTOM between 0.58 and 0.85, LANE is 0, 1 or 2. Start and end with ground. Leave at least one lane open beside every block. No violence, fear, weapons, or scary words. Bright garden, friendly shapes.")
+  "You design one obstacle phrase for a children's 3D endless runner called Lumen Run. The runner has three lanes (0 left, 1 centre, 2 right), jumps, and slides. Reply with ONLY one s-expression and no markdown. Allowed pieces: (seq (ground W) (gap W) (hurdle H W) (gate BOTTOM W) (coin Y) (spring W) (block LANE DEPTH) (coin-lane LANE Y)). Every parameter is a number; never write the words BOTTOM, W, H, LANE, DEPTH or other placeholders. Ranges in meters: spring W 0.45-1.6, hurdle W 0.35-2.2 and H 0.15-0.9, gate W 0.35-2.0 and BOTTOM 0.58-0.85, coin Y 0.4-2.4, coin-lane LANE 0, 1 or 2 and Y 0.4-2.4, ground W 0.8-18, gap W 0.4-2.0, block LANE 0, 1 or 2 and DEPTH 0.5-2.2. Start and end with ground. Leave at least one lane open beside every block. No violence, fear, weapons, or scary words. Bright garden, friendly shapes. Example: (seq (ground 6) (block 0 1) (hurdle 0.4 0.7) (ground 4) (gap 1.1) (ground 5))")
 
 (define g-now 32.0)
 (define jump-now 11.2)
@@ -42,6 +42,10 @@
 (define cleared (list))
 (define llm-busy #f)
 (define asked-at -1)
+; 0 unknown, 1 the runtime accepts an extra hash, 2 two-argument llm:chat.
+(define llm-chat-mode 0)
+(define llm-extra (hash "reasoning_effort" "minimal" "max_tokens" 2048))
+(define llm-reply #f)
 (define pending (list))
 (define llm-on #f)
 (define req-ch #f)
@@ -270,14 +274,15 @@
   (publish-named! "rule-slide-s" slide-now)
   (publish-named! "rule-run-speed" speed-now)
   (publish-named! "rule-hue" hue-now)
-  (let ((how (publish-rule! "motif-form"
-                            (string-append "(lambda () \"" motif-now "\")")
-                            (full-src))))
+  (let ((how (publish-rule! "motif-form" (motif-body motif-now) (full-src))))
     (set! publish-via how)
     (set! rule-rev (+ rule-rev 1))
     (set! rules-dirty #t)))
 
 (define (reset-run!)
+  ; A death used to leave llm-busy set, so the next run never asked again.
+  (set! llm-busy #f)
+  (set! asked-at -1)
   (set! player (make-player 1.2))
   (set! world (list))
   (set! chunks (list))
@@ -478,16 +483,13 @@
                                    "target" "motif-form"
                                    "apply"
                                    (lambda (s c)
-                                     (let ((text (evo:candidate-genome c)))
-                                       (let ((body (string-append "(lambda () \""
-                                                                  (if (string? text) text "")
-                                                                  "\")")))
-                                         (let ((rb (mutate :rebind "motif-form" body "motif")))
-                                           (if (equal? rb #t)
-                                             (begin (eval-current) (set! publish-via "rebind") #t)
-                                             (if (set-code (full-src))
-                                               (begin (eval-current) (set! publish-via "set-code") #t)
-                                               #f))))))))))
+                                     (let ((body (motif-body (evo:candidate-genome c))))
+                                       (let ((rb (mutate :rebind "motif-form" body "motif")))
+                                         (if (equal? rb #t)
+                                           (begin (eval-current) (set! publish-via "rebind") #t)
+                                           (if (set-code (full-src))
+                                             (begin (eval-current) (set! publish-via "set-code") #t)
+                                             #f)))))))))
                (evo:tell! search (list cand) (list ev))
                (if (evo:commit! search cand)
                  (begin
@@ -552,16 +554,13 @@
                                   "target" "motif-form"
                                   "apply"
                                   (lambda (s c)
-                                    (let ((text (evo:candidate-genome c)))
-                                      (let ((body (string-append "(lambda () \""
-                                                                 (if (string? text) text "")
-                                                                 "\")")))
-                                        (let ((rb (mutate :rebind "motif-form" body "motif")))
-                                          (if (equal? rb #t)
-                                            (begin (eval-current) (set! publish-via "rebind") #t)
-                                            (if (set-code (full-src))
-                                              (begin (eval-current) (set! publish-via "set-code") #t)
-                                              #f))))))))))
+                                    (let ((body (motif-body (evo:candidate-genome c))))
+                                      (let ((rb (mutate :rebind "motif-form" body "motif")))
+                                        (if (equal? rb #t)
+                                          (begin (eval-current) (set! publish-via "rebind") #t)
+                                          (if (set-code (full-src))
+                                            (begin (eval-current) (set! publish-via "set-code") #t)
+                                            #f)))))))))
               (evo:tell! search (list cand) (list ev))
               (if (evo:commit! search cand)
                 (begin
@@ -787,12 +786,28 @@
       (begin
         (require "std/llm" all:)
         (set! llm-on #t)
+        (set! llm-chat-mode 0)
+        ; v0.2.2 llm:chat is (sys user). A newer runtime takes a third
+        ; hash (reasoning_effort, max_tokens). The extra call throws an
+        ; arity error before any HTTP request; catch it and keep the
+        ; two-argument call. A hash result means the extra argument was
+        ; accepted, including an API error hash.
+        (set! llm-reply
+          (lambda (user)
+            (cond
+              ((= llm-chat-mode 2) (llm:chat SYS user))
+              ((= llm-chat-mode 1) (llm:chat SYS user llm-extra))
+              (else
+               (let ((tried (try (llm:chat SYS user llm-extra) (catch (e) #f))))
+                 (if (hash? tried)
+                   (begin (set! llm-chat-mode 1) tried)
+                   (begin (set! llm-chat-mode 2) (llm:chat SYS user))))))))
         (set! req-ch (channel:create 1))
         (set! res-ch (channel:create 1))
         (fiber:spawn (lambda ()
                        (let loop ()
                          (let ((prompt (channel:recv req-ch)))
-                           (let ((ans (llm:chat SYS (if (string? prompt) prompt ""))))
+                           (let ((ans (llm-reply (if (string? prompt) prompt ""))))
                              (channel:send res-ch
                                            (if (hash? ans)
                                              ans
