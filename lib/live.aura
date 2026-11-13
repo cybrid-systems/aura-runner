@@ -21,6 +21,15 @@
     "(define (motif-form) \"" motif "\")\n"
     "0"))
 
+; hot.aura writes (define (motif-form) "…"). The live workspace stores
+; that as (define motif-form (lambda () "…")), so rebind uses the lambda.
+; A bare string is refused (rebind-non-procedure). On Aura v0.2.2 this
+; lambda returns #t, including a second rebind whose string holds a
+; different phrase. Callers still fall back to set-code when rebind
+; does not return #t (persist-reject restores the previous topology).
+(define (motif-body text)
+  (string-append "(lambda () \"" (if (string? text) text "") "\")"))
+
 ; Returns "rebind" or "set-code".
 (define (publish-rule! name body full-src)
   (let ((rb (mutate :rebind name body "tune")))
