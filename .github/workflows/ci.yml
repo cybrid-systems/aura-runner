@@ -33,10 +33,15 @@ jobs:
           node --check scripts/check-sim.mjs
           node --check scripts/check-lanes.mjs
           node --check scripts/mock-llm-e2e.mjs
+          node --check scripts/check-contrast.mjs
+          node --check scripts/check-setcode.mjs
+          node --check scripts/check-play.mjs
       - name: Physics parity with the Aura golden
         run: node scripts/check-sim.mjs
       - name: Left moves toward screen-left
         run: node scripts/check-lanes.mjs
+      - name: Pink garden keeps obstacle contrast
+        run: node scripts/check-contrast.mjs
 
   smoke:
     runs-on: ubuntu-latest
@@ -59,3 +64,7 @@ jobs:
         run: node scripts/smoke.mjs
       - name: Mock LLM rebind
         run: node scripts/mock-llm-e2e.mjs
+      - name: Rebind refusal falls back to set-code
+        run: node scripts/check-setcode.mjs
+      - name: Ten minute run with a hung model call
+        run: node scripts/check-play.mjs

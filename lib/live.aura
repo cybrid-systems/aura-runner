@@ -37,14 +37,27 @@
 (define (scene-body text)
   (string-append "(lambda () \"" (if (string? text) text "") "\")"))
 
-; Returns "rebind" or "set-code".
+(define (env-on? name)
+  (let ((v (try (getenv name) (catch (e) ""))))
+    (and (string? v) (> (string-length v) 0) (not (string=? v "0")))))
+
+; Returns "rebind", "set-code", or "fail".
+; persist-reject (cybrid-systems/aura #5275) aborts mutate:rebind and
+; restores the previous topology. That shows up as a non-#t result or a
+; thrown error. Either way the phrase is installed with set-code, which
+; is what actually keeps it. LUMEN_SKIP_REBIND / LUMEN_SKIP_SETCODE are
+; test switches for those two steps.
 (define (publish-rule! name body full-src)
-  (let ((rb (mutate :rebind name body "tune")))
+  (let ((rb (if (env-on? "LUMEN_SKIP_REBIND")
+              #f
+              (try (mutate :rebind name body "tune") (catch (e) #f)))))
     (if (equal? rb #t)
       (begin (eval-current) "rebind")
-      (if (set-code full-src)
-        (begin (eval-current) "set-code")
-        "fail"))))
+      (if (env-on? "LUMEN_SKIP_SETCODE")
+        "fail"
+        (if (try (set-code full-src) (catch (e) #f))
+          (begin (eval-current) "set-code")
+          "fail")))))
 
 (define (extract-balanced s mark)
   (if (not (string? s))

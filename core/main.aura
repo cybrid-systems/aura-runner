@@ -11,10 +11,10 @@
 (require "lib/scene")
 
 (define SYS
-  "You design one obstacle phrase for a children's 3D endless runner called Lumen Run. The runner has three lanes (0 left, 1 centre, 2 right), jumps, and slides. Reply with ONLY one s-expression and no markdown. Allowed pieces: (seq (ground W) (gap W) (hurdle H W) (gate BOTTOM W) (coin Y) (spring W) (block LANE DEPTH) (coin-lane LANE Y)). Every parameter is a number; never write the words BOTTOM, W, H, LANE, DEPTH or other placeholders. Ranges in meters: spring W 0.45-1.6, hurdle W 0.35-2.2 and H 0.15-0.9, gate W 0.35-2.0 and BOTTOM 0.58-0.85, coin Y 0.4-2.4, coin-lane LANE 0, 1 or 2 and Y 0.4-2.4, ground W 0.8-18, gap W 0.4-2.0, block LANE 0, 1 or 2 and DEPTH 0.5-2.2. Start and end with ground. Leave at least one lane open beside every block. No violence, fear, weapons, or scary words. Bright garden, friendly shapes. Example: (seq (ground 6) (block 0 1) (hurdle 0.4 0.7) (ground 4) (gap 1.1) (ground 5))")
+  "You design one obstacle phrase for a children's 3D endless runner called Lumen Run. The runner has three lanes (0 left, 1 centre, 2 right), jumps, and slides. Reply with ONLY one s-expression and no markdown. Allowed pieces: (seq (ground W) (gap W) (hurdle H W) (gate BOTTOM W) (coin Y) (spring W) (block LANE DEPTH) (coin-lane LANE Y)). Every parameter is a number; never write the words BOTTOM, W, H, LANE, DEPTH or other placeholders. Ranges in meters: spring W 0.45-1.6, hurdle W 0.35-2.2 and H 0.15-0.9, gate W 0.35-2.0 and BOTTOM 0.58-0.85, coin Y 0.4-2.4, coin-lane LANE 0, 1 or 2 and Y 0.4-2.4, ground W 0.8-18, gap W 0.4-2.0, block LANE 0, 1 or 2 and DEPTH 0.5-2.2. Start and end with ground. Leave at least one lane open beside every block. No violence, fear, weapons, or scary words. Bright garden, friendly shapes. Example: (seq (ground 6) (block 0 1) (hurdle 0.4 0.7) (ground 5) (gate 0.72 0.8) (ground 5) (gap 1.1) (ground 5))")
 
 (define SCENE-SYS
-  "You redesign the garden backdrop for a children's 3D endless runner called Lumen Run. Reply with ONLY one s-expression and no markdown. Form: (garden (sky R G B) (ground R G B) (flower KIND DENSITY) (light L)). KIND is one of daisy, tulip, blossom, buttercup. Sky channels are 0.25 to 1 and the sky stays bright. Ground is green: G is at least 0.30 and at least as large as R, and not much smaller than B. Density is 0.15 to 1. Light is 0.40 to 1, never night. No violence, fear, weapons, or scary words. Make it look different from a plain blue sky and daisies. Example: (garden (sky 0.95 0.45 0.55) (ground 0.35 0.72 0.32) (flower tulip 0.85) (light 0.9))")
+  "You redesign the garden backdrop for a children's 3D endless runner called Lumen Run. Reply with ONLY one s-expression and no markdown. Form: (garden (sky R G B) (ground R G B) (flower KIND DENSITY) (light L)). KIND is one of daisy, tulip, blossom, buttercup. Sky channels are 0.25 to 1 and the sky stays bright. Ground is green: G is at least 0.30 and at least as large as R, and not much smaller than B. Density is 0.15 to 1. Light is 0.50 to 1, never night. Optional (fog F) is 0 to 0.38; do not ask for thicker fog. No violence, fear, weapons, or scary words. Make it look different from a plain blue sky and daisies. Example: (garden (sky 0.95 0.45 0.55) (ground 0.35 0.72 0.32) (flower tulip 0.85) (light 0.9))")
 
 (define g-now 32.0)
 (define jump-now 11.2)
@@ -36,6 +36,7 @@
 (define flower-now "daisy")
 (define density-now 0.45)
 (define light-now 0.82)
+(define fog-now 0.22)
 (define speed-lock #f)
 (define rule-rev 1)
 (define publish-via "set-code")
@@ -54,7 +55,31 @@
 (define audit (list))
 (define policy #f)
 (define cleared (list))
+; Derived view of the two in-flight flags. Obstacle and garden each keep
+; their own, so a hung garden call cannot stop obstacle phrases.
 (define llm-busy #f)
+(define motif-busy #f)
+(define scene-busy #f)
+(define motif-asked-at -1.0)
+(define scene-asked-at -1.0)
+(define motif-token 0)
+(define scene-token 0)
+(define motif-accept -1)
+(define scene-accept -1)
+(define motif-working #f)
+(define scene-working #f)
+(define motif-req #f)
+(define scene-req #f)
+(define motif-res #f)
+(define scene-res #f)
+(define llm-timeout-s 120.0)
+(define llm-watchdogs 0)
+(define stall-ch #f)
+(define stall-waiting #f)
+(define stall-scene? #f)
+(define scene-stalled 0)
+(define slide-hinted #f)
+(define tick-force -1.0)
 ; 0 unknown, 1 the runtime accepts an extra hash, 2 two-argument llm:chat.
 (define llm-chat-mode 0)
 (define llm-extra (hash "reasoning_effort" "minimal" "max_tokens" 2048))
@@ -205,7 +230,13 @@
     #f
     (let ((rows (hash-ref policy "arms" (list)))
           (nxt (arm-name (+ band 1))))
-      (if (or (has-arm? rows nxt) trial-open llm-busy)
+      ; llm-busy used to skip this for the whole wait, so a hung call
+      ; never opened band 2. The watchdog clears that latch. hash-set!
+      ; itself is still fatal on this pin while a fiber is inside
+      ; llm:chat (#5274), so the write waits only for that call to leave
+      ; the interpreter. A trial skips it too.
+      (if (or (has-arm? rows nxt) trial-open motif-working scene-working
+              (env-on? "LUMEN_SKIP_ARM"))
         #f
         (let ((row (find-arm rows (arm-name band))))
           (if (and row
@@ -215,7 +246,7 @@
             #f))))))
 
 (define (choose-band)
-  (if (< run-ms 30000.0)
+  (if (or (< run-ms 30000.0) (env-on? "LUMEN_SKIP_ARM"))
     (begin (set! band 0) "tutorial")
     (begin
       (open-next-arm!)
@@ -270,6 +301,12 @@
 (define (shift-onto pieces x0)
   (shift-pieces pieces x0))
 
+(define (any-gate? ps)
+  (let loop ((xs ps))
+    (if (null? xs)
+      #f
+      (if (= (piece-k (car xs)) 4.0) #t (loop (cdr xs))))))
+
 (define (add-chunk! origin pieces span b h)
   (let ((placed (shift-onto pieces next-x))
         (id next-id)
@@ -281,17 +318,27 @@
     (set! world (append world placed))
     (set! next-x x1)
     (set! next-id (+ id 1))
+    (if (and (not slide-hinted) (any-gate? placed))
+      (begin
+        (set! slide-hinted #t)
+        (note! "KEEP" "tutorial" "gate" "Slide under the bar"))
+      #f)
     id))
 
 (define (spawn-chunk!)
   (let ((why (choose-band)))
     (apply-feel! why)
-    (if (and (pair? motif-pieces) (= (modulo next-id 3) 2))
+    (if (and (pair? motif-pieces) (> motif-span 0.5) (= (modulo next-id 3) 2))
       (add-chunk! "motif" motif-pieces motif-span band hue-now)
-      (let ((ch (pattern-chunk seed next-id band)))
+      (let ((ch (chunk-or-fallback (pattern-chunk seed next-id band))))
         (if ch
-          (add-chunk! "offline" (hash-ref ch "pieces") (hash-ref ch "x1") band hue-now)
-          #f)))))
+          (add-chunk! (hash-ref ch "origin" "offline")
+                      (hash-ref ch "pieces") (hash-ref ch "x1") band hue-now)
+          ; Layout of the fallback itself failed. Still step the cursor so
+          ; ensure-ahead cannot spin in place and leave the road empty.
+          (add-chunk! "fallback"
+                      (list (piece 3.0 1.2 0.7 0.45 0.0))
+                      8.0 band hue-now))))))
 
 (define (ensure-ahead!)
   (let loop ((guard 0))
@@ -315,6 +362,13 @@
 (define (reset-run!)
   ; A death used to leave llm-busy set, so the next run never asked again.
   (set! llm-busy #f)
+  (set! motif-busy #f)
+  (set! scene-busy #f)
+  (set! motif-accept -1)
+  (set! scene-accept -1)
+  (set! motif-asked-at -1.0)
+  (set! scene-asked-at -1.0)
+  (set! slide-hinted #f)
   (set! player (make-player 1.2))
   (set! world (list))
   (set! chunks (list))
@@ -366,6 +420,7 @@
         "sky" (list sky-r sky-g sky-b)
         "ground" (list ground-r ground-g ground-b)
         "flower" flower-now "density" density-now "light" light-now
+        "fog" fog-now
         "motif" motif-now "scene" scene-now))
 
 (define (welcome-msg)
@@ -378,6 +433,7 @@
         "sky" (list sky-r sky-g sky-b)
         "ground" (list ground-r ground-g ground-b)
         "flower" flower-now "density" density-now "light" light-now
+        "fog" fog-now
         "motif" motif-now "scene" scene-now))
 
 ; The event is part of the hash when it is built. A later hash-set! on
@@ -409,8 +465,15 @@
         "flower" flower-now
         "density" density-now
         "light" light-now
+        "fog" fog-now
         "motif" motif-now
-        "scene" scene-now))
+        "scene" scene-now
+        "ahead" (obstacles-ahead)
+        "llm-busy" (if (or motif-busy scene-busy) #t #f)
+        "motif-busy" (if motif-busy #t #f)
+        "scene-busy" (if scene-busy #t #f)
+        "watchdogs" llm-watchdogs
+        "stall" (if stall-waiting #t #f)))
 
 (define (chunk-msg c)
   (hash "op" "chunk"
@@ -422,16 +485,41 @@
         "hue" (hash-ref c "hue")
         "pieces" (hash-ref c "pieces")))
 
-(define (send-new-chunks c)
+; all? resends every chunk still on the server. A reconnect cannot
+; rebuild the road from the browser's pruned list alone.
+(define (emit-chunks c all?)
   (let loop ((cs chunks))
     (if (null? cs)
       #t
       (begin
-        (if (>= (hash-ref (car cs) "id") sent-id)
+        (if (or all? (>= (hash-ref (car cs) "id") sent-id))
           (send c (chunk-msg (car cs)))
           #f)
         (loop (cdr cs)))))
   (set! sent-id next-id))
+
+(define (send-new-chunks c)
+  (emit-chunks c #f))
+
+(define (send-all-chunks c)
+  (emit-chunks c #t))
+
+(define (obstacle-kind? k)
+  (or (= k 2.0) (= k 3.0) (= k 4.0) (= k 7.0)))
+
+(define (obstacles-ahead)
+  (let ((x0 (player-x player))
+        (x1 (+ (player-x player) 40.0)))
+    (let loop ((ps world) (n 0))
+      (if (null? ps)
+        n
+        (let ((q (car ps)))
+          (loop (cdr ps)
+                (if (and (obstacle-kind? (piece-k q))
+                         (> (piece-x q) x0)
+                         (< (piece-x q) x1))
+                  (+ n 1)
+                  n)))))))
 
 (define (mark-cleared!)
   (let loop ((cs chunks))
@@ -443,7 +531,9 @@
                  (not (member-id? (hash-ref ch "id") cleared)))
           (begin
             (set! cleared (cons (hash-ref ch "id") cleared))
-            (set! policy (evo:policy-report policy (arm-name (hash-ref ch "band")) #t))
+            (if (env-on? "LUMEN_SKIP_ARM")
+              #f
+              (set! policy (evo:policy-report policy (arm-name (hash-ref ch "band")) #t)))
             (note! "CLEAR" "cleared" (arm-name (hash-ref ch "band"))))
           #f)
         (loop (cdr cs))))))
@@ -483,19 +573,71 @@
     (else next)))
 
 (define (pump! dt-ms)
-  (set! acc (+ acc (min 0.1 (/ (exact->inexact dt-ms) 1000.0))))
-  (let loop ((n 0) (ev "ok"))
-    (if (or (< acc PHYS-DT) (>= n 6))
-      ev
-      (begin
-        (set! acc (- acc PHYS-DT))
-        (loop (+ n 1) (keep-event ev (one-step!)))))))
+  ; A test can advance a whole second per message. A live tick stays at
+  ; a tenth of a second so one slow frame cannot skip the road.
+  (let ((cap (if (> (tick-force-ms) 0.0) 3.0 0.1))
+        (limit (if (> (tick-force-ms) 0.0) 180 6)))
+    (set! acc (+ acc (min cap (/ (exact->inexact dt-ms) 1000.0))))
+    (let loop ((n 0) (ev "ok"))
+      (if (or (< acc PHYS-DT) (>= n limit))
+        ev
+        (begin
+          (set! acc (- acc PHYS-DT))
+          (loop (+ n 1) (keep-event ev (one-step!))))))))
+
+(define (tick-force-ms)
+  (if (>= tick-force 0.0)
+    tick-force
+    (let ((raw (try (getenv "LUMEN_TICK_MS") (catch (e) ""))))
+      (let ((n (if (and (string? raw) (> (string-length raw) 0)) (string->number raw) 0)))
+        (set! tick-force (if (and (number? n) (> n 0)) (min 3000.0 (exact->inexact n)) 0.0))
+        tick-force))))
 
 (define (elapsed-ms)
-  (let ((now (monotonic-ms)))
-    (let ((d (if (= last-ms 0) 16 (- now last-ms))))
-      (set! last-ms now)
-      (if (> d 80) 80 (if (< d 0) 0 d)))))
+  (let ((forced (tick-force-ms)))
+    (if (> forced 0.0)
+      forced
+      (let ((now (monotonic-ms)))
+        (let ((d (if (= last-ms 0) 16 (- now last-ms))))
+          (set! last-ms now)
+          (if (> d 80) 80 (if (< d 0) 0 d)))))))
+
+; The kept string is compared against the live binding. rebind is tried
+; first; if persist-reject aborts it, set-code installs the same source.
+; Pieces and garden colours change only after that binding matches.
+(define (live-motif)
+  (let ((got (try (motif-form) (catch (e) ""))))
+    (if (string? got) got "")))
+
+(define (live-scene)
+  (let ((got (try (scene-form) (catch (e) ""))))
+    (if (string? got) got "")))
+
+(define (phrase-apply target)
+  (lambda (s c)
+    (let ((genome (evo:candidate-genome c)))
+      (let ((body (if (string=? target "scene-form")
+                    (scene-body genome)
+                    (motif-body genome))))
+        (not (string=? (publish-rule! target body (full-src)) "fail"))))))
+
+(define (phrase-search target)
+  (evo:search
+    (hash "algo" "lumen" "seed" (floor seed) "budget" 8
+          "target" target
+          "apply" (phrase-apply target))))
+
+(define (binding-landed? name body expected)
+  (let ((live (if (string=? name "scene-form") (live-scene) (live-motif))))
+    (if (string=? live expected)
+      #t
+      (and (not (string=? (publish-rule! name body (full-src)) "fail"))
+           (string=? (if (string=? name "scene-form") (live-scene) (live-motif)) expected)))))
+
+(define (try-tell-commit! search cand ev)
+  (try (begin (evo:tell! search (list cand) (list ev))
+              (evo:commit! search cand))
+       (catch (e) #f)))
 
 (define (consider-form! text)
   (let ((form (one-line (if (string? text) text ""))))
@@ -524,40 +666,23 @@
                                "trial")
                   "motif" "That shape drifted away"))
           (else
-           (let ((prev-form motif-now)
-                 (prev-pieces motif-pieces)
-                 (prev-span motif-span)
-                 (prev-hue hue-now))
+           (let ((prev-form motif-now))
              (set! motif-now form)
-             (set! motif-pieces (hash-ref found "pieces"))
-             (set! motif-span (hash-ref found "x1"))
-             (set! hue-now (exact->inexact (modulo (+ (floor hue-now) 1) 6)))
              (let ((ev (hash "status" "ok"
                              "objectives" (hash "fair" 1.0)
                              "constraints" (hash-ref found "violations")
                              "behavior" (hash "band" (exact->inexact band))))
-                   (search (evo:search
-                             (hash "algo" "lumen" "seed" (floor seed) "budget" 8
-                                   "target" "motif-form"
-                                   "apply"
-                                   (lambda (s c)
-                                     (let ((body (motif-body (evo:candidate-genome c))))
-                                       (let ((rb (mutate :rebind "motif-form" body "motif")))
-                                         (if (equal? rb #t)
-                                           (begin (eval-current) (set! publish-via "rebind") #t)
-                                           (if (set-code (full-src))
-                                             (begin (eval-current) (set! publish-via "set-code") #t)
-                                             #f)))))))))
-               (evo:tell! search (list cand) (list ev))
-               (if (evo:commit! search cand)
+                   (search (phrase-search "motif-form")))
+               (try-tell-commit! search cand ev)
+               (if (binding-landed? "motif-form" (motif-body form) form)
                  (begin
+                   (set! motif-pieces (hash-ref found "pieces"))
+                   (set! motif-span (hash-ref found "x1"))
+                   (set! hue-now (exact->inexact (modulo (+ (floor hue-now) 1) 6)))
                    (publish-named! "rule-hue" hue-now)
                    (note! "KEEP" "fair" "motif" "A new shape bloomed"))
                  (begin
                    (set! motif-now prev-form)
-                   (set! motif-pieces prev-pieces)
-                   (set! motif-span prev-span)
-                   (set! hue-now prev-hue)
                    (note! "ROLLBACK" "commit" "motif" "That shape drifted away")))))))))))
 
 (define (lref xs i)
@@ -595,40 +720,23 @@
                 (> (hash-ref found "budget" 1.0) 0.0)
                 (not trial) (not (evo:trial-ok? trial)) (not (evo:feasible? trial)))
           (note! "ROLLBACK" "reachable" "motif" "That shape drifted away")
-          (let ((prev-form motif-now)
-                (prev-pieces motif-pieces)
-                (prev-span motif-span)
-                (prev-hue hue-now))
+          (let ((prev-form motif-now))
             (set! motif-now form)
-            (set! motif-pieces pieces)
-            (set! motif-span span)
-            (set! hue-now (exact->inexact (modulo (+ (floor hue-now) 1) 6)))
             (let ((ev (hash "status" "ok"
                             "objectives" (hash "fair" 1.0)
                             "constraints" (hash "budget" 0.0 "geometry" 0.0 "reachable" 0.0 "safe" 0.0)
                             "behavior" (hash "band" (exact->inexact band))))
-                  (search (evo:search
-                            (hash "algo" "lumen" "seed" (floor seed) "budget" 8
-                                  "target" "motif-form"
-                                  "apply"
-                                  (lambda (s c)
-                                    (let ((body (motif-body (evo:candidate-genome c))))
-                                      (let ((rb (mutate :rebind "motif-form" body "motif")))
-                                        (if (equal? rb #t)
-                                          (begin (eval-current) (set! publish-via "rebind") #t)
-                                          (if (set-code (full-src))
-                                            (begin (eval-current) (set! publish-via "set-code") #t)
-                                            #f)))))))))
-              (evo:tell! search (list cand) (list ev))
-              (if (evo:commit! search cand)
+                  (search (phrase-search "motif-form")))
+              (try-tell-commit! search cand ev)
+              (if (binding-landed? "motif-form" (motif-body form) form)
                 (begin
+                  (set! motif-pieces pieces)
+                  (set! motif-span span)
+                  (set! hue-now (exact->inexact (modulo (+ (floor hue-now) 1) 6)))
                   (publish-named! "rule-hue" hue-now)
                   (note! "KEEP" "fair" "motif" "A new shape bloomed"))
                 (begin
                   (set! motif-now prev-form)
-                  (set! motif-pieces prev-pieces)
-                  (set! motif-span prev-span)
-                  (set! hue-now prev-hue)
                   (note! "ROLLBACK" "commit" "motif" "That shape drifted away"))))))))))
 
 (define (begin-dream!)
@@ -663,11 +771,13 @@
 ; An in-progress slice keeps going after a fall so the verdict still lands.
 ; A new dream starts only while the run is alive, a couple of seconds in.
 (define (maybe-dream!)
-  (cond
-    ((= dream-phase 1) (step-dream!))
-    ((and (player-alive? player) (>= run-ms next-dream))
-     (begin-dream!))
-    (else #f)))
+  (if (env-on? "LUMEN_SKIP_DREAM")
+    #f
+    (cond
+      ((= dream-phase 1) (step-dream!))
+      ((and (player-alive? player) (>= run-ms next-dream))
+       (begin-dream!))
+      (else #f))))
 
 (define (apply-scene! found form)
   (set! scene-now form)
@@ -679,7 +789,8 @@
   (set! ground-b (hash-ref found "ground-b"))
   (set! flower-now (hash-ref found "flower"))
   (set! density-now (hash-ref found "density"))
-  (set! light-now (hash-ref found "light")))
+  (set! light-now (hash-ref found "light"))
+  (set! fog-now (hash-ref found "fog" 0.22)))
 
 (define (consider-scene! text)
   (let ((form (one-line (if (string? text) text ""))))
@@ -706,46 +817,22 @@
                               (hash-ref found "why")
                               "trial")
                  "scene" "The garden stayed")
-          (let ((prev-form scene-now)
-                (prev-sky (list sky-r sky-g sky-b))
-                (prev-ground (list ground-r ground-g ground-b))
-                (prev-flower flower-now)
-                (prev-density density-now)
-                (prev-light light-now))
-            (apply-scene! found form)
+          (let ((prev-form scene-now))
+            (set! scene-now form)
             (let ((ev (hash "status" "ok"
                             "objectives" (hash "fair" 1.0)
                             "constraints" (hash-ref found "violations")
                             "behavior" (hash "band" (exact->inexact band))))
-                  (search (evo:search
-                            (hash "algo" "lumen" "seed" (floor seed) "budget" 8
-                                  "target" "scene-form"
-                                  "apply"
-                                  (lambda (s c)
-                                    (let ((body (scene-body (evo:candidate-genome c))))
-                                      (let ((rb (mutate :rebind "scene-form" body "scene")))
-                                        (if (equal? rb #t)
-                                          (begin (eval-current) (set! publish-via "rebind") #t)
-                                          (if (set-code (full-src))
-                                            (begin (eval-current) (set! publish-via "set-code") #t)
-                                            #f)))))))))
-              (evo:tell! search (list cand) (list ev))
-              (if (evo:commit! search cand)
+                  (search (phrase-search "scene-form")))
+              (try-tell-commit! search cand ev)
+              (if (binding-landed? "scene-form" (scene-body form) form)
                 (begin
+                  (apply-scene! found form)
                   (set! rule-rev (+ rule-rev 1))
                   (set! rules-dirty #t)
                   (note! "KEEP" "fair" "scene" (hash-ref found "cue" "The garden changed color")))
                 (begin
                   (set! scene-now prev-form)
-                  (set! sky-r (car prev-sky))
-                  (set! sky-g (car (cdr prev-sky)))
-                  (set! sky-b (car (cdr (cdr prev-sky))))
-                  (set! ground-r (car prev-ground))
-                  (set! ground-g (car (cdr prev-ground)))
-                  (set! ground-b (car (cdr (cdr prev-ground))))
-                  (set! flower-now prev-flower)
-                  (set! density-now prev-density)
-                  (set! light-now prev-light)
                   (note! "ROLLBACK" "commit" "scene" "The garden stayed"))))))))))
 
 (define (llm-prompt kind)
@@ -757,48 +844,138 @@
                    ". Jump speed is " (num-src speed-now)
                    " m/s. Invent a different rhythm from a straight row of hurdles.")))
 
-(define (ask-llm! kind)
-  (set! llm-kind kind)
-  (set! llm-busy #t)
-  (channel:send req-ch (hash "kind" kind "user" (llm-prompt kind))))
+; Game-side budget. The runtime's own HTTP cap is LLM_TIMEOUT; if that
+; call never comes back, give up LLM_TIMEOUT+10 seconds later and drop
+; whatever arrives after that.
+(define (load-llm-timeout!)
+  (let ((raw (try (getenv "LLM_TIMEOUT") (catch (e) ""))))
+    (let ((alt (if (and (string? raw) (> (string-length raw) 0))
+                 raw
+                 (try (getenv "AURA_HTTP_TIMEOUT") (catch (e) "")))))
+      (let ((n (if (and (string? alt) (> (string-length alt) 0))
+                 (string->number alt)
+                 #f)))
+        (if (and (number? n) (> n 0))
+          (set! llm-timeout-s (exact->inexact n))
+          #f)))))
 
-; channel:try-recv on an empty channel is #f on Aura v0.2.2 (measured;
-; #5161). A model reply is a hash, so that is what the loop accepts.
+(define (watchdog-ms)
+  (* (+ llm-timeout-s 10.0) 1000.0))
+
+; Tests can ask for obstacles less often. The live game stays at 16 seconds.
+(define (motif-gap-ms)
+  (let ((raw (try (getenv "LUMEN_MOTIF_GAP_MS") (catch (e) ""))))
+    (let ((n (if (and (string? raw) (> (string-length raw) 0)) (string->number raw) #f)))
+      (if (and (number? n) (> n 0)) (exact->inexact n) 16000.0))))
+
+(define (sync-llm-busy!)
+  (set! llm-busy (or motif-busy scene-busy)))
+
+(define (expire-one! busy asked accept-now arm cue)
+  (if (and busy (> asked 0.0) (> (- (monotonic-ms) asked) (watchdog-ms)))
+    (begin
+      (set! llm-watchdogs (+ llm-watchdogs 1))
+      (note! "ROLLBACK" "watchdog" arm cue)
+      #t)
+    #f))
+
+(define (expire-llm!)
+  (if (expire-one! scene-busy scene-asked-at scene-accept "scene" "The garden waited")
+    (begin (set! scene-accept -1) (set! scene-busy #f))
+    #f)
+  (if (expire-one! motif-busy motif-asked-at motif-accept "llm" "Still thinking")
+    (begin (set! motif-accept -1) (set! motif-busy #f))
+    #f)
+  (sync-llm-busy!))
+
+(define (accept-reply! tok accept)
+  (and (number? tok) (number? accept) (>= accept 0) (= tok accept)))
+
+(define (take-scene! c msg)
+  (if (not (accept-reply! (hash-ref msg "token" -1) scene-accept))
+    #f
+    (let ((ans (hash-ref msg "ans" #f)))
+      (set! scene-busy #f)
+      (set! scene-accept -1)
+      (if (and (hash? ans) (hash-ref ans "ok"))
+        (let ((form (extract-garden (hash-ref ans "content" ""))))
+          (if form
+            (consider-scene! form)
+            (note! "ROLLBACK" "no-garden" "scene" "The garden stayed")))
+        (note! "ROLLBACK" (if (hash? ans) (hash-ref ans "error" "llm") "llm")
+               "scene" "The garden stayed"))
+      (send c (rules-msg))
+      (set! rules-dirty #f))))
+
+(define (take-motif! c msg)
+  (if (not (accept-reply! (hash-ref msg "token" -1) motif-accept))
+    #f
+    (let ((ans (hash-ref msg "ans" #f)))
+      (set! motif-busy #f)
+      (set! motif-accept -1)
+      (if (and (hash? ans) (hash-ref ans "ok"))
+        (let ((form (extract-seq (hash-ref ans "content" ""))))
+          (if form
+            (consider-form! form)
+            (note! "ROLLBACK" "no-seq" "llm" "That shape drifted away")))
+        (note! "ROLLBACK" (if (hash? ans) (hash-ref ans "error" "llm") "llm")
+               "llm" "That shape drifted away"))
+      (send c (rules-msg))
+      (set! rules-dirty #f))))
+
+; Send on the caller. The worker is the only receiver, and we do not
+; enqueue a second job while it is still inside llm:chat, so this does
+; not block the tick and does not allocate a closure per ask.
+(define (ask-scene!)
+  (if (or scene-working (not scene-req))
+    #f
+    (let ((tok (+ scene-token 1)))
+      (set! scene-token tok)
+      (set! scene-accept tok)
+      (set! scene-asked-at (exact->inexact (monotonic-ms)))
+      (set! scene-busy #t)
+      (set! scene-next (+ run-ms 12000.0))
+      (channel:send scene-req (hash "kind" "scene" "token" tok "user" (llm-prompt "scene")))
+      (sync-llm-busy!))))
+
+(define (ask-motif!)
+  (if (or motif-working (not motif-req))
+    #f
+    (let ((tok (+ motif-token 1)))
+      (set! motif-token tok)
+      (set! motif-accept tok)
+      (set! motif-asked-at (exact->inexact (monotonic-ms)))
+      (set! motif-busy #t)
+      (set! motif-next (+ run-ms (motif-gap-ms)))
+      (channel:send motif-req (hash "kind" "motif" "token" tok "user" (llm-prompt "motif")))
+      (sync-llm-busy!))))
+
+; channel:try-recv on an empty channel is #f (#5161). Each kind has its
+; own channel, so a garden call that never returns cannot eat the next
+; obstacle phrase. A late hash whose token was retired by the watchdog
+; is ignored.
 (define (poll-llm! c)
   (if (not llm-on)
     #f
     (begin
-      (let ((ans (channel:try-recv res-ch)))
-        (if (hash? ans)
-          (begin
-            (set! llm-busy #f)
-            (if (hash-ref ans "ok")
-              (if (string=? llm-kind "scene")
-                (let ((form (extract-garden (hash-ref ans "content" ""))))
-                  (if form
-                    (consider-scene! form)
-                    (note! "ROLLBACK" "no-garden" "scene" "The garden stayed")))
-                (let ((form (extract-seq (hash-ref ans "content" ""))))
-                  (if form
-                    (consider-form! form)
-                    (note! "ROLLBACK" "no-seq" "llm" "That shape drifted away"))))
-              (note! "ROLLBACK" (hash-ref ans "error" "llm")
-                     (if (string=? llm-kind "scene") "scene" "llm")
-                     (if (string=? llm-kind "scene") "The garden stayed" "That shape drifted away")))
-            (send c (rules-msg))
-            (set! rules-dirty #f))
-          #f))
-      (if (and llm-on (not llm-busy))
-        (cond
-          ((>= run-ms scene-next)
-           (begin
-             (set! scene-next (+ run-ms 12000.0))
-             (ask-llm! "scene")))
-          ((>= run-ms motif-next)
-           (begin
-             (set! motif-next (+ run-ms 16000.0))
-             (ask-llm! "motif")))
-          (else #f))
+      ; try-recv only while a call is outstanding. An idle poll that still
+      ; touches the channel every tick retains a capture frame per call on
+      ; this Aura pin and a long run exhausts the arena.
+      (if (or scene-busy motif-busy) (expire-llm!) #f)
+      (if scene-busy
+        (let ((scene-msg (channel:try-recv scene-res)))
+          (if (hash? scene-msg) (take-scene! c scene-msg) #f))
+        #f)
+      (if motif-busy
+        (let ((motif-msg (channel:try-recv motif-res)))
+          (if (hash? motif-msg) (take-motif! c motif-msg) #f))
+        #f)
+      (sync-llm-busy!)
+      (if (and (not scene-busy) (not scene-working) (>= run-ms scene-next))
+        (ask-scene!)
+        #f)
+      (if (and (not motif-busy) (not motif-working) (>= run-ms motif-next))
+        (ask-motif!)
         #f))))
 
 (define (on-hello c msg)
@@ -808,7 +985,7 @@
     (set! speed-now 5.0)
     (reset-run!)
     (send c (welcome-msg))
-    (send-new-chunks c)
+    (send-all-chunks c)
     (send c (state-msg "ok"))
     (flush-notes! c)))
 
@@ -817,9 +994,15 @@
     (if parsed (set! seed parsed) #f)
     (reset-run!)
     (send c (welcome-msg))
-    (send-new-chunks c)
+    (send-all-chunks c)
     (send c (state-msg "ok"))
     (flush-notes! c)))
+
+(define (on-resync c msg)
+  (send c (hash "op" "resync" "seed" seed))
+  (send-all-chunks c)
+  (send c (state-msg "ok"))
+  (flush-notes! c))
 
 (define (on-tick c msg)
   (if (and (player-alive? player) (> (hash-ref msg "jump" 0) 0))
@@ -888,7 +1071,10 @@
         (set! rules-dirty #f)))))
 
 (define (on-propose c msg)
-  (consider-form! (hash-ref msg "form" ""))
+  (let ((text (hash-ref msg "form" "")))
+    (if (and (string? text) (string-contains? text "(garden"))
+      (consider-scene! text)
+      (consider-form! text)))
   (flush-notes! c)
   (send c (rules-msg))
   (set! rules-dirty #f)
@@ -902,7 +1088,14 @@
     (cond
       ((string=? op "hello") (on-hello c msg))
       ((string=? op "restart") (on-restart c msg))
+      ((string=? op "resync") (on-resync c msg))
       ((string=? op "tick") (on-tick c msg))
+      ((string=? op "unstall")
+       (if stall-waiting
+         (begin
+           (channel:send stall-ch #t)
+           (set! stall-waiting #f))
+         #f))
       ((string=? op "rebind") (on-rebind c msg))
       ((string=? op "propose") (on-propose c msg))
       ((string=? op "audit") (on-audit c msg))
@@ -963,24 +1156,45 @@
                  (if (hash? tried)
                    (begin (set! llm-chat-mode 1) tried)
                    (begin (set! llm-chat-mode 2) (llm:chat sys user))))))))
-        (set! req-ch (channel:create 1))
-        (set! res-ch (channel:create 1))
-        (fiber:spawn (lambda ()
-                       (let loop ()
-                         (let ((job (channel:recv req-ch)))
-                           (let ((sys (if (and (hash? job) (string=? (hash-ref job "kind" "") "scene"))
-                                        SCENE-SYS
-                                        SYS))
-                                 (user (if (hash? job)
-                                         (hash-ref job "user" "")
-                                         (if (string? job) job ""))))
-                             (let ((ans (llm-reply sys user)))
-                               (channel:send res-ch
-                                             (if (hash? ans)
-                                               ans
-                                               (hash "ok" #f "error" "bad" "content" "")))))
-                           (loop))))))
+        (load-llm-timeout!)
+        (set! stall-scene? (env-on? "LUMEN_STALL_SCENE"))
+        (set! stall-ch (channel:create 1))
+        (set! motif-req (channel:create 2))
+        (set! motif-res (channel:create 2))
+        (set! scene-req (channel:create 2))
+        (set! scene-res (channel:create 2))
+        (fiber:spawn (lambda () (llm-worker motif-req motif-res SYS "motif")))
+        (fiber:spawn (lambda () (llm-worker scene-req scene-res SCENE-SYS "scene"))))
       #f)))
+
+; One worker per phrase kind. A scene call stuck inside llm:chat does not
+; take the obstacle worker with it. LUMEN_STALL_SCENE parks the first
+; garden job until `unstall`, which is how the watchdog test imitates a
+; call that ignores LLM_TIMEOUT.
+(define (deliver! res job ans)
+  (channel:send res
+                (hash "kind" (hash-ref job "kind" "")
+                      "token" (hash-ref job "token" 0)
+                      "ans" (if (hash? ans)
+                              ans
+                              (hash "ok" #f "error" "bad" "content" "")))))
+
+(define (llm-worker req res sys kind)
+  (let loop ()
+    (let ((job (channel:recv req)))
+      (if (string=? kind "scene") (set! scene-working #t) (set! motif-working #t))
+      (if (and stall-scene?
+               (= scene-stalled 0)
+               (string=? kind "scene"))
+        (begin
+          (set! scene-stalled 1)
+          (set! stall-waiting #t)
+          (channel:recv stall-ch)
+          (set! stall-waiting #f))
+        #f)
+      (deliver! res job (llm-reply sys (if (hash? job) (hash-ref job "user" "") "")))
+      (if (string=? kind "scene") (set! scene-working #f) (set! motif-working #f))
+      (loop))))
 
 (define (port-number)
   (let ((raw (try (getenv "AURA_RUNNER_PORT") (catch (e) ""))))
