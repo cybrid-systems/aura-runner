@@ -72,18 +72,37 @@ html, body {
   font-size: 22px;
 }
 #pace {
-  top: max(146px, calc(env(safe-area-inset-top) + 134px));
+  top: max(164px, calc(env(safe-area-inset-top) + 152px));
   font-size: 16px;
   letter-spacing: 0.04em;
 }
-#score.pop { animation: pop 0.22s ease-out; }
+#meter {
+  position: fixed;
+  top: max(148px, calc(env(safe-area-inset-top) + 136px));
+  left: max(18px, env(safe-area-inset-left));
+  width: 148px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(92, 52, 20, 0.28);
+  overflow: hidden;
+  pointer-events: none;
+}
+#meter-fill {
+  display: block;
+  height: 100%;
+  width: 0%;
+  border-radius: inherit;
+  background: #ffe08a;
+}
+#meter.full #meter-fill { background: #fff6e8; }
+#score.pop, #grade.pop, #pace.pop { animation: pop 0.28s ease-out; }
 @keyframes pop {
   from { transform: translateY(4px) scale(1.16); }
   to { transform: none; }
 }
 #combo {
   position: fixed;
-  top: max(176px, calc(env(safe-area-inset-top) + 164px));
+  top: max(190px, calc(env(safe-area-inset-top) + 178px));
   left: max(18px, env(safe-area-inset-left));
   margin: 0;
   padding: 4px 12px;
@@ -94,7 +113,39 @@ html, body {
   font-weight: 800;
   pointer-events: none;
 }
+#combo.hot {
+  font-size: 32px;
+  background: #ffe08a;
+  color: #8a3414;
+}
 #combo[hidden] { display: none; }
+#gain {
+  position: fixed;
+  left: 50%;
+  top: 42%;
+  margin: 0;
+  padding: 6px 16px;
+  border-radius: 999px;
+  background: rgba(255, 246, 232, 0.94);
+  color: #8a3414;
+  font-size: 32px;
+  font-weight: 800;
+  pointer-events: none;
+  opacity: 1;
+  transform: translateX(-50%);
+}
+#gain.big {
+  font-size: 48px;
+  background: #ffe08a;
+  color: #8a3414;
+}
+#gain.float { animation: floatup 1.05s ease-out both; }
+#gain[hidden] { display: none; }
+@keyframes floatup {
+  0% { opacity: 0; transform: translateX(-50%) translateY(14px) scale(0.82); }
+  16% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateX(-50%) translateY(-76px) scale(1.04); }
+}
 #toast {
   position: fixed;
   left: 50%;
@@ -275,5 +326,5 @@ html, body {
 }
 #bench { position: fixed; left: 8px; top: 40%; color: white; }
 @media (prefers-reduced-motion: reduce) {
-  #score, #toast { animation: none; text-shadow: none; }
+  #score, #toast, #gain, #grade, #pace { animation: none; text-shadow: none; }
 }

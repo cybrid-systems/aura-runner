@@ -4,6 +4,8 @@
 
 export const GRADES = ["", "Sprout", "Runner", "Bloom", "Shine", "Lumen"];
 export const GRADE_STEP = 100;
+// A clean pass pays a little. It stays under a coin.
+export const NICE_POINTS = 20;
 
 export function lootWorth(name) {
   if (name === "blossom") return 40;
@@ -52,4 +54,10 @@ export function awardPickup(worth, combo, comboUntil, now, grade, bank) {
     text,
     gainUntil: now + 1100,
   };
+}
+
+// Sliding under a bar, or leaving a bursting popper's lane, pays this.
+export function praise(grade, bank) {
+  const rated = takePoints(grade, bank, NICE_POINTS);
+  return { points: NICE_POINTS, grade: rated.grade, bank: rated.bank, text: "Nice! +" + NICE_POINTS };
 }

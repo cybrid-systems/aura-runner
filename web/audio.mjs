@@ -41,6 +41,29 @@ export function createAudio() {
   function jump() { tone(520, 0.12, "triangle", 0.5); }
   function slide() { tone(180, 0.14, "sine", 0.35); }
   function coin() { tone(880, 0.08, "sine", 0.4); tone(1320, 0.12, "sine", 0.25); }
+  function pickup(kind) {
+    if (kind === "gem") {
+      tone(660, 0.08, "sine", 0.36);
+      tone(880, 0.1, "triangle", 0.4);
+      tone(1320, 0.16, "sine", 0.32);
+    } else if (kind === "star") {
+      tone(784, 0.08, "sine", 0.38);
+      tone(1176, 0.14, "triangle", 0.32);
+    } else if (kind === "apple") {
+      tone(620, 0.08, "sine", 0.36);
+      tone(880, 0.12, "triangle", 0.26);
+    } else if (kind === "blossom") {
+      tone(740, 0.08, "sine", 0.34);
+      tone(988, 0.12, "sine", 0.24);
+    } else coin();
+  }
+  function cheer() {
+    tone(523, 0.1, "triangle", 0.4);
+    tone(659, 0.12, "triangle", 0.34);
+    tone(784, 0.18, "sine", 0.3);
+  }
+  function rise() { tone(392, 0.08, "sine", 0.28); tone(523, 0.14, "triangle", 0.32); }
+  function nice() { tone(660, 0.08, "triangle", 0.36); tone(880, 0.12, "sine", 0.28); }
   function spring() { tone(420, 0.16, "triangle", 0.4); }
   function die() { tone(392, 0.18, "sine", 0.28); tone(330, 0.28, "sine", 0.22); }
   function keep() { tone(523, 0.1, "triangle", 0.3); tone(659, 0.14, "triangle", 0.25); }
@@ -62,5 +85,5 @@ export function createAudio() {
     if (master) master.gain.value = v ? 0 : 0.18;
   }
 
-  return { unlock, jump, slide, coin, spring, die, keep, land, near, pop, music, setMuted, get muted() { return muted; } };
+  return { unlock, jump, slide, coin, pickup, cheer, rise, nice, spring, die, keep, land, near, pop, music, setMuted, get muted() { return muted; } };
 }
