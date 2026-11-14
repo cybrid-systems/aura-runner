@@ -69,7 +69,6 @@ let lastCue = "";
 let lastCueAt = 0;
 let alive = true;
 let seed = 1;
-let serverScore = 0;
 let seenChunks = new Set();
 const frames = new Float32Array(240);
 let frameN = 0;
@@ -253,6 +252,9 @@ function showMark(word) {
 }
 
 function remember(msg) {
+  // The server's stumble is a late sim. The picture toasts only when
+  // the body on screen meets a hole or an obstacle.
+  if (msg.kind === "BUMP") return;
   const cue = msg.cue || "";
   if (!cue) return;
   gardenNotes.unshift({ cue, why: msg.why || "", ask: msg.ask || "" });
@@ -312,17 +314,13 @@ function resetLocal() {
 
 function reconcile(st) {
   if (typeof st.g === "number") applyRules(st);
-  serverScore = st.score;
   alive = true;
   player[5] = 1;
-  if (typeof st.grace === "number" && st.grace > 0) stumble = Math.max(stumble, st.grace * 1000);
-  if (st.alive !== false) {
+  // A late server pose, a few metres ahead after a hole the body already
+  // cleared, must not drag the runner into that hole. Only a real split snaps.
+  if (st.alive !== false && typeof st.x === "number") {
     const lead = player[0] - st.x;
-    if (lead < -0.4) player[0] += (-lead) * 0.35;
-    else if (lead > 3.5) player[0] = st.x;
-    const lane = st.lane;
-    if (typeof lane === "number" && Math.abs(player[9] - lane) > 1.5) player[9] = lane;
-    if (typeof st.lx === "number" && Math.abs(player[10] - st.lx) > 2.2) player[10] = st.lx;
+    if (lead < -12 || lead > 12) player[0] = st.x;
   }
   if (typeof st.hue === "number") hue = st.hue;
 }
@@ -380,7 +378,6 @@ function connect() {
       remember(msg);
       if (msg.kind === "KEEP" && (msg.arm === "motif" || msg.arm === "scene" || msg.arm === "pals")) audio.keep();
       if (msg.kind === "ROLLBACK") rejectSpark = true;
-      if (msg.kind === "BUMP") stumble = Math.max(stumble, 1500);
     }
   };
   ws.onclose = () => {
@@ -527,7 +524,7 @@ function frame(now) {
   } else if (comboEl.textContent) {
     comboEl.hidden = true;
   }
-  const shown = Math.max(0, Math.floor(scoreNow(player)), serverScore | 0);
+  const shown = Math.max(0, Math.floor(scoreNow(player)));
   if (scoreEl.textContent !== String(shown)) {
     scoreEl.textContent = String(shown);
     scoreEl.classList.remove("pop");

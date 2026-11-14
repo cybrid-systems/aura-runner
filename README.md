@@ -52,9 +52,9 @@ The model is asked for an obstacle phrase, a garden phrase, and one friend. Each
 
 ## What you feel
 
-The browser predicts the runner from the latest rule snapshot, so a slow server tick never changes how a jump feels. Lanes ease in with a cap on acceleration. A jump builds speed for a short takeoff, then gravity takes over. The road heading accumulates, and the sun and the hills turn with it, so a new bend continues from where you are. A stumble or a "Back on the path" does not swing that view back to the opening, and the drawn path glides across a gap instead of popping. Aura remains the authority for the course, the score and a stumble.
+The browser predicts the runner from the latest rule snapshot, so a slow server tick never changes how a jump feels. Lanes ease in with a cap on acceleration. A jump builds speed for a short takeoff, then gravity takes over. The road heading accumulates, and the sun and the hills turn with it, so a new bend continues from where you are. A stumble or a "Back on the path" does not swing that view back to the opening, and the drawn path glides across a gap instead of popping. Aura remains the authority for the course. The score and a stumble follow the picture, so a late tick does not call a miss the runner did not touch.
 
-Hitting a hurdle, a gate, or a pot does not end the run. The runner slows for a moment, loses a few points, and keeps going. A gap sets them back on the path at the same pace, without a white flash. Old chunks behind the runner are dropped so a long run does not keep the whole trail.
+Hitting a hurdle, a gate, or a pot does not end the run. The runner slows for a moment, loses a few points, and keeps going. A gap sets them back on the path at the same pace, without a white flash. The hole is the water on that lane. A pot or a toy counts when the body meets it. Old chunks behind the runner are dropped so a long run does not keep the whole trail.
 
 | What you see | Where |
 | --- | --- |

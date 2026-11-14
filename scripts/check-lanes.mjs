@@ -2,8 +2,8 @@
 // where world +X is screen-left, so the renderer negates lateral x. After a
 // Left press the runner's screen x, under a camera that stays on the centre
 // lane, must decrease.
-import { DT, makePlayer, pressJump, pressLane, rulesOf, step } from "../web/sim.mjs";
-import { DEFAULT_BEND, drawsKeeper, glideS, integrateRoad, poseOnRoad, rebaseAnchor, roadPoint, screenX } from "../web/render.mjs";
+import { DT, bodyLane, makePlayer, pressJump, pressLane, rulesOf, step } from "../web/sim.mjs";
+import { DEFAULT_BEND, drawsKeeper, gapSpans, gateBarDepth, glideS, integrateRoad, poseOnRoad, rebaseAnchor, roadPoint, screenX } from "../web/render.mjs";
 
 const rules = rulesOf(32, 11.2, 5, 0.48, 0.12, 0.12);
 const centre = makePlayer(10);
@@ -113,4 +113,23 @@ if (!rewound.rebase || rewound.s !== 4) {
 if (drawsKeeper(null) !== true || drawsKeeper({ plan: "keeper" }) !== true || drawsKeeper({ plan: "kitten" }) !== false) {
   throw new Error("the runner look did not follow the hero plan");
 }
+const hole = gapSpans([[2, 10, 1, 1.2, -1.2]], 10, 12, 1);
+if (hole.length !== 1 || hole[0][0] !== 10 || hole[0][1] !== 11) {
+  throw new Error(`a gap between tile centres disappeared ${JSON.stringify(hole)}`);
+}
+if (gapSpans([[2, 10, 1, 1.2, -1.2]], 12, 14, 1).length !== 0) {
+  throw new Error("a gap leaked into the next tile");
+}
+if (gapSpans([[2, 10, 1, 1.2, -1.2, 0]], 10, 12, 1).length !== 0) {
+  throw new Error("another lane's gap painted this lane");
+}
+if (gapSpans([[2, 10, 1, 1.2, -1.2, -1]], 10, 12, 2).length !== 1) {
+  throw new Error("a full-width gap missed a lane");
+}
+if (Math.abs(gateBarDepth(0.7) - 0.245) > 1e-9) {
+  throw new Error(`gate bar drifted from the mesh ${gateBarDepth(0.7)}`);
+}
+const edge = makePlayer(5);
+edge[10] = 0.88;
+if (bodyLane(edge) !== 1) throw new Error("the lane edge was already the next lane");
 console.log(`lanes ok  left ${side.toFixed(1)}  centre ${mid.toFixed(1)}  right ${east.toFixed(1)}  bend ${DEFAULT_BEND}`);

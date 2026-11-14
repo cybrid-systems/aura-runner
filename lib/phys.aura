@@ -201,6 +201,32 @@
 (define (rects-overlap? ax1 ay1 ax2 ay2 bx1 by1 bx2 by2)
   (and (< ax1 bx2) (> ax2 bx1) (< ay1 by2) (> ay2 by1)))
 
+; Mesh footprints. Twins: gateBarDepth / POT_* / FLY_* in web/render.mjs.
+; A pot is about 1.05 across and its leaves top out near 1.16.
+; A toy is smaller than its lane. The gate bar is thinner than the piece.
+(define POT-REACH 0.84)
+(define POT-TOP 1.12)
+(define POT-HALF 0.56)
+(define FLY-REACH 0.62)
+(define FLY-HALF 0.22)
+
+(define (gate-span x w)
+  (let* ((depth (max 0.45 w))
+         (thick (max 0.22 (* depth 0.35)))
+         (mid (+ x (* w 0.5)))
+         (half (* thick 0.5)))
+    (cons (- mid half) (+ mid half))))
+
+(define (lane-centre lane)
+  (* (- lane 1.0) LANE-W))
+
+(define (abs-diff a b)
+  (let ((d (- a b)))
+    (if (< d 0.0) (- 0.0 d) d)))
+
+(define (meets-side? lx lane reach)
+  (or (< lane -0.5) (< (abs-diff lx (lane-centre lane)) reach)))
+
 ; Returns (list player pieces event).
 ; event is "ok" "coin" "spring" "bump" "oops" "dead".
 ; "dead" happens only under strict rules. A playing run stumbles:
@@ -289,12 +315,27 @@
         (list player (append (reverse acc) ps) (if dead "dead" event))
         (let* ((q (car ps))
                (k (piece-k q))
-               (x1 (piece-x q))
+               (qlane (piece-lane q))
+               (px (piece-x q))
+               (wide (piece-w q))
                (y1 (piece-y q))
-               (x2 (+ x1 (piece-w q)))
-               (y2 (+ y1 (piece-h q)))
-               (hit (and (hits-lane? q lane)
-                         (rects-overlap? left bottom right top x1 y1 x2 y2))))
+               (span (cond
+                       ((= k 4.0) (gate-span px wide))
+                       ((= k 8.0)
+                        (let ((mid (+ px (* wide 0.5))))
+                          (cons (- mid FLY-HALF) (+ mid FLY-HALF))))
+                       ((= k 7.0)
+                        (let* ((mid (+ px (* wide 0.5)))
+                               (half (min (* wide 0.5) POT-HALF)))
+                          (cons (- mid half) (+ mid half))))
+                       (else (cons px (+ px wide)))))
+               (x1 (car span))
+               (x2 (cdr span))
+               (y2 (if (= k 7.0) (min (+ y1 (piece-h q)) POT-TOP) (+ y1 (piece-h q))))
+               (side (if (or (= k 7.0) (= k 8.0))
+                       (meets-side? (player-lx p) qlane (if (= k 7.0) POT-REACH FLY-REACH))
+                       (hits-lane? q lane)))
+               (hit (and side (rects-overlap? left bottom right top x1 y1 x2 y2))))
           (cond
             ((and hit (or (= k 3.0) (= k 4.0) (= k 7.0) (= k 8.0)))
              (if (strict? rules)
