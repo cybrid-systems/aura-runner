@@ -453,6 +453,7 @@ function publishProbe() {
   root.dataset.chat = saidRows.join(" | ");
   root.dataset.said = saidEl && !saidEl.hidden ? saidEl.textContent : "";
   root.dataset.flyers = String(pieces.reduce((n, q) => n + (q[0] === 8 ? 1 : 0), 0));
+  root.dataset.poppers = String(pieces.reduce((n, q) => n + (q[0] === 9 ? 1 : 0), 0));
 }
 
 function frame(now) {
@@ -505,6 +506,7 @@ function frame(now) {
         }
       }
       if (wasY > 0.2 && player[1] <= 0.001 && player[5] > 0) audio.land();
+      if (hearPoppers(pieces)) audio.pop();
       if (scanNear(now)) { nearSpark = true; audio.near(); }
       player[5] = 1;
       acc -= DT;
@@ -575,6 +577,18 @@ function frame(now) {
   if (showStats && frameN % 20 === 0) paintStats();
   if (benchMode && frameN === 180) finishBench();
   requestAnimationFrame(frame);
+}
+
+function hearPoppers(list) {
+  let heard = false;
+  for (let i = 0; i < list.length; i++) {
+    const q = list[i];
+    if (q[0] === 9 && q[6] > 0.5 && !q.heard) {
+      q.heard = 1;
+      heard = true;
+    }
+  }
+  return heard;
 }
 
 function scanNear(nowMs) {

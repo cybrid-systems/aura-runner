@@ -97,6 +97,49 @@ function gateRun(slider) {
   return { bumped, x: p[0] };
 }
 
+const pop0 = [[9, 20, 0.64, 0.64, 1.85, 1, 0, 3.6, 2.8, 1.05]];
+step(makePlayer(1), pop0, rules, DT);
+const popX = mm(pop0[0][1]);
+const popY = mm(pop0[0][4]);
+const pop1 = [[9, 16, 0.64, 0.64, 1.85, 1, 0, 3.6, 2.8, 0.01]];
+step(makePlayer(10), pop1, rules, DT);
+const popped = pop1[0];
+const popBlast = popped[0] === 9 && popped[6] > 0.5 && popped[3] > 1 ? 1 : 0;
+const blast = [[9, 4.5, 1.7, 1.25, 0, 1, 1, 0, 0, 0.3]];
+function popEvent(p) {
+  return step(p, blast.map((q) => q.slice()), rules, DT);
+}
+function sidePop() {
+  const p = makePlayer(5.2);
+  p[9] = 0;
+  p[10] = -1.8;
+  return p;
+}
+function jumpPop() {
+  const p = makePlayer(5.2);
+  p[1] = 1.4;
+  return p;
+}
+function slidePop() {
+  const p = makePlayer(5.2);
+  pressSlide(p);
+  return p;
+}
+function popperFor(id, x0, span) {
+  if (span < 12) return null;
+  if (id > 0 && id % 5 === 0) return null;
+  const want = id === 0 ? 18 : 10 + ((id + 2) % 9);
+  const along = Math.min(want, span - 3);
+  if (along < 6) return null;
+  return { x: x0 + along, lane: id === 0 ? 1 : id % 3 };
+}
+const opened = popperFor(0, 0, 40);
+const laneA = popperFor(1, 0, 40);
+const laneB = popperFor(2, 0, 40);
+const popOpen = opened && opened.lane === 1 && opened.x > 17 && opened.x < 19 ? 1 : 0;
+const popSkip = !popperFor(5, 0, 40) && !popperFor(1, 0, 8) ? 1 : 0;
+const popLanes = laneA && laneB && laneA.lane !== laneB.lane ? 1 : 0;
+
 const pit = [[1, 0, 4, 0.45, 0], [2, 4, 5, 1.2, -1.2], [1, 9, 20, 0.45, 0]];
 const pp = makePlayer(1);
 let pitGrace = 0;
@@ -131,6 +174,15 @@ const got = [
   `fly-edge ${flyEvent(edgePlayer()) === "ok" ? 1 : 0}`,
   `gate-stand ${gateRun(false).bumped}`,
   `gate-slide ${gateRun(true).bumped === 0 && gateRun(true).x > 9 ? 1 : 0}`,
+  `pop-step ${popX}.0 ${popY}.0`,
+  `pop-blast ${popBlast}`,
+  `pop-hit ${popEvent(makePlayer(5.2)) === "bump" ? 1 : 0}`,
+  `pop-side ${popEvent(sidePop()) === "ok" ? 1 : 0}`,
+  `pop-jump ${popEvent(jumpPop()) === "ok" ? 1 : 0}`,
+  `pop-slide ${popEvent(slidePop()) === "bump" ? 1 : 0}`,
+  `pop-open ${popOpen}`,
+  `pop-skip ${popSkip}`,
+  `pop-lanes ${popLanes}`,
 ];
 // apex/air are analytic and already in the golden; compare the sim lines.
 const simGolden = golden.filter((l) => !l.startsWith("apex ") && !l.startsWith("air "));

@@ -152,9 +152,67 @@ function nudgeFlyers(pieces, dt) {
   }
 }
 
+// Kind 9 is a popper. Twin of step-poppers in lib/phys.aura.
+// phase, approach speed, vy, fuse sit at [6] [7] [8] [9].
+const POP_G = 16;
+const POP_BOUNCE = 0.7;
+const POP_MIN = 2.4;
+const POP_BLAST = 0.45;
+const POP_ARM = 14;
+const POP_BW = 1.7;
+const POP_BH = 1.25;
+
+function stepPoppers(pieces, p, dt) {
+  const px = p[0];
+  for (let i = 0; i < pieces.length; i++) {
+    const q = pieces[i];
+    if (q[0] !== 9) continue;
+    const phase = q.length > 6 ? q[6] : 0;
+    const fuse = q.length > 9 ? q[9] : 0;
+    if (phase > 0.5) {
+      const left = fuse - dt;
+      if (left <= 0) q[0] = 0;
+      else q[9] = left;
+      continue;
+    }
+    const vx = q.length > 7 ? q[7] : 0;
+    const vy0 = q.length > 8 ? q[8] : 0;
+    const x = q[1] - vx * dt;
+    const vy = vy0 - POP_G * dt;
+    let y = q[4] + vy * dt;
+    let vy1 = vy;
+    if (y < 0) {
+      y = 0;
+      vy1 = Math.max(POP_MIN, -vy * POP_BOUNCE);
+    }
+    const ahead = x - px;
+    const close = ahead <= POP_ARM && x + q[2] > px - 1;
+    const fuse1 = close ? fuse - dt : fuse;
+    if (fuse1 <= 0) {
+      const mid = x + q[2] * 0.5;
+      q[1] = mid - POP_BW * 0.5;
+      q[2] = POP_BW;
+      q[3] = POP_BH;
+      q[4] = 0;
+      q[6] = 1;
+      q[7] = 0;
+      q[8] = 0;
+      q[9] = POP_BLAST;
+    } else {
+      q[1] = x;
+      q[4] = y;
+      q[6] = 0;
+      q[7] = vx;
+      q[8] = vy1;
+      q[9] = fuse1;
+    }
+  }
+}
+
 export function step(p, pieces, rules, dt) {
   if (p[5] <= 0) return "dead";
   nudgeFlyers(pieces, dt);
+  stepPoppers(pieces, p, dt);
   const g = rules.g;
   const jump = rules.jump;
   const speed = runSpeed(rules.speed, p);
@@ -266,7 +324,7 @@ function collide(p, pieces, rules) {
       ? meetsSide(p[10], pieceLane(q), k === 7 ? POT_REACH : FLY_REACH)
       : hitsLane(q, lane);
     const hit = side && overlap(left, bottom, right, top, x1, y1, x2, y2);
-    if (hit && (k === 3 || k === 4 || k === 7 || k === 8)) {
+    if (hit && (k === 3 || k === 4 || k === 7 || k === 8 || k === 9)) {
       if (rules.strict) {
         p[5] = 0;
         return "dead";
