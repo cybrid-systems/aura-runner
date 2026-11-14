@@ -173,26 +173,111 @@ export function worldX(simX) {
 }
 
 // One road frame for the mesh, the camera, and screenX.
-// Sim forward s is arc length. Heading ψ = bend * sin(s / WAVE), 0 meaning world +Z.
+// Sim forward s is arc length. Heading starts at 0 (world +Z) and integrates
+// curvature bend / ROAD_RADIUS. A later bend continues from the pose already
+// run; it does not rebuild the path from the origin.
+// A jump in s (a rescue, a server snap, a new run) keeps the world pose and
+// adopts the new parameter, so the view does not rewind to the opening.
 // Forward T = (sin ψ, 0, cos ψ). Road-right (sim +lateral, screen-right) is
 // T × up = (-cos ψ, 0, sin ψ). At ψ = 0 that is world -X, matching worldX.
-export const ROAD_WAVE = 36;
+export const ROAD_RADIUS = 42;
 export const DEFAULT_BEND = 0.38;
 
-export function roadPoint(s, lateral, bend = 0) {
-  const amp = Math.max(-0.7, Math.min(0.7, Number(bend) || 0));
-  const psi = amp * Math.sin(s / ROAD_WAVE);
-  const cx = amp === 0 ? 0 : -amp * ROAD_WAVE * (Math.cos(s / ROAD_WAVE) - 1);
-  const c = Math.cos(psi);
-  const sn = Math.sin(psi);
-  const lat = lateral || 0;
+export function clampBend(bend) {
+  const n = Number(bend);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(-0.7, Math.min(0.7, n));
+}
+
+function advance(x, z, psi, kappa, ds) {
+  if (Math.abs(kappa) < 1e-8) {
+    return { x: x + Math.sin(psi) * ds, z: z + Math.cos(psi) * ds, psi };
+  }
+  const psi1 = psi + kappa * ds;
   return {
-    x: cx + lat * -c,
-    z: s + lat * sn,
+    x: x + (Math.cos(psi) - Math.cos(psi1)) / kappa,
+    z: z + (Math.sin(psi1) - Math.sin(psi)) / kappa,
+    psi: psi1,
+  };
+}
+
+function withTangent(pose) {
+  return { x: pose.x, z: pose.z, psi: pose.psi, tx: Math.sin(pose.psi), tz: Math.cos(pose.psi) };
+}
+
+// keys are { s, bend }, ascending. Bend on a key holds until the next.
+// s may be negative: that continues the first key backward, so tiles behind
+// a rebased runner still lie on the same curve.
+export function integrateRoad(keys, s) {
+  const at = Number.isFinite(Number(s)) ? Number(s) : 0;
+  const list = keys && keys.length ? keys : [{ s: 0, bend: 0 }];
+  if (at <= 0) return withTangent(advance(0, 0, 0, clampBend(list[0].bend) / ROAD_RADIUS, at));
+  let x = 0;
+  let z = 0;
+  let psi = 0;
+  let cursor = 0;
+  for (let i = 0; i < list.length; i++) {
+    const end = i + 1 < list.length ? list[i + 1].s : at;
+    const s1 = Math.min(at, end);
+    if (s1 > cursor) {
+      const step = advance(x, z, psi, clampBend(list[i].bend) / ROAD_RADIUS, s1 - cursor);
+      x = step.x;
+      z = step.z;
+      psi = step.psi;
+      cursor = s1;
+    }
+    if (cursor >= at - 1e-9) break;
+  }
+  return withTangent({ x, z, psi });
+}
+
+// Place the arc-length curve into the world. The anchor is the pose at anchor.s.
+export function poseOnRoad(anchor, keys, s) {
+  const origin = anchor && Number.isFinite(anchor.psi) ? anchor : { s: 0, x: 0, z: 0, psi: 0 };
+  const originS = Number.isFinite(origin.s) ? origin.s : 0;
+  const shifted = (keys && keys.length ? keys : [{ s: originS, bend: 0 }]).map((k) => ({
+    s: k.s - originS,
+    bend: k.bend,
+  }));
+  const rel = integrateRoad(shifted, (Number(s) || 0) - originS);
+  const ap = origin.psi || 0;
+  const c = Math.cos(ap);
+  const sn = Math.sin(ap);
+  const psi = ap + rel.psi;
+  return withTangent({
+    x: (origin.x || 0) + c * rel.x + sn * rel.z,
+    z: (origin.z || 0) - sn * rel.x + c * rel.z,
     psi,
+  });
+}
+
+// Keep the world pose at fromS, and call that pose toS. Later distance turns
+// from there. Used when arc length jumps, so the camera does not fly back
+// along the old curve to the opening view.
+export function rebaseAnchor(anchor, keys, fromS, toS, bend) {
+  const kept = poseOnRoad(anchor, keys, fromS);
+  const at = Number.isFinite(Number(toS)) ? Number(toS) : 0;
+  return {
+    anchor: { s: at, x: kept.x, z: kept.z, psi: kept.psi },
+    keys: [{ s: at, bend: clampBend(bend) }],
+  };
+}
+
+function projectLateral(pose, lateral) {
+  const lat = lateral || 0;
+  const c = Math.cos(pose.psi);
+  const sn = Math.sin(pose.psi);
+  return {
+    x: pose.x + lat * -c,
+    z: pose.z + lat * sn,
+    psi: pose.psi,
     tx: sn,
     tz: c,
   };
+}
+
+export function roadPoint(s, lateral, bend = 0) {
+  return projectLateral(integrateRoad([{ s: 0, bend }], s), lateral);
 }
 
 export function cameraPose(simLx, simY, simZ, fovy = 0.95, bend = 0) {
@@ -241,7 +326,7 @@ const SKY_FS = `#version 300 es
 precision highp float;
 uniform vec3 uSky0; uniform vec3 uSky1; uniform vec3 uHill; uniform vec3 uHill2;
 uniform vec3 uSunCol; uniform vec2 uSun; uniform vec2 uRes;
-uniform float uTime; uniform float uCamZ;
+uniform float uTime; uniform float uCamZ; uniform float uYaw; uniform float uFov;
 out vec4 o;
 void main() {
   vec2 uv = gl_FragCoord.xy / uRes;
@@ -249,14 +334,18 @@ void main() {
   vec3 c = mix(uSky1, uSky0, horizon);
   float haze = exp(-max(uv.y - 0.18, 0.0) * 3.2);
   c = mix(c, uSky1, haze * 0.35);
-  float parallax = uCamZ * 0.012;
-  float h1 = 0.30 + 0.045 * sin(uv.x * 7.0 + parallax);
-  float h2 = 0.22 + 0.035 * sin(uv.x * 15.0 + 1.4 + parallax * 1.7);
+  // Hills and the sun are world-fixed. uYaw is the road heading, so a turn
+  // carries the opening sky off to the side instead of leaving it on screen.
+  float span = max(uFov * uRes.x / max(uRes.y, 1.0), 0.3);
+  float x = uv.x - uYaw / span;
+  float parallax = uCamZ * 0.004;
+  float h1 = 0.30 + 0.045 * sin(x * 7.0 + parallax);
+  float h2 = 0.22 + 0.035 * sin(x * 15.0 + 1.4 + parallax * 1.7);
   if (uv.y < h1) c = mix(c, uHill, smoothstep(h1, h1 - 0.08, uv.y));
   if (uv.y < h2) c = mix(c, uHill2, 0.9);
-  float cloud = sin(uv.x * 5.0 + parallax);
+  float cloud = sin(x * 5.0 + parallax);
   c = mix(c, vec3(1.0, 0.95, 0.88), smoothstep(0.2, 0.9, cloud) * smoothstep(0.4, 0.75, uv.y) * 0.22);
-  vec2 sun = uv - uSun;
+  vec2 sun = vec2(x, uv.y) - uSun;
   float sd = length(sun);
   c += uSunCol * smoothstep(0.14, 0.0, sd) * 0.5;
   c += vec3(1.0, 0.97, 0.9) * smoothstep(0.035, 0.0, sd);
@@ -401,6 +490,8 @@ export function createRenderer(canvas) {
     res: gl.getUniformLocation(sky, "uRes"),
     time: gl.getUniformLocation(sky, "uTime"),
     camZ: gl.getUniformLocation(sky, "uCamZ"),
+    yaw: gl.getUniformLocation(sky, "uYaw"),
+    fov: gl.getUniformLocation(sky, "uFov"),
     proj: gl.getUniformLocation(mesh, "uProj"),
     view: gl.getUniformLocation(mesh, "uView"),
     eye: gl.getUniformLocation(mesh, "uEye"),
@@ -413,6 +504,30 @@ export function createRenderer(canvas) {
   let h = 1;
   let camS = 0;
   let camLat = 0;
+  let runS = 0;
+  // World pose at anchor.s. A jump in arc length moves this anchor instead
+  // of rewinding the curve back to the opening heading.
+  let anchor = { s: 0, x: 0, z: 0, psi: 0 };
+  // Bend changes append a key at the runner. The path already run is kept.
+  let roadKeys = [{ s: 0, bend: DEFAULT_BEND }];
+  function sample(s, lateral) {
+    return projectLateral(poseOnRoad(anchor, roadKeys, s), lateral);
+  }
+  function noteBend(s, bend) {
+    const amp = clampBend(bend);
+    const last = roadKeys[roadKeys.length - 1];
+    if (Math.abs(last.bend - amp) < 0.002) return;
+    const at = Math.max(0, s);
+    if (roadKeys.length === 1 && at < 8) {
+      last.bend = amp;
+      return;
+    }
+    if (at <= last.s + 0.5) {
+      last.bend = amp;
+      return;
+    }
+    roadKeys.push({ s: at, bend: amp });
+  }
   let camY = 2.15;
   let camFov = 0.92;
   let prevY = 0;
@@ -578,7 +693,7 @@ export function createRenderer(canvas) {
     else drawFriend(x, y, z, rgb);
   }
 
-  function drawPals(list, pz, t, reduced, bend) {
+  function drawPals(list, pz, t, reduced) {
     if (!Array.isArray(list)) return;
     const nPals = Math.min(6, list.length);
     for (let i = 0; i < nPals; i++) {
@@ -595,7 +710,7 @@ export function createRenderer(canvas) {
       // side > 0 used to be world +X (screen-left). Sim lateral is the opposite.
       const lat = -(side * (2.95 + rank * 0.15) + weave);
       const z = pz + 1.6 + rank * 1.8 + (reduced ? 0 : Math.sin(t * 0.8 + i) * 0.2);
-      const at = roadPoint(z, lat, bend);
+      const at = sample(z, lat);
       spin = at.psi;
       push(at.x, 0.02, at.z, 0.55, 0.02, 0.4, 0, [0.18, 0.12, 0.08], 1, 0);
       drawBody(pal.plan || pal.kind, at.x, hop, at.z, palRgb(pal), t, reduced);
@@ -616,12 +731,24 @@ export function createRenderer(canvas) {
     const pal = palette(st.hue || 0, st.scene);
     const px = st.lx || 0;
     const py = st.y || 0;
-    const pz = st.x || 0;
+    const pz = Number.isFinite(st.x) ? st.x : runS;
     const speed = st.speed || 5;
     const grav = st.g || 32;
     const alive = st.alive !== false;
     const bend = Number.isFinite(st.bend) ? st.bend : DEFAULT_BEND;
-    const feet = roadPoint(pz, px, bend);
+    // A rescue or a server correction can move s by a meter or two. A jump
+    // back toward the opening is many meters; keep the view and keep going.
+    if (Math.abs(pz - runS) > 8) {
+      const kept = rebaseAnchor(anchor, roadKeys, camS, pz, bend);
+      anchor = kept.anchor;
+      roadKeys = kept.keys;
+      camS = pz;
+      camLat = px;
+    } else {
+      noteBend(pz, bend);
+    }
+    runS = pz;
+    const feet = sample(pz, px);
     const rx = feet.x;
     const rz = feet.z;
     const reduced = !!st.reduced;
@@ -647,8 +774,8 @@ export function createRenderer(canvas) {
     const wantFov = (py > 0.35 ? 1.04 : 0.9) + Math.min(0.1, Math.max(0, speed - 5) * 0.025) + pulse * 0.04;
     camFov += (wantFov - camFov) * (reduced ? 1 : 0.08);
     const bob = reduced || !alive ? 0 : Math.sin(st.time * (8 + speed * 0.25)) * 0.02;
-    const basis = roadPoint(camS, 0, bend);
-    const followed = roadPoint(camS, camLat, bend);
+    const basis = sample(camS, 0);
+    const followed = sample(camS, camLat);
     const psi = basis.psi;
     const ox = followed.x - basis.x;
     const oz = followed.z - basis.z;
@@ -677,6 +804,8 @@ export function createRenderer(canvas) {
     gl.uniform2f(u.sun, pal.sunUv[0], pal.sunUv[1]);
     gl.uniform1f(u.time, st.time || 0);
     gl.uniform1f(u.camZ, camS);
+    gl.uniform1f(u.yaw, psi);
+    gl.uniform1f(u.fov, camFov);
     gl.uniform2f(u.res, w, h);
     gl.bindVertexArray(null);
     gl.bindBuffer(gl.ARRAY_BUFFER, tri);
@@ -692,7 +821,7 @@ export function createRenderer(canvas) {
     const pieces = st.pieces;
     const z0 = pz - 8;
     const z1 = pz + 42;
-    const onRoad = (s, lateral) => roadPoint(s, lateral, bend);
+    const onRoad = (s, lateral) => sample(s, lateral);
     for (let z = Math.floor(z0 / 2) * 2; z < z1; z += 2) {
       const cz = z + 1;
       const dist = cz - pz;
@@ -806,7 +935,7 @@ export function createRenderer(canvas) {
     if (land > 0.85) burst(rx, 0.15, rz, pal.path, 4, 0.01);
     if (st.reject) burst(rx, 1.6, rz + 2, pal.flower, 10, 0.06);
 
-    drawPals(st.pals, pz, st.time || 0, reduced, bend);
+    drawPals(st.pals, pz, st.time || 0, reduced);
 
     const air = py > 0.08;
     const sliding = st.slide > 0;
@@ -816,7 +945,7 @@ export function createRenderer(canvas) {
     const squash = !alive ? 1 : air ? 1.14 : 1 - land * 0.16;
     const widen = !alive ? 1 : air ? 0.9 : 1 + land * 0.12;
     const leanLat = reduced ? 0 : -lean * 0.35;
-    const spot = (ds, dlat) => roadPoint(pz + ds, px + dlat, bend);
+    const spot = (ds, dlat) => sample(pz + ds, px + dlat);
     const blink = st.stumble > 0.05 && !reduced && Math.sin((st.time || 0) * 28) > 0.15;
     spin = feet.psi;
     if (alive && !blink) {
@@ -873,8 +1002,8 @@ export function createRenderer(canvas) {
     }
     if (reject > 0.2 && !reduced && (n < MAX - 4)) {
       const petal = Math.sin(st.time * 3) * 0.4;
-      const petalA = roadPoint(pz + 1.5, px - petal, bend);
-      const petalB = roadPoint(pz + 2.2, px + petal, bend);
+      const petalA = sample(pz + 1.5, px - petal);
+      const petalB = sample(pz + 2.2, px + petal);
       push(petalA.x, 1.8 + reject, petalA.z, 0.12, 0.08, 0.12, 1, pal.flower, 0.3, 0.4);
       push(petalB.x, 2.1 + reject * 0.5, petalB.z, 0.1, 0.07, 0.1, 1, pal.flower2, 0.3, 0.35);
     }
