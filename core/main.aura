@@ -466,14 +466,16 @@
       (if (= (piece-k (car xs)) 4.0) #t (loop (cdr xs))))))
 
 (define (add-chunk! origin pieces span b h)
-  (let ((placed (shift-onto pieces next-x))
-        (id next-id)
-        (x0 next-x)
-        (x1 (+ next-x span)))
+  (let* ((placed (shift-onto pieces next-x))
+         (id next-id)
+         (x0 next-x)
+         (x1 (+ next-x span))
+         (toss (popper-for id x0 span))
+         (with (if toss (append placed (list toss)) placed)))
     (set! chunks (append chunks (list (hash "id" id "x0" x0 "x1" x1
                                             "band" b "origin" origin "hue" h
-                                            "pieces" placed))))
-    (set! world (append world placed))
+                                            "pieces" with))))
+    (set! world (append world with))
     (set! next-x x1)
     (set! next-id (+ id 1))
     (if (and (not slide-hinted) (any-gate? placed))
@@ -703,7 +705,7 @@
   (emit-chunks c #t))
 
 (define (obstacle-kind? k)
-  (or (= k 2.0) (= k 3.0) (= k 4.0) (= k 7.0) (= k 8.0)))
+  (or (= k 2.0) (= k 3.0) (= k 4.0) (= k 7.0) (= k 8.0) (= k 9.0)))
 
 (define (obstacles-ahead)
   (let ((x0 (player-x player))

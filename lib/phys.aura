@@ -20,6 +20,9 @@
 ;   Forward x is arc length along the road (rendered as the road tangent).
 ; Piece:  (kind x w h y lane) and, for a flyer, (vis speed).
 ;   Kind 8 flies toward the runner: each step subtracts speed from x.
+;   Kind 9 is a popper the course tosses in. It is not a phrase. After
+;   lane it keeps phase, approach speed, vy, and a fuse. It bounces
+;   toward the runner, then bursts on that one lane.
 ;   lane -1 means every lane. kinds: 1 ground, 2 gap, 3 hurdle, 4 gate,
 ;   5 coin, 6 spring, 7 block (a crate you change lanes to avoid).
 
@@ -237,6 +240,68 @@
 (define (meets-side? lx lane reach)
   (or (< lane -0.5) (< (abs-diff lx (lane-centre lane)) reach)))
 
+; Popper motion. Twins: stepPoppers in web/sim.mjs.
+; The fuse waits until the ball is close, so a stretch laid out ahead
+; still bursts as the runner arrives. POP-MIN keeps the bounce alive.
+(define POP-G 16.0)
+(define POP-BOUNCE 0.7)
+(define POP-MIN 2.4)
+(define POP-BLAST 0.45)
+(define POP-ARM 14.0)
+(define POP-W 0.64)
+(define POP-H 0.64)
+(define POP-BW 1.7)
+(define POP-BH 1.25)
+
+; Same id, same toss. A short stretch and every fifth later id skip it.
+; The opening id is always the centre lane, a short way down the road.
+(define (popper-for id x0 span)
+  (if (< span 12.0)
+    #f
+    (if (and (> id 0) (= (modulo id 5) 0))
+      #f
+      (let* ((want (if (= id 0) 18.0 (+ 10.0 (exact->inexact (modulo (+ id 2) 9)))))
+             (along (min want (- span 3.0)))
+             (lane (if (= id 0) 1.0 (exact->inexact (modulo id 3)))))
+        (if (< along 6.0)
+          #f
+          (piece 9.0 (+ x0 along) POP-W POP-H 1.85 lane 0.0 3.6 2.8 1.05))))))
+
+(define (step-one-pop q px dt)
+  (let ((phase (piece-nth q 6 0.0))
+        (fuse (piece-nth q 9 0.0))
+        (lane (piece-lane q)))
+    (if (> phase 0.5)
+      (let ((left (- fuse dt)))
+        (if (<= left 0.0)
+          (piece 0.0 (piece-x q) (piece-w q) (piece-h q) 0.0 lane)
+          (piece 9.0 (piece-x q) (piece-w q) (piece-h q) 0.0 lane 1.0 0.0 0.0 left)))
+      (let* ((vx (piece-nth q 7 0.0))
+             (vy0 (piece-nth q 8 0.0))
+             (x (- (piece-x q) (* vx dt)))
+             (vy (- vy0 (* POP-G dt)))
+             (y (+ (piece-y q) (* vy dt)))
+             (landed (< y 0.0))
+             (y1 (if landed 0.0 y))
+             (vy1 (if landed (max POP-MIN (* (- 0.0 vy) POP-BOUNCE)) vy))
+             (ahead (- x px))
+             (close (and (<= ahead POP-ARM) (> (+ x (piece-w q)) (- px 1.0))))
+             (fuse1 (if close (- fuse dt) fuse)))
+        (if (<= fuse1 0.0)
+          (let ((mid (+ x (* (piece-w q) 0.5))))
+            (piece 9.0 (- mid (* POP-BW 0.5)) POP-BW POP-BH 0.0 lane 1.0 0.0 0.0 POP-BLAST))
+          (piece 9.0 x (piece-w q) (piece-h q) y1 lane 0.0 vx vy1 fuse1))))))
+
+(define (step-poppers pieces player dt)
+  (let ((px (player-x player)))
+    (let loop ((ps pieces) (acc (list)))
+      (if (null? ps)
+        (reverse acc)
+        (let ((q (car ps)))
+          (if (= (piece-k q) 9.0)
+            (loop (cdr ps) (cons (step-one-pop q px dt) acc))
+            (loop (cdr ps) (cons q acc))))))))
+
 ; Returns (list player pieces event).
 ; event is "ok" "coin" "spring" "bump" "oops" "dead".
 ; "dead" happens only under strict rules. A playing run stumbles:
@@ -244,7 +309,7 @@
 (define (step p pieces rules dt)
   (if (<= (pxs p 5) 0.0)
     (list p pieces "dead")
-    (let ((pieces (nudge-flyers pieces dt)))
+    (let ((pieces (step-poppers (nudge-flyers pieces dt) p dt)))
     (let* ((g (hash-ref rules "g"))
            (jump (hash-ref rules "jump"))
            (speed (run-speed (hash-ref rules "speed") p))
@@ -347,7 +412,7 @@
                        (hits-lane? q lane)))
                (hit (and side (rects-overlap? left bottom right top x1 y1 x2 y2))))
           (cond
-            ((and hit (or (= k 3.0) (= k 4.0) (= k 7.0) (= k 8.0)))
+            ((and hit (or (= k 3.0) (= k 4.0) (= k 7.0) (= k 8.0) (= k 9.0)))
              (if (strict? rules)
                (loop (cdr ps) (cons q acc) (pset player 5 0.0) "dead" #t)
                (if (> (player-grace player) 0.0)

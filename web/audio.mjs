@@ -46,6 +46,7 @@ export function createAudio() {
   function keep() { tone(523, 0.1, "triangle", 0.3); tone(659, 0.14, "triangle", 0.25); }
   function land() { tone(140, 0.07, "sine", 0.3); }
   function near() { tone(740, 0.06, "sine", 0.22); tone(980, 0.08, "triangle", 0.12); }
+  function pop() { tone(180, 0.09, "sine", 0.4); tone(520, 0.12, "triangle", 0.28); }
 
   function music(reduced) {
     if (muted || !ctx || reduced) return;
@@ -61,5 +62,5 @@ export function createAudio() {
     if (master) master.gain.value = v ? 0 : 0.18;
   }
 
-  return { unlock, jump, slide, coin, spring, die, keep, land, near, music, setMuted, get muted() { return muted; } };
+  return { unlock, jump, slide, coin, spring, die, keep, land, near, pop, music, setMuted, get muted() { return muted; } };
 }

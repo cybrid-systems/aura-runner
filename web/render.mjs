@@ -1112,6 +1112,36 @@ export function createRenderer(canvas) {
       }
     }
 
+    // Round body on one lane. The hit is that lane's box in sim, so the
+    // patch on the road marks the lane and the sphere stays the body.
+    function drawPopper(q, here) {
+      const yaw = here.psi;
+      const phase = q.length > 6 ? q[6] : 0;
+      if (phase > 0.5) {
+        const fuse = q.length > 9 ? q[9] : 0;
+        const life = Math.max(0, Math.min(1, fuse / 0.45));
+        const grow = (reduced ? 0.85 : 0.35 + (1 - life) * 1.15);
+        const y = 0.55 * grow;
+        push(here.x, y, here.z, 1.15 * grow, 1.15 * grow, 1.15 * grow, 1, [1, 0.72, 0.28], 0.2, 0.85, yaw);
+        push(here.x, y * 0.72, here.z, 0.7 * grow, 0.7 * grow, 0.7 * grow, 1, [1, 0.95, 0.75], 0.15, 0.95, yaw);
+        if (!q.puffed) {
+          q.puffed = 1;
+          burst(here.x, 0.6, here.z, [1, 0.78, 0.3], 10, 0.12);
+        }
+        return;
+      }
+      const cy = q[4] + q[3] * 0.5;
+      const rad = 0.32;
+      const shadow = 0.42 / (1 + cy * 0.45);
+      push(here.x, 0.03, here.z, shadow * 1.6, 0.02, shadow, 0, [0.2, 0.14, 0.08], 1, 0, yaw);
+      push(here.x, 0.045, here.z, 1.35, 0.025, 0.7, 0, [1, 0.62, 0.25], 0.35, 0.35, yaw);
+      push(here.x, cy, here.z, rad * 2, rad * 2, rad * 2, 1, [0.95, 0.42, 0.16], 0.3, 0.22, yaw);
+      push(here.x, cy, here.z, rad * 2.05, 0.08, rad * 2.05, 0, [1, 0.86, 0.42], 0.25, 0.35, yaw);
+      push(here.x, cy + rad + 0.08, here.z, 0.05, 0.16, 0.05, 0, [0.35, 0.22, 0.12], 0.5, 0.05, yaw);
+      const spark = reduced || Math.sin((st.time || 0) * 16 + q[1]) > 0 ? 0.95 : 0.25;
+      push(here.x, cy + rad + 0.18, here.z, 0.08, 0.08, 0.08, 1, [1, 0.95, 0.55], 0.1, spark, yaw);
+    }
+
     function drawBlock(q, zc, lane, sc, glow) {
       const look = variedLook(q, 7);
       const lat = laneX(lane < 0 ? 1 : lane);
@@ -1198,6 +1228,8 @@ export function createRenderer(canvas) {
           push(here.x, fy, here.z, 0.64 * sc, 0.06 * sc, 0.22 * sc, 0, [0.94, 0.97, 1], 0.3, 0.18, yaw);
           push(here.x, fy, here.z, 0.16 * sc, 0.08 * sc, 0.48 * sc, 0, [0.45, 0.72, 0.95], 0.28, 0.12, yaw);
         }
+      } else if (k === 9) {
+        drawPopper(q, here);
       }
     }
 
