@@ -10,24 +10,56 @@
     acc
     (cons-all (cdr items) (cons (car items) acc))))
 
-(define (layout-specs specs x0)
-  (let loop ((ss specs) (x x0) (acc (list)))
-    (if (null? ss)
-      (list (reverse acc) x)
-      (let* ((sp (car ss))
-             (kind (car sp))
-             (placed (place-one kind sp x)))
-        (if (not placed)
-          #f
-          (loop (cdr ss) (car (cdr placed)) (cons-all (car placed) acc)))))))
+; Ground is a beat of time, not a fixed meter. 10.4 m at 8 m/s is 1.3 s.
+; 4.8 m at 8 m/s is a 0.6 s rest. Laid width is authored * speed / 8, so
+; the same phrase takes the same time at every pace. Gaps and obstacles
+; stay in authored meters: they are the jump, not the padding.
+(define REF-SPEED 8.0)
+(define BEAT-S 1.3)
+(define REST-S 0.6)
+; The camera look-at, about 7.4 m ahead of the runner. Readable lead is
+; this distance, not the horizon. Do not treat it as a reason to move
+; the camera.
+(define LOOK-M 7.4)
+(define SPARE-S 0.25)
+(define LEAD-JUMP 0.22)
+(define LEAD-SLIDE 0.20)
+(define LEAD-LANE 0.22)
+(define PRESS-SLACK 0.16)
+; The autopilot is born here, inside the chunk, so a hazard near x=0
+; has less preview than a live stretch that arrives 40 m ahead.
+(define START-X 0.4)
 
-(define (place-one kind sp x)
+(define (opt-speed rest)
+  (if (and (pair? rest) (number? (car rest)) (> (car rest) 0.0))
+    (exact->inexact (car rest))
+    REF-SPEED))
+
+(define (ground-scale speed)
+  (if (and (number? speed) (> speed 0.0))
+    (/ (exact->inexact speed) REF-SPEED)
+    1.0))
+
+(define (layout-specs specs x0 . rest)
+  (let ((scale (ground-scale (opt-speed rest))))
+    (let loop ((ss specs) (x x0) (acc (list)))
+      (if (null? ss)
+        (list (reverse acc) x)
+        (let* ((sp (car ss))
+               (kind (car sp))
+               (placed (place-one kind sp x scale)))
+          (if (not placed)
+            #f
+            (loop (cdr ss) (car (cdr placed)) (cons-all (car placed) acc))))))))
+
+(define (place-one kind sp x scale)
   (cond
     ((string=? kind "ground")
      (let ((w (spec-num sp 1 4.0)))
        (if (not (positive-range? w 0.8 18.0))
          #f
-         (list (list (piece 1.0 x w 0.45 0.0)) (+ x w)))))
+         (let ((laid (* w scale)))
+           (list (list (piece 1.0 x laid 0.45 0.0)) (+ x laid))))))
     ((string=? kind "gap")
      (let ((w (spec-num sp 1 1.2)))
        (if (not (positive-range? w 0.4 8.0))
@@ -203,88 +235,88 @@
     ((= band 3) patterns-3)
     (else patterns-4)))
 
-; Band 0 is the opening stretch. Every pattern opens with a high, easy
-; gate a couple of seconds in, then one gentle toy flying back along a
-; lane, a centre block, a low hurdle and a short gap. A hurdle, a gate,
-; and a block each pick a garden look. Actions land about every 18–24 m
-; so a slide, a lane change or a jump shows up inside each 20–30 m.
+; Authored ground is a beat at the opening pace: 10.4 m is 1.3 s, 4.8 m
+; is a 0.6 s rest. A jump is followed by a full beat so the landing is
+; down before the next hazard. A rest is only a pause or a close.
+; Band 4 uses a lantern or a bubble. A plane or a ball closes too fast
+; to leave a quarter-second once the pace is 14 m/s.
 (define patterns-0
   (list
-    (list (list "ground" 10.0) (list "gate" 0.84 0.85 "ribbon") (list "ground" 8.0)
-          (list "flyer" "plane" 1.0 0.7) (list "ground" 7.0)
-          (list "ground" 4.0) (list "block" 1.0 1.0 "stump") (list "coin-lane" 2.0 1.3)
-          (list "ground" 14.0) (list "hurdle" 0.36 0.6 "log") (list "ground" 14.0)
-          (list "gap" 1.0) (list "ground" 6.0))
-    (list (list "ground" 9.0) (list "gate" 0.82 0.8 "vine") (list "ground" 8.0)
-          (list "flyer" "bubble" 0.0 0.65) (list "ground" 7.0)
-          (list "ground" 4.0) (list "block" 1.0 1.1 "mushroom") (list "ground" 14.0)
-          (list "hurdle" 0.38 0.65 "fence") (list "ground" 14.0) (list "gap" 0.95)
-          (list "coin" 1.4) (list "ground" 6.0))
-    (list (list "ground" 11.0) (list "gate" 0.80 0.9 "lights") (list "ground" 8.0)
-          (list "flyer" "lantern" 2.0 0.75) (list "ground" 7.0)
-          (list "ground" 3.0) (list "hurdle" 0.34 0.6 "bloom") (list "ground" 14.0)
-          (list "block" 1.0 1.0 "bush") (list "coin-lane" 0.0 1.2) (list "ground" 14.0)
-          (list "gap" 1.05) (list "ground" 6.0))))
+    (list (list "ground" 10.4) (list "gate" 0.84 0.85 "ribbon") (list "ground" 4.8)
+          (list "flyer" "plane" 1.0 0.7) (list "ground" 10.4)
+          (list "block" 1.0 1.0 "stump") (list "coin-lane" 2.0 1.3)
+          (list "ground" 10.4) (list "hurdle" 0.36 0.6 "log") (list "ground" 10.4)
+          (list "gap" 1.0) (list "ground" 4.8))
+    (list (list "ground" 10.4) (list "gate" 0.82 0.8 "vine") (list "ground" 4.8)
+          (list "flyer" "bubble" 0.0 0.65) (list "ground" 10.4)
+          (list "block" 1.0 1.1 "mushroom") (list "ground" 10.4)
+          (list "hurdle" 0.38 0.65 "fence") (list "ground" 10.4) (list "gap" 0.95)
+          (list "coin" 1.4) (list "ground" 4.8))
+    (list (list "ground" 10.4) (list "gate" 0.80 0.9 "lights") (list "ground" 4.8)
+          (list "flyer" "lantern" 2.0 0.75) (list "ground" 10.4)
+          (list "hurdle" 0.34 0.6 "bloom") (list "ground" 10.4)
+          (list "block" 1.0 1.0 "bush") (list "coin-lane" 0.0 1.2) (list "ground" 10.4)
+          (list "gap" 1.05) (list "ground" 4.8))))
 
 (define patterns-1
   (list
-    (list (list "ground" 6.0) (list "block" 1.0 1.0 "crate") (list "ground" 6.0)
-          (list "flyer" "leaf" 1.0 0.7) (list "ground" 7.0)
-          (list "hurdle" 0.48 0.7 "drum") (list "ground" 16.0) (list "gate" 0.74 0.75 "scarf")
-          (list "ground" 16.0) (list "gap" 1.25) (list "ground" 8.0))
-    (list (list "ground" 7.0) (list "gap" 1.15) (list "ground" 6.0)
-          (list "flyer" "ball" 2.0 0.68) (list "ground" 7.0)
-          (list "gate" 0.72 0.8 "ribbon") (list "ground" 16.0) (list "block" 1.0 1.0 "stump")
-          (list "ground" 16.0) (list "hurdle" 0.52 0.7 "log") (list "coin" 1.3)
-          (list "ground" 7.0))))
+    (list (list "ground" 10.4) (list "block" 1.0 1.0 "crate") (list "ground" 4.8)
+          (list "flyer" "leaf" 1.0 0.7) (list "ground" 10.4)
+          (list "hurdle" 0.48 0.7 "drum") (list "ground" 10.4) (list "gate" 0.74 0.75 "scarf")
+          (list "ground" 10.4) (list "gap" 1.25) (list "ground" 4.8))
+    (list (list "ground" 10.4) (list "gap" 1.15) (list "ground" 10.4)
+          (list "flyer" "ball" 2.0 0.68) (list "ground" 10.4)
+          (list "gate" 0.72 0.8 "ribbon") (list "ground" 4.8) (list "block" 1.0 1.0 "stump")
+          (list "ground" 10.4) (list "hurdle" 0.52 0.7 "log") (list "coin" 1.3)
+          (list "ground" 4.8))))
 
-; Recovery ground is long enough that a jump lands before the next
-; hazard. A gate never sits inside the arc of the previous jump.
+; Recovery ground is a full beat, so a jump lands before the next hazard.
 (define patterns-2
   (list
-    (list (list "ground" 5.0) (list "block" 1.0 1.0 "mushroom") (list "block" 0.0 1.0 "crate")
-          (list "ground" 4.2) (list "gate" 0.66 0.75 "vine") (list "ground" 4.0)
-          (list "coin" 1.4) (list "hurdle" 0.55 0.7 "fence") (list "ground" 4.0)
-          (list "flyer" "plane" 0.0 0.72) (list "ground" 4.0)
-          (list "gap" 1.5) (list "ground" 4.5) (list "spring" 0.7)
-          (list "ground" 4.0))
-    (list (list "ground" 4.6) (list "block" 1.0 1.0 "bush") (list "block" 2.0 1.0 "stump")
-          (list "ground" 3.6) (list "hurdle" 0.6 0.7 "bloom") (list "ground" 4.0)
-          (list "flyer" "bubble" 1.0 0.66) (list "ground" 4.0)
-          (list "gate" 0.64 0.7 "lights") (list "ground" 4.0) (list "gap" 1.55)
-          (list "ground" 4.2) (list "coin" 1.5) (list "ground" 3.6))))
+    (list (list "ground" 10.4) (list "block" 1.0 1.0 "mushroom") (list "block" 0.0 1.0 "crate")
+          (list "ground" 10.4) (list "gate" 0.66 0.75 "vine") (list "ground" 4.8)
+          (list "coin" 1.4) (list "ground" 10.4) (list "hurdle" 0.55 0.7 "fence")
+          (list "ground" 4.8) (list "flyer" "plane" 0.0 0.72) (list "ground" 10.4)
+          (list "gap" 1.5) (list "ground" 4.8) (list "spring" 0.7)
+          (list "ground" 4.8))
+    (list (list "ground" 10.4) (list "block" 1.0 1.0 "bush") (list "block" 2.0 1.0 "stump")
+          (list "ground" 10.4) (list "hurdle" 0.6 0.7 "bloom") (list "ground" 10.4)
+          (list "flyer" "bubble" 1.0 0.66) (list "ground" 10.4)
+          (list "gate" 0.64 0.7 "lights") (list "ground" 10.4) (list "gap" 1.55)
+          (list "ground" 4.8) (list "coin" 1.5) (list "ground" 4.8))))
 
 (define patterns-3
   (list
-    (list (list "ground" 4.2) (list "block" 1.0 1.05 "crate") (list "ground" 3.4)
-          (list "gap" 1.6) (list "ground" 4.4)
-          (list "hurdle" 0.7 0.7 "drum") (list "ground" 4.0)
-          (list "flyer" "lantern" 2.0 0.7) (list "ground" 4.0)
+    (list (list "ground" 10.4) (list "block" 1.0 1.05 "crate") (list "ground" 4.8)
+          (list "gap" 1.6) (list "ground" 10.4)
+          (list "hurdle" 0.7 0.7 "drum") (list "ground" 10.4)
+          (list "flyer" "lantern" 2.0 0.7) (list "ground" 10.4)
           (list "gate" 0.64 0.7 "scarf")
-          (list "ground" 4.0) (list "coin" 1.6) (list "gap" 1.55)
-          (list "ground" 4.0) (list "spring" 0.75) (list "ground" 3.6))
-    (list (list "ground" 4.0) (list "block" 1.0 1.0 "mushroom") (list "ground" 3.4)
-          (list "gate" 0.62 0.7 "vine") (list "ground" 4.0)
-          (list "flyer" "leaf" 0.0 0.74) (list "ground" 4.0)
-          (list "gap" 1.7) (list "ground" 4.4) (list "hurdle" 0.75 0.7 "log")
-          (list "ground" 4.2) (list "coin" 1.5) (list "spring" 0.7)
-          (list "ground" 3.8))))
+          (list "coin" 1.6) (list "ground" 10.4) (list "gap" 1.55)
+          (list "ground" 4.8) (list "spring" 0.75) (list "ground" 4.8))
+    (list (list "ground" 10.4) (list "block" 1.0 1.0 "mushroom") (list "ground" 10.4)
+          (list "gate" 0.62 0.7 "vine") (list "ground" 4.8)
+          (list "flyer" "leaf" 0.0 0.74) (list "ground" 10.4)
+          (list "gap" 1.7) (list "ground" 10.4) (list "hurdle" 0.75 0.7 "log")
+          (list "ground" 4.8) (list "coin" 1.5) (list "spring" 0.7)
+          (list "ground" 4.8))))
 
 (define patterns-4
   (list
-    (list (list "ground" 3.8) (list "block" 1.0 1.0 "stump") (list "ground" 3.2)
-          (list "hurdle" 0.82 0.68 "fence") (list "flyer" "ball" 1.0 0.68)
-          (list "ground" 4.0) (list "gap" 1.85) (list "ground" 4.2) (list "gate" 0.62 0.68 "ribbon")
-          (list "ground" 3.8) (list "spring" 0.7) (list "ground" 3.4)
-          (list "gap" 1.7) (list "ground" 4.2) (list "coin" 1.6)
-          (list "ground" 3.2))
-    (list (list "ground" 3.6) (list "block" 1.0 1.0 "bush") (list "ground" 3.2)
-          (list "gap" 1.9) (list "ground" 4.2)
-          (list "gate" 0.6 0.66 "lights") (list "ground" 4.0)
-          (list "flyer" "plane" 2.0 0.7) (list "ground" 3.2)
+    (list (list "ground" 10.4) (list "block" 1.0 1.0 "stump") (list "ground" 10.4)
+          (list "hurdle" 0.82 0.68 "fence") (list "flyer" "lantern" 1.0 0.68)
+          (list "ground" 10.4) (list "gap" 1.85) (list "ground" 10.4)
+          (list "gate" 0.62 0.68 "ribbon")
+          (list "ground" 4.8) (list "spring" 0.7) (list "ground" 10.4)
+          (list "gap" 1.7) (list "ground" 4.8) (list "coin" 1.6)
+          (list "ground" 4.8))
+    (list (list "ground" 10.4) (list "block" 1.0 1.0 "bush") (list "ground" 10.4)
+          (list "gap" 1.9) (list "ground" 10.4)
+          (list "gate" 0.6 0.66 "lights") (list "ground" 4.8)
+          (list "flyer" "bubble" 2.0 0.7) (list "ground" 10.4)
           (list "hurdle" 0.88 0.68 "drum")
-          (list "ground" 4.2) (list "coin" 1.5) (list "spring" 0.7)
-          (list "ground" 3.6))))
+          (list "ground" 4.8) (list "coin" 1.5) (list "spring" 0.7)
+          (list "ground" 4.8))))
 
 (define (pick-pattern band rng)
   (let* ((table (pattern-table band))
@@ -319,19 +351,77 @@
         (s (hash-ref rules "speed")))
     (* s (+ TAKEOFF-S (/ (* 2.0 v) g)))))
 
+(define (pace-of rules)
+  (let ((s (hash-ref rules "speed" REF-SPEED)))
+    (if (and (number? s) (> s 0.1)) (exact->inexact s) REF-SPEED)))
+
+; A flyer closes at the runner's pace plus its own speed. Everything
+; else waits on the road.
+(define (approach-of q pace)
+  (if (= (piece-k q) 8.0)
+    (+ pace (piece-nth q 7 0.0))
+    pace))
+
+; The child model starts in the centre. A side crate or a side toy is
+; not a decision until the body is on that lane.
+(define (on-start-lane? q)
+  (let ((lane (piece-lane q)))
+    (or (< lane 0.0) (= lane 1.0))))
+
+(define (hazard-kind? k)
+  (or (= k 2.0) (= k 3.0) (= k 4.0) (= k 7.0) (= k 8.0)))
+
+(define (lead-for k)
+  (cond
+    ((or (= k 2.0) (= k 3.0)) LEAD-JUMP)
+    ((= k 4.0) LEAD-SLIDE)
+    (else LEAD-LANE)))
+
+; Seconds to spare after the hazard enters the camera look, once the
+; action has been given its lead. 9 means nothing on the start lane.
+(define (spare-one q pace)
+  (let ((dx (- (piece-x q) START-X)))
+    (if (< (+ dx (piece-w q)) 0.0)
+      9.0
+      (let ((sight (min LOOK-M (max 0.0 dx)))
+            (approach (approach-of q pace)))
+        (if (<= approach 0.1)
+          0.0
+          (- (/ sight approach) (lead-for (piece-k q))))))))
+
+(define (spare-time pieces rules)
+  (let ((pace (pace-of rules)))
+    (let loop ((ps pieces) (best 9.0))
+      (if (null? ps)
+        best
+        (let ((q (car ps)))
+          (if (and (hazard-kind? (piece-k q)) (on-start-lane? q))
+            (let ((m (spare-one q pace)))
+              (loop (cdr ps) (if (< m best) m best)))
+            (loop (cdr ps) best)))))))
+
 ; Numeric pre-checks plus an autopilot that has to finish the chunk alive.
 ; Violation magnitudes follow std/evo-core: 0 means the constraint holds.
 (define (constraint-hash pieces rules)
   (let ((budget (budget-violation pieces))
         (geom (geom-violation pieces rules)))
-    ; A shape that already fails the jump envelope does not need the
-    ; autopilot. Measured on v0.2.2: a full fair autopilot is about a
-    ; second, so the dream slices that work across ticks instead.
-    (let ((auto (if (> geom 0.0) 1.0 (if (autopilot-clear? pieces rules) 0.0 1.0))))
-      (hash "budget" budget
-            "geometry" geom
-            "reachable" auto
-            "safe" 0.0))))
+    ; Geometry already failed, so skip the autopilot. A margin under a
+    ; quarter-second is also a miss, and that check is a walk, not a sim.
+    ; Measured on v0.2.2: a full fair autopilot is about a second, so the
+    ; dream slices that work across ticks instead.
+    (let ((margin (if (> geom 0.0) 0.0 (spare-time pieces rules))))
+      (let ((auto (cond
+                    ((> geom 0.0) 1.0)
+                    ((< margin SPARE-S) 1.0)
+                    ((autopilot-clear? pieces rules) 0.0)
+                    (else 1.0))))
+        ; margin stays off this hash. A positive spare would look like a
+        ; violated constraint to evo:feasible?. The spare itself is recorded
+        ; beside the layout, and a short spare is already reachable = 1.
+        (hash "budget" budget
+              "geometry" geom
+              "reachable" auto
+              "safe" 0.0)))))
 
 ; The playing run stumbles and continues. The gate still has to fail a
 ; phrase the autopilot cannot finish, so the check uses strict rules.
@@ -476,51 +566,72 @@
               (loop (cdr ps))))
           (loop (cdr ps)))))))
 
-(define (lane-clear? pieces x lane)
-  (not (block-ahead? pieces x lane 0.0 3.2)))
+(define (time-left dx approach)
+  (if (<= approach 0.1) 99.0 (/ dx approach)))
 
-; Leave a crate by one lane. Only commits a switch when the body has
-; arrived at its current target, so a held decision cannot walk off the road.
-(define (dodge-block p pieces)
+; In the camera look, and still early enough that a lane change finishes.
+(define (lane-commit? dx approach)
+  (and (> dx -0.05)
+       (<= dx LOOK-M)
+       (>= (time-left dx approach) LEAD-LANE)))
+
+; Jump and slide commit inside a short window: late enough that the
+; action is still going at contact, early enough that it finishes.
+(define (act-commit? dx approach lead)
+  (let ((t (time-left dx approach)))
+    (and (> dx 0.0)
+         (<= dx LOOK-M)
+         (>= t lead)
+         (<= t (+ lead PRESS-SLACK)))))
+
+; The neighbour has to be clear across the whole look. A shorter window
+; misses a crate sitting beside the one we are leaving, and the body
+; walks back and forth until it hits one of them.
+(define (lane-clear? pieces x lane pace)
+  (not (or (block-ahead? pieces x lane -0.05 LOOK-M)
+           (flyer-blocking? pieces x lane pace))))
+
+; Leave a crate by one lane once it is in view. Only commits a switch
+; when the body has arrived, so a held decision cannot walk off the road.
+(define (dodge-block p pieces pace)
   (let ((lane (body-lane p))
         (x (player-x p)))
-    (if (and (block-ahead? pieces x lane 0.15 2.4)
+    (if (and (block-ahead? pieces x lane (* pace LEAD-LANE) LOOK-M)
              (= (player-lane p) lane))
       (cond
-        ((and (< lane 1.5) (lane-clear? pieces x (+ lane 1.0)))
+        ((and (< lane 1.5) (lane-clear? pieces x (+ lane 1.0) pace))
          (press-lane p 1.0))
-        ((and (> lane 0.5) (lane-clear? pieces x (- lane 1.0)))
+        ((and (> lane 0.5) (lane-clear? pieces x (- lane 1.0) pace))
          (press-lane p -1.0))
         (else p))
       p)))
 
-(define (flyer-blocking? pieces x lane)
+(define (flyer-blocking? pieces x lane pace)
   (let loop ((ps pieces))
     (if (null? ps)
       #f
       (let ((q (car ps)))
-        (if (and (= (piece-k q) 8.0) (hits-lane? q lane))
-          (let ((dx (- (piece-x q) x)))
-            (if (and (>= dx 0.0) (<= dx 9.0))
-              #t
-              (loop (cdr ps))))
+        (if (and (= (piece-k q) 8.0)
+                 (hits-lane? q lane)
+                 (lane-commit? (- (piece-x q) x) (approach-of q pace)))
+          #t
           (loop (cdr ps)))))))
 
-(define (flyer-lane-open? pieces x lane)
-  (and (lane-clear? pieces x lane)
-       (not (flyer-blocking? pieces x lane))))
+(define (flyer-lane-open? pieces x lane pace)
+  (and (lane-clear? pieces x lane pace)
+       (not (flyer-blocking? pieces x lane pace))))
 
-; A flyer is already closing, so step aside as soon as it is in view.
-; The slide below still clears one that both neighbours are holding.
-(define (dodge-flyer p pieces)
+; A flyer steps aside once it enters the look, while a lane change can
+; still finish. The slide below clears one both neighbours are holding.
+(define (dodge-flyer p pieces pace)
   (let ((lane (body-lane p))
         (x (player-x p)))
-    (if (and (flyer-blocking? pieces x lane)
+    (if (and (flyer-blocking? pieces x lane pace)
              (= (player-lane p) lane))
       (cond
-        ((and (< lane 1.5) (flyer-lane-open? pieces x (+ lane 1.0)))
+        ((and (< lane 1.5) (flyer-lane-open? pieces x (+ lane 1.0) pace))
          (press-lane p 1.0))
-        ((and (> lane 0.5) (flyer-lane-open? pieces x (- lane 1.0)))
+        ((and (> lane 0.5) (flyer-lane-open? pieces x (- lane 1.0) pace))
          (press-lane p -1.0))
         (else p))
       p)))
@@ -528,21 +639,23 @@
 (define (autopilot-press p pieces rules)
   (if (not (player-alive? p))
     p
-    (let ((p1 (dodge-flyer p pieces)))
-      (let ((p2 (dodge-block p1 pieces)))
-        (let ((q (next-hazard pieces (player-x p2) (body-lane p2))))
-          (if (not q)
-            p2
-            (let ((dx (- (piece-x q) (player-x p2)))
-                  (k (piece-k q)))
-              (cond
-                ((and (= k 4.0) (< dx 1.4) (> dx -0.15))
-                 (press-slide p2))
-                ((and (= k 8.0) (< dx 1.8) (> dx 0.15))
-                 (press-slide p2))
-                ((and (or (= k 2.0) (= k 3.0)) (< dx 0.95) (> dx 0.0))
-                 (press-jump p2))
-                (else p2)))))))))
+    (let ((pace (pace-of rules)))
+      (let ((p1 (dodge-flyer p pieces pace)))
+        (let ((p2 (dodge-block p1 pieces pace)))
+          (let ((q (next-hazard pieces (player-x p2) (body-lane p2))))
+            (if (not q)
+              p2
+              (let ((dx (- (piece-x q) (player-x p2)))
+                    (k (piece-k q))
+                    (approach (approach-of q pace)))
+                (cond
+                  ((and (= k 4.0) (act-commit? dx pace LEAD-SLIDE))
+                   (press-slide p2))
+                  ((and (= k 8.0) (act-commit? dx approach LEAD-SLIDE))
+                   (press-slide p2))
+                  ((and (or (= k 2.0) (= k 3.0)) (act-commit? dx pace LEAD-JUMP))
+                   (press-jump p2))
+                  (else p2))))))))))
 
 (define banned-words
   (list "kill" "blood" "gun" "knife" "scary" "monster" "weapon"
@@ -658,7 +771,7 @@
           (let ((specs (specs-of-form form)))
             (if (not specs)
               (refuse "shape" rules)
-              (let ((laid (layout-specs specs 0.0)))
+              (let ((laid (layout-specs specs 0.0 (pace-of rules))))
                 (if (not laid)
                   (refuse "range" rules)
                   (let* ((pieces (car laid))
@@ -688,32 +801,39 @@
 
 ; The shipped tables are gated by tests. The running game lays them out
 ; directly so a new chunk does not pay for another autopilot sim.
-(define (pattern-chunk seed index band)
-  (let* ((rng (make-random (modulo (+ seed (* index 9973) (* band 13)) 2147483646)))
-         (picked (pick-pattern band rng))
-         (laid (layout-specs (car picked) 0.0)))
-    (if (not laid)
-      #f
-      (hash "pieces" (car laid) "x1" (car (cdr laid)) "origin" "offline"))))
+(define (pattern-chunk seed index band . rest)
+  (let ((speed (opt-speed rest)))
+    (let* ((rng (make-random (modulo (+ seed (* index 9973) (* band 13)) 2147483646)))
+           (picked (pick-pattern band rng))
+           (laid (layout-specs (car picked) 0.0 speed)))
+      (if (not laid)
+        #f
+        (let ((pieces (car laid)))
+          (hash "pieces" pieces "x1" (car (cdr laid)) "origin" "offline"
+                "margin" (spare-time pieces (hash "speed" speed))))))))
 
 ; Used when a pattern refuses to lay out. Always advances the track and
 ; always contains a gate and a hurdle, so a failed roll cannot empty the road.
+; The grounds are a beat, a beat, and a rest, same as the seeded tables.
 (define fallback-specs
-  (list (list "ground" 5.0) (list "gate" 0.80 0.8)
-        (list "ground" 6.0) (list "hurdle" 0.40 0.65) (list "ground" 6.0)))
+  (list (list "ground" 10.4) (list "gate" 0.80 0.8)
+        (list "ground" 10.4) (list "hurdle" 0.40 0.65) (list "ground" 4.8)))
 
-(define (fallback-chunk)
-  (let ((laid (layout-specs fallback-specs 0.0)))
-    (if (not laid)
-      #f
-      (hash "pieces" (car laid) "x1" (car (cdr laid)) "origin" "fallback"))))
+(define (fallback-chunk . rest)
+  (let ((speed (opt-speed rest)))
+    (let ((laid (layout-specs fallback-specs 0.0 speed)))
+      (if (not laid)
+        #f
+        (let ((pieces (car laid)))
+          (hash "pieces" pieces "x1" (car (cdr laid)) "origin" "fallback"
+                "margin" (spare-time pieces (hash "speed" speed))))))))
 
-(define (chunk-or-fallback ch)
+(define (chunk-or-fallback ch . rest)
   (if (and (hash? ch)
            (pair? (hash-ref ch "pieces" (list)))
            (> (hash-ref ch "x1" 0.0) 0.0))
     ch
-    (fallback-chunk)))
+    (fallback-chunk (opt-speed rest))))
 
 (define (specs-have-gate? specs)
   (let loop ((xs specs))
@@ -733,7 +853,7 @@
   (let* ((rng (make-random (modulo (+ seed (* index 9973) (* band 13)) 2147483646)))
          (picked (pick-pattern band rng))
          (specs (car picked))
-         (laid (layout-specs specs 0.0)))
+         (laid (layout-specs specs 0.0 (pace-of rules))))
     (if (not laid)
       #f
       (let ((pieces (car laid)))
@@ -806,7 +926,7 @@
       (let ((specs (specs-of-form form)))
         (if (not specs)
           #f
-          (let ((laid (layout-specs specs 0.0)))
+          (let ((laid (layout-specs specs 0.0 (pace-of rules))))
             (if (not laid)
               #f
               (let* ((pieces (car laid))
@@ -815,6 +935,7 @@
                       "x1" (car (cdr laid))
                       "geometry" (geom-violation pieces rules)
                       "budget" (budget-violation pieces)
+                      "margin" (spare-time pieces rules)
                       "loot" (car meta)
                       "bend" (car (cdr meta)))))))))))
 

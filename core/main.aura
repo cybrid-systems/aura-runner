@@ -12,7 +12,7 @@
 (require "lib/pals")
 
 (define SYS
-  "You design one obstacle phrase for a children's 3D endless runner called Lumen Run. The runner has three lanes (0 left, 1 centre, 2 right), jumps, and slides. No markdown. Allowed pieces: (seq (ground W) (gap W) (hurdle H W) (gate BOTTOM W) (coin Y) (spring W) (block LANE DEPTH) (coin-lane LANE Y)). Every parameter is a number; never write the words BOTTOM, W, H, LANE, DEPTH or other placeholders. Ranges in meters: spring W 0.45-1.6, hurdle W 0.35-2.2 and H 0.15-0.9, gate W 0.35-2.0 and BOTTOM 0.58-0.85, coin Y 0.4-2.4, coin-lane LANE 0, 1 or 2 and Y 0.4-2.4, ground W 0.8-18, gap W 0.4-2.0, block LANE 0, 1 or 2 and DEPTH 0.5-2.2. Optional (loot KIND) restyles every pickup. KIND is coin, star, gem, blossom, or apple. Optional (bend AMP) turns the road. AMP is 0.12 to 0.65. Start and end with ground. Leave at least one lane open beside every block. No violence, fear, weapons, or scary words. Bright garden, friendly shapes. First write one short bright English sentence with no parentheses, then the s-expression. That sentence is what the child reads. Optional (flyer KIND LANE Y) sends one gentle toy flying toward the runner along one lane. KIND is plane, bubble, lantern, leaf, or ball. LANE is 0, 1 or 2. Y is 0.55 to 0.85. At most two flyers, and never on every lane at once. Optional last word on a hurdle, a gate, or a block picks its look. A hurdle is bar, log, fence, bloom, or drum. A gate is bar, ribbon, vine, lights, or scarf. A block is pot, stump, mushroom, crate, or bush. Example: (seq (ground 6) (block 0 1) (hurdle 0.4 0.7) (ground 5) (gate 0.72 0.8) (ground 5) (gap 1.1) (ground 5))")
+  "You design one obstacle phrase for a children's 3D endless runner called Lumen Run. The runner has three lanes (0 left, 1 centre, 2 right), jumps, and slides. No markdown. Allowed pieces: (seq (ground W) (gap W) (hurdle H W) (gate BOTTOM W) (coin Y) (spring W) (block LANE DEPTH) (coin-lane LANE Y)). Every parameter is a number; never write the words BOTTOM, W, H, LANE, DEPTH or other placeholders. Ranges in meters: spring W 0.45-1.6, hurdle W 0.35-2.2 and H 0.15-0.9, gate W 0.35-2.0 and BOTTOM 0.58-0.85, coin Y 0.4-2.4, coin-lane LANE 0, 1 or 2 and Y 0.4-2.4, ground W 0.8-18, gap W 0.4-2.0, block LANE 0, 1 or 2 and DEPTH 0.5-2.2. Optional (loot KIND) restyles every pickup. KIND is coin, star, gem, blossom, or apple. Optional (bend AMP) turns the road. AMP is 0.12 to 0.65. Start and end with ground. Leave at least one lane open beside every block. No violence, fear, weapons, or scary words. Bright garden, friendly shapes. First write one short bright English sentence with no parentheses, then the s-expression. That sentence is what the child reads. A ground of 10.4 is one beat, about 1.3 seconds, and a ground of 4.8 is a short rest. Leave a full beat of ground before a jump. Optional (flyer KIND LANE Y) sends one gentle toy flying toward the runner along one lane. KIND is plane, bubble, lantern, leaf, or ball. LANE is 0, 1 or 2. Y is 0.55 to 0.85. At most two flyers, and never on every lane at once. Optional last word on a hurdle, a gate, or a block picks its look. A hurdle is bar, log, fence, bloom, or drum. A gate is bar, ribbon, vine, lights, or scarf. A block is pot, stump, mushroom, crate, or bush. Example: (seq (ground 6) (block 0 1) (hurdle 0.4 0.7) (ground 5) (gate 0.72 0.8) (ground 5) (gap 1.1) (ground 5))")
 
 (define SCENE-SYS
   "You redesign the garden backdrop for a children's 3D endless runner called Lumen Run. No markdown. Form: (garden (sky R G B) (ground R G B) (flower KIND DENSITY) (light L)). KIND is one of daisy, tulip, blossom, buttercup. Sky channels are 0.25 to 1 and the sky stays bright. Ground is green: G is at least 0.30 and at least as large as R, and not much smaller than B. Density is 0.15 to 1. Light is 0.50 to 1, never night. Optional (fog F) is 0 to 0.38; do not ask for thicker fog. No violence, fear, weapons, or scary words. Make it look different from a plain blue sky and daisies. First write one short bright English sentence with no parentheses, then the s-expression. That sentence is what the child reads. Example: (garden (sky 0.95 0.45 0.55) (ground 0.35 0.72 0.32) (flower tulip 0.85) (light 0.9))")
@@ -173,13 +173,24 @@
     (set! rules-dirty #t)
     how))
 
+; A spare-time number rides along in rest. It stays inside the evidence
+; hash. A separate decision would count as another trial and drag the mean.
+(define (rest-margin rest)
+  (let loop ((xs rest))
+    (if (or (not (pair? xs)) (null? xs))
+      #f
+      (if (number? (car xs))
+        (exact->inexact (car xs))
+        (loop (cdr xs))))))
+
 (define (note! kind why arm . rest)
   (let ((cue (if (and (pair? rest) (string? (car rest))) (car rest) ""))
         (mark (if (and (pair? rest) (pair? (cdr rest)) (string? (car (cdr rest))))
                 (car (cdr rest)) ""))
         (ask (if (and (pair? rest) (pair? (cdr rest)) (pair? (cdr (cdr rest)))
                       (string? (car (cdr (cdr rest)))))
-               (car (cdr (cdr rest))) "")))
+               (car (cdr (cdr rest))) ""))
+        (margin (rest-margin rest)))
     (let ((row (hash "op" "decision" "kind" kind "why" why "arm" arm
                      "via" publish-via "cue" cue "mark" mark "ask" ask)))
     (set! audit (cons (hash "kind" kind "why" why "arm" arm "cue" cue) audit))
@@ -192,7 +203,10 @@
     ; worker takes the token. The decision is still sent to the client.
     (if (or (llm-posting?) (chat-open?))
       #f
-      (try (evo:record! arm kind why (hash "arm" arm) "" 0) (catch (e) #f)))
+      (try (evo:record! arm kind why
+                        (if margin (hash "arm" arm "margin" margin) (hash "arm" arm))
+                        "" 0)
+           (catch (e) #f)))
     row)))
 
 (define (flush-notes! c)
@@ -465,8 +479,11 @@
       #f
       (if (= (piece-k (car xs)) 4.0) #t (loop (cdr xs))))))
 
-(define (add-chunk! origin pieces span b h)
-  (let* ((placed (shift-onto pieces next-x))
+(define (add-chunk! origin pieces span b h . rest)
+  (let* ((margin (if (and (pair? rest) (number? (car rest)))
+                   (exact->inexact (car rest))
+                   9.0))
+         (placed (shift-onto pieces next-x))
          (id next-id)
          (x0 next-x)
          (x1 (+ next-x span))
@@ -474,6 +491,7 @@
          (with (if toss (append placed (list toss)) placed)))
     (set! chunks (append chunks (list (hash "id" id "x0" x0 "x1" x1
                                             "band" b "origin" origin "hue" h
+                                            "margin" margin
                                             "pieces" with))))
     (set! world (append world with))
     (set! next-x x1)
@@ -490,17 +508,24 @@
     (apply-feel! why)
     ; Every other stretch uses the latest kept phrase, so a mutation
     ; shows up before the seeded road has repeated itself.
+    ; choose-band and apply-feel already ran, so speed-now is the pace
+    ; this stretch will be run at. Ground is laid in time at that pace.
     (if (and (pair? motif-pieces) (> motif-span 0.5) (= (modulo next-id 2) 1))
-      (add-chunk! "motif" motif-pieces motif-span band hue-now)
-      (let ((ch (chunk-or-fallback (pattern-chunk seed next-id band))))
+      (let ((laid (layout-form motif-now (rules-hash))))
+        (if (and (hash? laid) (> (hash-ref laid "x1" 0.0) 0.5))
+          (add-chunk! "motif" (hash-ref laid "pieces") (hash-ref laid "x1")
+                      band hue-now (hash-ref laid "margin" 9.0))
+          (add-chunk! "motif" motif-pieces motif-span band hue-now 9.0)))
+      (let ((ch (chunk-or-fallback (pattern-chunk seed next-id band speed-now) speed-now)))
         (if ch
           (add-chunk! (hash-ref ch "origin" "offline")
-                      (hash-ref ch "pieces") (hash-ref ch "x1") band hue-now)
+                      (hash-ref ch "pieces") (hash-ref ch "x1") band hue-now
+                      (hash-ref ch "margin" 9.0))
           ; Layout of the fallback itself failed. Still step the cursor so
           ; ensure-ahead cannot spin in place and leave the road empty.
           (add-chunk! "fallback"
                       (list (piece 3.0 1.2 0.7 0.45 0.0))
-                      8.0 band hue-now))))))
+                      8.0 band hue-now 9.0))))))
 
 (define (ensure-ahead!)
   (let loop ((guard 0))
@@ -741,7 +766,8 @@
                   (set! owed (cons (hash-ref ch "band") owed))
                   #f)
                 (set! policy (evo:policy-report policy (arm-name (hash-ref ch "band")) #t))))
-            (note! "CLEAR" "cleared" (arm-name (hash-ref ch "band"))))
+            (note! "CLEAR" "cleared" (arm-name (hash-ref ch "band"))
+                   (hash-ref ch "margin" 9.0)))
           #f)
         (loop (cdr cs))))))
 
@@ -859,14 +885,20 @@
               (evo:commit! search cand))
        (catch (e) #f)))
 
+(define (margin-ok? laid)
+  (and (hash? laid) (>= (hash-ref laid "margin" 0.0) SPARE-S)))
+
 (define (layout-fair? laid)
   (and (hash? laid)
        (<= (hash-ref laid "geometry" 1.0) 0.0)
        (<= (hash-ref laid "budget" 1.0) 0.0)
+       (margin-ok? laid)
        (> (hash-ref laid "x1" 0.0) 0.0)))
 
-; Geometry only. A full autopilot is about a second, and doing it inside
-; the reply tick is the hitch. The slice below spends that budget later.
+; Geometry and the spare-time walk. A full autopilot is about a second,
+; and doing it inside the reply tick is the hitch. The slice below
+; spends that budget later. A margin under a quarter-second is refused
+; here, because that walk is cheap.
 (define (reject-form! form)
   ; open-trial while another fiber is inside http-post wedges that call
   ; on this pin, so a hung garden never reaches its timeout.
@@ -876,8 +908,10 @@
              (cond
                ((and (hash? found) (> (hash-ref found "geometry" 0.0) 0.0)) "geometry")
                ((and (hash? found) (> (hash-ref found "budget" 0.0) 0.0)) "budget")
+               ((and (hash? found) (not (margin-ok? found))) "reachable")
                (else "shape"))
-             "motif" "That shape drifted away"))
+             "motif" "That shape drifted away"
+             (if (hash? found) (hash-ref found "margin" 0.0) 0.0)))
     (reject-trial! form)))
 
 (define (reject-trial! form)
@@ -905,9 +939,11 @@
                  (cond
                    ((and (hash? found) (> (hash-ref found "geometry" 0.0) 0.0)) "geometry")
                    ((and (hash? found) (> (hash-ref found "budget" 0.0) 0.0)) "budget")
+                   ((and (hash? found) (not (margin-ok? found))) "reachable")
                    ((not trial) "trial")
                    (else "shape"))
-                 "motif" "That shape drifted away")
+                 "motif" "That shape drifted away"
+                 (if (hash? found) (hash-ref found "margin" 0.0) 0.0))
           (release-slot!))))))
 
 (define (queue-hold! form laid say)
@@ -951,12 +987,13 @@
                                              "objectives"
                                              (hash "fair" (if (and cleared? found
                                                                    (<= (hash-ref found "geometry" 1.0) 0.0)
-                                                                   (<= (hash-ref found "budget" 1.0) 0.0))
+                                                                   (<= (hash-ref found "budget" 1.0) 0.0)
+                                                                   (margin-ok? found))
                                                             1.0 0.0))
                                              "constraints"
                                              (hash "budget" (if found (hash-ref found "budget" 1.0) 1.0)
                                                    "geometry" (if found (hash-ref found "geometry" 1.0) 1.0)
-                                                   "reachable" (if cleared? 0.0 1.0)
+                                                   "reachable" (if (and cleared? (margin-ok? found)) 0.0 1.0)
                                                    "safe" 0.0)
                                              "behavior" (hash "band" (exact->inexact band))))))))
         (if (trial-busy? trial)
@@ -965,8 +1002,10 @@
         (if (or (not found) (not cleared?)
                 (> (hash-ref found "geometry" 1.0) 0.0)
                 (> (hash-ref found "budget" 1.0) 0.0)
+                (not (margin-ok? found))
                 (not trial) (not (evo:trial-ok? trial)) (not (evo:feasible? trial)))
-          (note! "ROLLBACK" "reachable" "motif" "That shape drifted away")
+          (note! "ROLLBACK" "reachable" "motif" "That shape drifted away"
+                 (if (hash? found) (hash-ref found "margin" 0.0) 0.0))
           (let ((prev-form motif-now)
                 (prev-hue hue-now))
             (set! motif-now form)
@@ -983,7 +1022,8 @@
                   (set! motif-span span)
                   (set! rules-dirty #t)
                   (set! rule-rev (+ rule-rev 1))
-                  (note! "KEEP" "fair" "motif" "A new shape bloomed" "shape"))
+                  (note! "KEEP" "fair" "motif" "A new shape bloomed" "shape"
+                         (hash-ref found "margin" 9.0)))
                 (begin
                   (set! motif-now prev-form)
                   (set! hue-now prev-hue)
@@ -995,11 +1035,16 @@
   (consider-form! "(seq (ground 4.0) (gap 5.5) (ground 4.0))" "")
   (set! dream-form (pattern-form seed (+ next-id 1) band))
   (let ((laid (layout-form dream-form (rules-hash))))
-    (if (or (not laid) (> (hash-ref laid "geometry" 1.0) 0.0))
+    (if (or (not laid)
+            (> (hash-ref laid "geometry" 1.0) 0.0)
+            (not (margin-ok? laid)))
       (begin
         (set! dream-phase 0)
         (set! next-dream (+ run-ms 8000.0))
-        (note! "ROLLBACK" "geometry" "motif" "That shape drifted away"))
+        (note! "ROLLBACK"
+               (if (and laid (> (hash-ref laid "geometry" 1.0) 0.0)) "geometry" "reachable")
+               "motif" "That shape drifted away"
+               (if laid (hash-ref laid "margin" 0.0) 0.0)))
       (begin
         (set! dream-pieces (hash-ref laid "pieces"))
         (set! dream-span (hash-ref laid "x1"))
@@ -1040,12 +1085,13 @@
                                              "objectives"
                                              (hash "fair" (if (and cleared? found
                                                                    (<= (hash-ref found "geometry" 1.0) 0.0)
-                                                                   (<= (hash-ref found "budget" 1.0) 0.0))
+                                                                   (<= (hash-ref found "budget" 1.0) 0.0)
+                                                                   (margin-ok? found))
                                                             1.0 0.0))
                                              "constraints"
                                              (hash "budget" (if found (hash-ref found "budget" 1.0) 1.0)
                                                    "geometry" (if found (hash-ref found "geometry" 1.0) 1.0)
-                                                   "reachable" (if cleared? 0.0 1.0)
+                                                   "reachable" (if (and cleared? (margin-ok? found)) 0.0 1.0)
                                                    "safe" 0.0)
                                              "behavior" (hash "band" (exact->inexact band))))))))
         (if (trial-busy? trial)
@@ -1054,8 +1100,10 @@
         (if (or (not found) (not cleared?)
                 (> (hash-ref found "geometry" 1.0) 0.0)
                 (> (hash-ref found "budget" 1.0) 0.0)
+                (not (margin-ok? found))
                 (not trial) (not (evo:trial-ok? trial)) (not (evo:feasible? trial)))
-          (note! "ROLLBACK" "reachable" "motif" "That shape drifted away")
+          (note! "ROLLBACK" "reachable" "motif" "That shape drifted away"
+                 (if (hash? found) (hash-ref found "margin" 0.0) 0.0))
           (let ((prev-form motif-now)
                 (prev-hue hue-now)
                 (prev-loot loot-now)
@@ -1085,7 +1133,8 @@
                   (set! motif-span span)
                   (set! rules-dirty #t)
                   (set! rule-rev (+ rule-rev 1))
-                  (note! "KEEP" "fair" "motif" line mark "What should come down the path?"))
+                  (note! "KEEP" "fair" "motif" line mark "What should come down the path?"
+                         (hash-ref found "margin" 9.0)))
                 (begin
                   (set! motif-now prev-form)
                   (set! hue-now prev-hue)
