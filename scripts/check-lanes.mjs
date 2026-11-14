@@ -3,7 +3,7 @@
 // Left press the runner's screen x, under a camera that stays on the centre
 // lane, must decrease.
 import { DT, makePlayer, pressJump, pressLane, rulesOf, step } from "../web/sim.mjs";
-import { DEFAULT_BEND, roadPoint, screenX } from "../web/render.mjs";
+import { DEFAULT_BEND, integrateRoad, poseOnRoad, rebaseAnchor, roadPoint, screenX } from "../web/render.mjs";
 
 const rules = rulesOf(32, 11.2, 5, 0.48, 0.12, 0.12);
 const centre = makePlayer(10);
@@ -65,5 +65,37 @@ for (let i = 0; i < 4; i++) {
 }
 if (!(vys[0] > 2 && vys[0] < 6 && vys[2] > 10 && vys[2] < 12 && vys[3] < vys[2] - 0.2)) {
   throw new Error(`jump did not accelerate ${vys.map((v) => v.toFixed(2)).join(",")}`);
+}
+const kept = integrateRoad([{ s: 0, bend: 0.38 }], 50);
+const changed = integrateRoad([{ s: 0, bend: 0.38 }, { s: 50, bend: 0.62 }], 50);
+if (Math.hypot(kept.x - changed.x, kept.z - changed.z) > 1e-6 || Math.abs(kept.psi - changed.psi) > 1e-6) {
+  throw new Error("a new bend rebuilt the road already run");
+}
+const onward = integrateRoad([{ s: 0, bend: 0.38 }, { s: 50, bend: 0.62 }], 90);
+if (!(onward.psi > kept.psi + 0.3)) {
+  throw new Error(`heading folded back after a bend ${onward.psi.toFixed(3)} from ${kept.psi.toFixed(3)}`);
+}
+const far = integrateRoad([{ s: 0, bend: 0.38 }], 226);
+if (!(far.psi > 1.5)) throw new Error(`heading returned to the start ${far.psi.toFixed(3)}`);
+const behind = integrateRoad([{ s: 0, bend: 0.38 }], -12);
+if (!(behind.psi < -0.08 && behind.z < 0)) {
+  throw new Error(`road behind the anchor left the curve ${behind.psi.toFixed(3)} ${behind.z.toFixed(3)}`);
+}
+const origin = { s: 0, x: 0, z: 0, psi: 0 };
+const keys = [{ s: 0, bend: 0.38 }];
+const plain = integrateRoad(keys, 40);
+const wrapped = poseOnRoad(origin, keys, 40);
+if (Math.hypot(plain.x - wrapped.x, plain.z - wrapped.z) > 1e-6 || Math.abs(plain.psi - wrapped.psi) > 1e-6) {
+  throw new Error("poseOnRoad drifted from the road frame");
+}
+const held = poseOnRoad(origin, keys, 80);
+const rescued = rebaseAnchor(origin, keys, 80, 4, 0.38);
+const same = poseOnRoad(rescued.anchor, rescued.keys, 4);
+if (Math.hypot(same.x - held.x, same.z - held.z) > 1e-4 || Math.abs(same.psi - held.psi) > 1e-4) {
+  throw new Error(`a jump in distance rewound the view to ${same.psi.toFixed(3)} from ${held.psi.toFixed(3)}`);
+}
+const onward2 = poseOnRoad(rescued.anchor, rescued.keys, 24);
+if (!(onward2.psi > same.psi + 0.1)) {
+  throw new Error(`the view stopped turning after a rescue ${onward2.psi.toFixed(3)}`);
 }
 console.log(`lanes ok  left ${side.toFixed(1)}  centre ${mid.toFixed(1)}  right ${east.toFixed(1)}  bend ${DEFAULT_BEND}`);
