@@ -23,7 +23,7 @@
 (define g-now 32.0)
 (define jump-now 11.2)
 (define slide-now 0.48)
-(define speed-now 5.0)
+(define speed-now 8.0)
 (define coyote-now 0.12)
 (define forgive-now 0.12)
 (define hue-now 0.0)
@@ -61,6 +61,16 @@
 (define sent-id 0)
 (define run-ms 0.0)
 (define band 0)
+; Clears and the clock both raise the pace. A chat in flight must not
+; freeze it: the numbers move here, and the policy write waits.
+(define clears 0)
+(define pace 0)
+(define owed (list))
+(define feel-cue "")
+(define published-g 32.0)
+(define published-jump 11.2)
+(define published-slide 0.48)
+(define published-speed 8.0)
 (define acc 0.0)
 (define last-ms 0)
 (define audit (list))
@@ -109,8 +119,17 @@
 (define res-ch #f)
 (define buf "")
 
+(define (loot-worth name)
+  (cond
+    ((string=? name "blossom") 40.0)
+    ((string=? name "apple") 55.0)
+    ((string=? name "star") 80.0)
+    ((string=? name "gem") 120.0)
+    (else 25.0)))
+
 (define (rules-hash)
-  (rules-of g-now jump-now speed-now slide-now coyote-now forgive-now))
+  (rules-of g-now jump-now speed-now slide-now coyote-now forgive-now
+            (loot-worth loot-now)))
 
 (define (full-src)
   (hot-source g-now jump-now slide-now speed-now coyote-now forgive-now hue-now motif-now scene-now pals-now))
@@ -207,15 +226,15 @@
     (else 0)))
 
 ; Gravity, jump and slide ease with the band so a faster path stays
-; reachable. The step is one notch at a time: a new arm is added only
-; after the current one is being cleared.
+; reachable. The opening is already a run. Each notch is faster, and
+; the top stays a pace a short recovery can still land.
 (define (feel-for b)
   (cond
-    ((= b 0) (list 32.0 11.2 0.48 5.0))
-    ((= b 1) (list 31.4 11.4 0.50 5.8))
-    ((= b 2) (list 30.8 11.6 0.52 6.6))
-    ((= b 3) (list 30.4 11.8 0.54 7.3))
-    (else (list 30.0 12.0 0.56 8.0))))
+    ((= b 0) (list 32.0 11.2 0.48 8.0))
+    ((= b 1) (list 31.4 11.5 0.50 10.0))
+    ((= b 2) (list 30.8 11.8 0.52 12.0))
+    ((= b 3) (list 30.2 12.1 0.54 13.0))
+    (else (list 29.6 12.4 0.56 14.0))))
 
 (define (arm-row name)
   (list (cons "arm" name) (cons "n" 0) (cons "keeps" 0) (cons "mean" 0.0)))
@@ -326,63 +345,116 @@
             (hash-put! policy "arms" (append rows (list (arm-row nxt))))
             #f))))))
 
-(define (choose-band)
-  (if (or (< run-ms 30000.0) (env-on? "LUMEN_SKIP_ARM"))
-    (begin (set! band 0) "tutorial")
-    (if (llm-posting?)
-      "busy"
+; One notch per cleared stretch, and also every eight seconds, so a
+; chat cannot park the run on the opening pace. Four is the top.
+(define (pace-step n)
+  (cond
+    ((>= n 4) 4)
+    ((>= n 3) 3)
+    ((>= n 2) 2)
+    ((>= n 1) 1)
+    (else 0)))
+
+(define (pace-wanted)
+  (let ((by-time (pace-step (/ run-ms 8000.0))))
+    (pace-step (if (> clears by-time) clears by-time))))
+
+(define (flush-owed!)
+  (let loop ((xs (reverse owed)))
+    (if (null? xs)
+      (set! owed (list))
       (begin
-      (open-next-arm!)
-      (let ((sel (evo:policy-select policy)))
-        (let ((arm (if (and (pair? sel) (string? (car sel))) (car sel) "band-0"))
-              (next (if (and (pair? sel) (pair? (cdr sel)) (hash? (car (cdr sel))))
-                      (car (cdr sel))
-                      #f)))
-          (if next (set! policy next) #f)
-          (set! band (band-of arm))
-          "ucb"))))))
+        (set! policy (evo:policy-report policy (arm-name (car xs)) #t))
+        (loop (cdr xs))))))
+
+(define (choose-band)
+  (if (env-on? "LUMEN_SKIP_ARM")
+    (begin (set! band 0) "tutorial")
+    (begin
+      (set! pace (pace-wanted))
+      (set! band pace)
+      ; policy-report and hash-set! wedge a POST that is in flight.
+      (if (or (llm-posting?) (chat-open?))
+        "pace"
+        (begin
+          (flush-owed!)
+          (open-next-arm!)
+          "pace")))))
+
+; A long opening buffer used to hide the climb until the next stretch
+; was laid. The clock raises the pace on the tick that earns it.
+(define (advance-pace!)
+  (if (env-on? "LUMEN_SKIP_ARM")
+    #f
+    (let ((want (pace-wanted)))
+      (if (not (= want pace))
+        (begin
+          (set! pace want)
+          (set! band want)
+          (apply-feel! "pace"))
+        #f))))
+
+(define (remember-published!)
+  (set! published-g g-now)
+  (set! published-jump jump-now)
+  (set! published-slide slide-now)
+  (set! published-speed speed-now))
 
 (define (apply-feel! why)
-  ; Rebinding gravity while a POST is in flight wedges that call.
-  (if (or (string=? why "busy") (llm-posting?))
+  ; The pace numbers move even while a POST is in flight. The rebind
+  ; waits, because publishing a rule then wedges that call.
+  (if (string=? why "tutorial")
     why
     (let ((f (feel-for band)))
     (let ((ng (car f))
           (nj (car (cdr f)))
           (nsl (car (cdr (cdr f))))
-          (nv (car (cdr (cdr (cdr f)))))
-          (cue ""))
+          (nv (car (cdr (cdr (cdr f))))))
       (if (not (= ng g-now))
         (begin
           (set! g-now ng)
-          (publish-named! "rule-gravity" g-now)
-          (if (= (string-length cue) 0)
-            (set! cue (if (< ng 32.0) "Lighter steps" "A bit heavier"))
+          (if (= (string-length feel-cue) 0)
+            (set! feel-cue (if (< ng 32.0) "Lighter steps" "A bit heavier"))
             #f))
         #f)
       (if (not (= nj jump-now))
         (begin
           (set! jump-now nj)
-          (publish-named! "rule-jump-v" jump-now)
-          (if (= (string-length cue) 0) (set! cue "Higher jumps") #f))
+          (if (= (string-length feel-cue) 0) (set! feel-cue "Higher jumps") #f))
         #f)
       (if (not (= nsl slide-now))
         (begin
           (set! slide-now nsl)
-          (publish-named! "rule-slide-s" slide-now)
-          (if (= (string-length cue) 0) (set! cue "Longer slides") #f))
+          (if (= (string-length feel-cue) 0) (set! feel-cue "Longer slides") #f))
         #f)
       (if (and (not speed-lock) (not (= nv speed-now)))
         (begin
           (let ((up (> nv speed-now)))
             (set! speed-now nv)
-            (publish-named! "rule-run-speed" speed-now)
-            (set! cue (if up "A little faster" "A gentler pace"))))
+            (set! feel-cue (if up "Faster now" "A gentler pace"))))
         #f)
-      (if (> (string-length cue) 0)
-        (begin (set! tuned #t) (note! "KEEP" why "rule" cue))
-        #f)
-      why))))
+      (if (or (llm-posting?) (chat-open?))
+        why
+        (begin
+          (if (not (= g-now published-g))
+            (begin (publish-named! "rule-gravity" g-now) (set! published-g g-now))
+            #f)
+          (if (not (= jump-now published-jump))
+            (begin (publish-named! "rule-jump-v" jump-now) (set! published-jump jump-now))
+            #f)
+          (if (not (= slide-now published-slide))
+            (begin (publish-named! "rule-slide-s" slide-now) (set! published-slide slide-now))
+            #f)
+          (if (not (= speed-now published-speed))
+            (begin (publish-named! "rule-run-speed" speed-now) (set! published-speed speed-now))
+            #f)
+          (if (> (string-length feel-cue) 0)
+            (begin
+              (set! tuned #t)
+              (note! "KEEP" why "rule" feel-cue)
+              (set! feel-cue ""))
+            #f)
+          why))))))
 
 (define (shift-onto pieces x0)
   (shift-pieces pieces x0))
@@ -468,6 +540,10 @@
   (set! sent-id 0)
   (set! run-ms 0.0)
   (set! band 0)
+  (set! clears 0)
+  (set! pace 0)
+  (set! owed (list))
+  (set! feel-cue "")
   (set! acc 0.0)
   (set! last-ms 0)
   (set! cleared (list))
@@ -484,10 +560,11 @@
   (set! pals-next 5000.0)
   (set! dream-phase 0)
   (set! hold-phase 0)
-  (if (not speed-lock) (set! speed-now 5.0) #f)
+  (if (not speed-lock) (set! speed-now 8.0) #f)
   (if tuned
     (begin (sync-rules!) (set! tuned #f))
     #f)
+  (remember-published!)
   (ensure-ahead!))
 
 (define (parse-seed v)
@@ -525,6 +602,7 @@
         "flower" flower-now "density" density-now "light" light-now
         "fog" fog-now
         "bend" bend-now "loot" loot-now
+        "worth" (loot-worth loot-now)
         "motif" motif-now "scene" scene-now
         "pals" pals-rows "hero" (hero-public) "provider" llm-provider
         "model" (active-model) "providers" (ready-providers)))
@@ -541,6 +619,7 @@
         "flower" flower-now "density" density-now "light" light-now
         "fog" fog-now
         "bend" bend-now "loot" loot-now
+        "worth" (loot-worth loot-now)
         "motif" motif-now "scene" scene-now
         "pals" pals-rows "hero" (hero-public) "provider" llm-provider
         "model" (active-model) "providers" (ready-providers)))
@@ -561,6 +640,8 @@
         "g" g-now
         "jump" jump-now
         "speed" speed-now
+        "worth" (loot-worth loot-now)
+        "pace" pace
         "slide-dur" slide-now
         "rev" rule-rev
         "run" (floor run-ms)
@@ -645,14 +726,19 @@
       (let ((ch (car cs)))
         (if (and (player-alive? player)
                  (>= (player-x player) (hash-ref ch "x1"))
-                 (not (member-id? (hash-ref ch "id") cleared))
-                 (not (llm-posting?))
-                 (not (chat-open?)))
+                 (not (member-id? (hash-ref ch "id") cleared)))
           (begin
             (set! cleared (cons (hash-ref ch "id") cleared))
+            (set! clears (+ clears 1))
+            ; The clear itself is local. Reporting it into the policy
+            ; waits until no chat is inside http-post.
             (if (env-on? "LUMEN_SKIP_ARM")
               #f
-              (set! policy (evo:policy-report policy (arm-name (hash-ref ch "band")) #t)))
+              (if (or (llm-posting?) (chat-open?))
+                (if (< (length owed) 32)
+                  (set! owed (cons (hash-ref ch "band") owed))
+                  #f)
+                (set! policy (evo:policy-report policy (arm-name (hash-ref ch "band")) #t))))
             (note! "CLEAR" "cleared" (arm-name (hash-ref ch "band"))))
           #f)
         (loop (cdr cs))))))
@@ -1463,7 +1549,7 @@
   (let ((parsed (parse-seed (hash-ref msg "seed" #f))))
     (set! seed (if parsed parsed (exact->inexact (fresh-seed))))
     (set! speed-lock #f)
-    (set! speed-now 5.0)
+    (set! speed-now 8.0)
     (reset-run!)
     (send c (welcome-msg))
     (send-all-chunks c)
@@ -1506,6 +1592,7 @@
       (note! "BUMP" ev "run"
              (if (string=? ev "oops") "Back on the path" "Oops! Keep going"))
       #f)
+    (advance-pace!)
     (maybe-hold!)
     (maybe-dream!)
     (maybe-guests!)
@@ -1552,7 +1639,7 @@
                  ((string=? name "gravity") (if (< value 32.0) "Lighter steps" "A bit heavier"))
                  ((string=? name "jump") (if (> value 11.2) "Higher jumps" "Softer jumps"))
                  ((string=? name "slide") "Longer slides")
-                 ((string=? name "speed") (if (> value 5.0) "A little faster" "A gentler pace"))
+                 ((string=? name "speed") (if (> value 8.0) "Faster now" "A gentler pace"))
                  (else "The light shifted")))
         (flush-notes! c)
         (send c (rules-msg))

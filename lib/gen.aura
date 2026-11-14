@@ -203,7 +203,7 @@
     ((= band 3) patterns-3)
     (else patterns-4)))
 
-; Band 0 is the first 30 seconds. Every pattern opens with a high, easy
+; Band 0 is the opening stretch. Every pattern opens with a high, easy
 ; gate a couple of seconds in, then one gentle toy flying back along a
 ; lane, a centre block, a low hurdle and a short gap. A hurdle, a gate,
 ; and a block each pick a garden look. Actions land about every 18–24 m

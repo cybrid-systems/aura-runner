@@ -1,10 +1,13 @@
-import { DT, bodyLane, makePlayer, pressJump, pressLane, pressSlide, rulesOf, scoreNow, step } from "./sim.mjs";
+import { DT, bodyLane, makePlayer, pressJump, pressLane, pressSlide, rulesOf, step } from "./sim.mjs";
+import { awardPickup, dropGrade, gradeLabel, lootWorth } from "./score.mjs";
 import { createRenderer } from "./render.mjs";
 import { createInput } from "./input.mjs";
 import { createAudio } from "./audio.mjs";
 
 const canvas = document.getElementById("view");
 const scoreEl = document.getElementById("score");
+const gradeEl = document.getElementById("grade");
+const paceEl = document.getElementById("pace");
 const replayEl = document.getElementById("replay");
 const statsEl = document.getElementById("stats");
 const motionBtn = document.getElementById("motion");
@@ -34,7 +37,7 @@ if (!renderer) {
 }
 
 const player = makePlayer(1.2);
-let rules = rulesOf(32, 11.2, 5, 0.48, 0.12, 0.12);
+let rules = rulesOf(32, 11.2, 8, 0.48, 0.12, 0.12);
 let pieces = [];
 let hue = 0;
 const sceneTarget = {
@@ -86,6 +89,10 @@ let nearSpark = false;
 let rejectSpark = false;
 let combo = 0;
 let comboUntil = 0;
+let grade = 1;
+let gradeBank = 0;
+let gainText = "";
+let gainUntil = 0;
 const nearSeen = new Set();
 const toastQ = [];
 let toastUntil = 0;
@@ -173,6 +180,8 @@ function applyProvider(msg) {
 function applyLook(msg) {
   if (typeof msg.bend === "number" && msg.bend >= 0.05 && msg.bend <= 0.75) bend = msg.bend;
   if (typeof msg.loot === "string" && LOOTS.has(msg.loot)) loot = msg.loot;
+  const named = lootWorth(loot);
+  rules.worth = typeof msg.worth === "number" && msg.worth > 0 ? msg.worth : named;
 }
 
 function applyRules(msg) {
@@ -305,7 +314,14 @@ function resetLocal() {
   alive = true;
   acc = 0;
   combo = 0;
+  comboUntil = 0;
+  grade = 1;
+  gradeBank = 0;
+  gainText = "";
+  gainUntil = 0;
   comboEl.hidden = true;
+  if (gradeEl) gradeEl.textContent = gradeLabel(1);
+  if (paceEl) paceEl.textContent = "Speed 8";
   nearSeen.clear();
   stumble = 0;
   flashEl.hidden = true;
@@ -429,6 +445,9 @@ function publishProbe() {
   root.dataset.hero = hero.plan || "keeper";
   root.dataset.provider = provider;
   root.dataset.loot = loot;
+  root.dataset.points = String(Math.max(0, Math.floor(player[6])));
+  root.dataset.grade = gradeLabel(grade).split(" ")[0];
+  root.dataset.speed = String(rules.speed);
   root.dataset.bend = bend.toFixed(2);
   root.dataset.mark = markEl && !markEl.hidden ? markEl.textContent : "";
   root.dataset.chat = saidRows.join(" | ");
@@ -463,8 +482,14 @@ function frame(now) {
       if (ev === "coin") {
         audio.coin();
         spark = "coin";
-        combo = now < comboUntil ? combo + 1 : 1;
-        comboUntil = now + 2200;
+        const got = awardPickup(rules.worth, combo, comboUntil, now, grade, gradeBank);
+        combo = got.combo;
+        comboUntil = got.comboUntil;
+        player[6] += got.extra;
+        gainText = got.text;
+        gainUntil = got.gainUntil;
+        grade = got.grade;
+        gradeBank = got.bank;
       }
       if (ev === "spring") { audio.spring(); spark = "spring"; }
       if (ev === "bump" || ev === "oops") {
@@ -472,6 +497,12 @@ function frame(now) {
         player[5] = 1;
         showCue(ev === "oops" ? "Back on the path" : "Oops! Keep going");
         audio.near();
+        if (ev === "bump") {
+          grade = dropGrade(grade);
+          gradeBank = 0;
+          combo = 0;
+          comboUntil = 0;
+        }
       }
       if (wasY > 0.2 && player[1] <= 0.001 && player[5] > 0) audio.land();
       if (scanNear(now)) { nearSpark = true; audio.near(); }
@@ -518,19 +549,28 @@ function frame(now) {
     toastEl.hidden = true;
     toastUntil = 0;
   }
-  if (combo > 1 && now < comboUntil) {
+  if (gainText && now < gainUntil) {
     comboEl.hidden = false;
-    comboEl.textContent = "×" + combo;
-  } else if (comboEl.textContent) {
+    comboEl.textContent = gainText;
+  } else if (!comboEl.hidden) {
     comboEl.hidden = true;
+    gainText = "";
   }
-  const shown = Math.max(0, Math.floor(scoreNow(player)));
+  const shown = Math.max(0, Math.floor(player[6]));
   if (scoreEl.textContent !== String(shown)) {
     scoreEl.textContent = String(shown);
     scoreEl.classList.remove("pop");
     void scoreEl.offsetWidth;
     scoreEl.classList.add("pop");
     lastShown = String(shown);
+  }
+  if (gradeEl) {
+    const label = gradeLabel(grade);
+    if (gradeEl.textContent !== label) gradeEl.textContent = label;
+  }
+  if (paceEl) {
+    const paceLabel = "Speed " + Math.round(rules.speed);
+    if (paceEl.textContent !== paceLabel) paceEl.textContent = paceLabel;
   }
   if (showStats && frameN % 20 === 0) paintStats();
   if (benchMode && frameN === 180) finishBench();

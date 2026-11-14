@@ -134,7 +134,7 @@
 (display (if (player-alive? stand) 1 0))
 (newline)
 
-; Coin adds 25 and is spent once.
+; A coin adds 25. A pickup whose rules name a higher worth adds that.
 (define coined
   (list (piece 1.0 0.0 20.0 0.45 0.0)
         (piece 5.0 3.0 0.42 0.42 0.4)))
@@ -148,6 +148,22 @@
       (loop (+ i 1)))))
 (display "coins ")
 (display (player-score cp))
+(newline)
+
+(define starred
+  (list (piece 1.0 0.0 20.0 0.45 0.0)
+        (piece 5.0 3.0 0.42 0.42 0.4)))
+(define star-rules (rules-of 32.0 11.2 5.0 0.48 0.12 0.12 80.0))
+(define spick (make-player 1.0))
+(define star-pieces starred)
+(let loop ((i 0))
+  (if (>= i 80) #t
+    (let ((r (step spick star-pieces star-rules PHYS-DT)))
+      (set! spick (car r))
+      (set! star-pieces (car (cdr r)))
+      (loop (+ i 1)))))
+(display "star ")
+(display (player-score spick))
 (newline)
 
 ; A hurdle bumps. The runner stays alive, keeps the distance, loses one

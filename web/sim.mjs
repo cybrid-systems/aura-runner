@@ -81,7 +81,12 @@ function easeLane(p, dt) {
 }
 
 export function rulesOf(g, jump, speed, slide, coyote, forgive) {
-  return { g, jump, speed, slide, coyote, forgive, ph: 1.05, pw: 0.56, sh: 0.46 };
+  return { g, jump, speed, slide, coyote, forgive, ph: 1.05, pw: 0.56, sh: 0.46, worth: 25 };
+}
+
+function pickupWorth(rules) {
+  const n = rules.worth;
+  return Number.isFinite(n) && n > 0 ? n : 25;
 }
 
 function tickTimers(p, dt) {
@@ -273,7 +278,7 @@ function collide(p, pieces, rules) {
     }
     if (hit && k === 5) {
       q[0] = 0;
-      p[6] += 25;
+      p[6] += pickupWorth(rules);
       event = "coin";
     } else if (hit && k === 6 && p[1] <= 0.05 && p[2] <= 0) {
       p[2] = rules.jump * 1.28;

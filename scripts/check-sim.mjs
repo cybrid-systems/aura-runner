@@ -51,6 +51,11 @@ for (let i = 0; i < 300 && stand[5] > 0; i++) step(stand, standPieces, rules, DT
 const coined = [[1, 0, 20, 0.45, 0], [5, 3, 0.42, 0.42, 0.4]];
 const cp = makePlayer(1);
 for (let i = 0; i < 80; i++) step(cp, coined, rules, DT);
+const starRules = rulesOf(32, 11.2, 5, 0.48, 0.12, 0.12);
+starRules.worth = 80;
+const spick = makePlayer(1);
+const starred = [[1, 0, 20, 0.45, 0], [5, 3, 0.42, 0.42, 0.4]];
+for (let i = 0; i < 80; i++) step(spick, starred, starRules, DT);
 
 const hurdled = [[1, 0, 30, 0.45, 0], [5, 2.2, 0.42, 0.42, 0.4], [3, 4.2, 0.7, 0.55, 0]];
 const hp = makePlayer(1);
@@ -113,6 +118,7 @@ const got = [
   `slide-alive ${sp[5] > 0 && sp[0] > 9.2 ? 1 : 0}`,
   `stand-alive ${stand[5] > 0 ? 1 : 0}`,
   `coins ${cp[6].toFixed(1)}`,
+  `star ${spick[6].toFixed(1)}`,
   `bump-alive ${sawBump === 1 && hp[5] > 0 && hp[0] > 6 ? 1 : 0}`,
   `bump-score ${hp[6].toFixed(1)}`,
   `bump-grace ${bumpGrace > 1 ? 1 : 0}`,
