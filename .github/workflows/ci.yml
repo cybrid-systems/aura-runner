@@ -8,7 +8,7 @@ jobs:
   aura:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/cybrid-systems/aura:e7d85162c
+      image: ghcr.io/cybrid-systems/aura:nightly
     steps:
       - uses: actions/checkout@v4
       - name: Aura core tests
@@ -53,7 +53,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Install pinned Aura
+      - name: Install Aura nightly
         run: |
           set -euo pipefail
           # shellcheck disable=SC1091
