@@ -8,7 +8,7 @@ A 3D parkour runner for children. The game core is [Aura](https://github.com/cyb
 ./run.sh
 ```
 
-Open <http://127.0.0.1:8080>. Ctrl-C stops the core and the page. If 8080 or 8765 is taken, set `AURA_RUNNER_WEB` and `AURA_RUNNER_PORT`.
+Open <http://127.0.0.1:8080>. Ctrl-C stops the core and the page. If 8080 or 8765 is already taken, `./run.sh` prints the next free port and uses that. Set `AURA_RUNNER_WEB` or `AURA_RUNNER_PORT` to choose one.
 
 The first run downloads Aura nightly for this machine (Linux x86_64 or arm64) into `.tools`. Later runs reuse that copy and only fetch the release checksum, so a new nightly replaces it on its own. Nothing here is compiled.
 

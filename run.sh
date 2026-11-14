@@ -8,8 +8,53 @@ mkdir -p out .tools
 # shellcheck source=scripts/aura-path.sh
 source "$ROOT/scripts/aura-path.sh"
 
-WEB_PORT="${AURA_RUNNER_WEB:-8080}"
-AURA_PORT="${AURA_RUNNER_PORT:-8765}"
+# A chosen port stays put. The defaults slide forward when something else
+# already has them, which is common on a shared machine.
+port_free() {
+  python3 - "$1" << 'PY'
+import socket, sys
+s = socket.socket()
+try:
+    s.bind(("127.0.0.1", int(sys.argv[1])))
+except OSError:
+    sys.exit(1)
+finally:
+    s.close()
+PY
+}
+
+pick_port() {
+  local name="$1" chosen="$2" explicit="$3" start="$4"
+  if port_free "$chosen"; then
+    echo "$chosen"
+    return
+  fi
+  if [[ "$explicit" == 1 ]]; then
+    echo "${name} port ${chosen} is already in use" >&2
+    exit 1
+  fi
+  local p
+  for p in $(seq "$start" $((start + 30))); do
+    if port_free "$p"; then
+      echo "${name} port ${chosen} is in use; using ${p}" >&2
+      echo "$p"
+      return
+    fi
+  done
+  echo "no free ${name} port near ${chosen}" >&2
+  exit 1
+}
+
+if [[ -n "${AURA_RUNNER_WEB:-}" ]]; then
+  WEB_PORT="$(pick_port web "$AURA_RUNNER_WEB" 1 8080)"
+else
+  WEB_PORT="$(pick_port web 8080 0 8081)"
+fi
+if [[ -n "${AURA_RUNNER_PORT:-}" ]]; then
+  AURA_PORT="$(pick_port aura "$AURA_RUNNER_PORT" 1 8765)"
+else
+  AURA_PORT="$(pick_port aura 8765 0 8766)"
+fi
 
 if [[ "${1:-}" == "deepseek" || "${1:-}" == "minimax" ]]; then
   export LUMEN_LLM="$1"
