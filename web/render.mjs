@@ -263,6 +263,29 @@ export function rebaseAnchor(anchor, keys, fromS, toS, bend) {
   };
 }
 
+// A gap recovery teleports arc length by about the width of the hole.
+// Taking the whole jump in one frame pops the runner ahead of the camera.
+// Glide across it. A correction past 8 m still rebases, so the view does
+// not rewind to the opening.
+export function glideS(shown, next, speed, dt) {
+  const s0 = Number.isFinite(shown) ? shown : 0;
+  const s1 = Number.isFinite(next) ? next : s0;
+  const jump = s1 - s0;
+  const stepDt = Number.isFinite(dt) && dt > 0 ? Math.min(0.05, dt) : 1 / 60;
+  const pace = Math.max(0.5, Number.isFinite(speed) ? speed : 5);
+  const normal = Math.max(pace * stepDt * 1.35, 0.02);
+  if (Math.abs(jump) > 8) return { s: s1, rebase: true };
+  if (Math.abs(jump) <= normal) return { s: s1, rebase: false };
+  const cap = Math.max(normal, 7 * stepDt);
+  const step = Math.sign(jump) * Math.min(Math.abs(jump), cap);
+  return { s: s0 + step, rebase: false };
+}
+
+export function drawsKeeper(hero) {
+  const plan = hero && typeof hero.plan === "string" ? hero.plan : "keeper";
+  return plan === "keeper";
+}
+
 function projectLateral(pose, lateral) {
   const lat = lateral || 0;
   const c = Math.cos(pose.psi);
@@ -505,6 +528,9 @@ export function createRenderer(canvas) {
   let camS = 0;
   let camLat = 0;
   let runS = 0;
+  let shownS = 0;
+  let shownAt = 0;
+  let shownSeen = false;
   // World pose at anchor.s. A jump in arc length moves this anchor instead
   // of rewinding the curve back to the opening heading.
   let anchor = { s: 0, x: 0, z: 0, psi: 0 };
@@ -736,19 +762,31 @@ export function createRenderer(canvas) {
     const grav = st.g || 32;
     const alive = st.alive !== false;
     const bend = Number.isFinite(st.bend) ? st.bend : DEFAULT_BEND;
-    // A rescue or a server correction can move s by a meter or two. A jump
-    // back toward the opening is many meters; keep the view and keep going.
-    if (Math.abs(pz - runS) > 8) {
-      const kept = rebaseAnchor(anchor, roadKeys, camS, pz, bend);
+    const nowMs = Number.isFinite(st.now) ? st.now : 0;
+    const frameDt = shownAt > 0 ? Math.min(0.05, Math.max(0.001, (nowMs - shownAt) / 1000)) : 1 / 60;
+    if (nowMs > 0) shownAt = nowMs;
+    if (!shownSeen) {
+      shownS = pz;
+      shownSeen = true;
+    }
+    // A gap recovery jumps s by the hole. Glide the drawn arc so the
+    // runner and the camera stay on the road already in view. A much
+    // larger correction keeps the world pose instead of rewinding.
+    const glide = glideS(shownS, pz, speed, frameDt);
+    if (glide.rebase) {
+      const kept = rebaseAnchor(anchor, roadKeys, shownS, glide.s, bend);
       anchor = kept.anchor;
       roadKeys = kept.keys;
-      camS = pz;
+      shownS = glide.s;
+      camS = shownS;
       camLat = px;
     } else {
-      noteBend(pz, bend);
+      shownS = glide.s;
+      noteBend(shownS, bend);
     }
-    runS = pz;
-    const feet = sample(pz, px);
+    runS = shownS;
+    const drawS = shownS;
+    const feet = sample(drawS, px);
     const rx = feet.x;
     const rz = feet.z;
     const reduced = !!st.reduced;
@@ -767,7 +805,7 @@ export function createRenderer(canvas) {
     const followL = reduced ? 1 : 0.12;
     const followS = reduced ? 1 : 0.18;
     camLat += (px - camLat) * followL;
-    camS += (pz - camS) * followS;
+    camS += (drawS - camS) * followS;
     const floaty = Math.max(0, (32 - grav) * 0.03);
     const wantY = 2.25 + floaty + (py > 0.4 ? 0.18 : 0) - land * 0.16;
     camY += (wantY - camY) * (reduced ? 1 : 0.08);
@@ -954,7 +992,7 @@ export function createRenderer(canvas) {
     if (land > 0.85) burst(rx, 0.15, rz, pal.path, 4, 0.01);
     if (st.reject) burst(rx, 1.6, rz + 2, pal.flower, 10, 0.06);
 
-    drawPals(st.pals, pz, st.time || 0, reduced);
+    drawPals(st.pals, drawS, st.time || 0, reduced);
 
     const air = py > 0.08;
     const sliding = st.slide > 0;
@@ -964,13 +1002,12 @@ export function createRenderer(canvas) {
     const squash = !alive ? 1 : air ? 1.14 : 1 - land * 0.16;
     const widen = !alive ? 1 : air ? 0.9 : 1 + land * 0.12;
     const leanLat = reduced ? 0 : -lean * 0.35;
-    const spot = (ds, dlat) => sample(pz + ds, px + dlat);
-    const blink = st.stumble > 0.05 && !reduced && Math.sin((st.time || 0) * 28) > 0.15;
+    const spot = (ds, dlat) => sample(drawS + ds, px + dlat);
     const hero = st.hero || {};
     const heroPlan = hero.plan || "keeper";
-    const dressed = heroPlan !== "keeper";
+    const dressed = !drawsKeeper(hero);
     spin = feet.psi;
-    if (alive && !blink) {
+    if (alive) {
       const shadow = spot(0, 0);
       push(shadow.x, 0.02, shadow.z, sliding ? 0.95 : 0.62, 0.025, sliding ? 0.9 : 0.5, 0, [0.18, 0.12, 0.08], 1, 0);
       if (dressed) {

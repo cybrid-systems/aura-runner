@@ -490,10 +490,7 @@ function frame(now) {
     sendAcc = 0;
   }
   stumble = Math.max(0, stumble - dt * 1000);
-  if (stumble > 0) {
-    flashEl.hidden = false;
-    if (!flashEl.classList.contains("on")) flashEl.classList.add("on");
-  } else if (!flashEl.hidden) {
+  if (!flashEl.hidden) {
     flashEl.hidden = true;
     flashEl.classList.remove("on");
   }

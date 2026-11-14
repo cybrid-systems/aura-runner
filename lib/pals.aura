@@ -339,3 +339,89 @@
               (loop (cdr xs) (append room (list row))
                     (if (string=? new-cue "") (hash-ref row "cue" "A new friend came along") new-cue)
                     updated))))))))
+
+; The runner's look advances when a phrase forgets it, or repeats it.
+; A different kind written by the model is kept, including keeper.
+(define (next-look kind)
+  (cond
+    ((string=? kind "kitten") "car")
+    ((string=? kind "car") "bunny")
+    ((string=? kind "bunny") "bird")
+    ((string=? kind "bird") "butterfly")
+    ((string=? kind "butterfly") "frog")
+    ((string=? kind "frog") "duck")
+    ((string=? kind "duck") "kitten")
+    (else "kitten")))
+
+(define (look-rgb kind)
+  (cond
+    ((string=? kind "car") "0.35 0.72 0.95")
+    ((string=? kind "bunny") "0.98 0.78 0.86")
+    ((string=? kind "bird") "0.95 0.86 0.35")
+    ((string=? kind "butterfly") "0.72 0.55 0.98")
+    ((string=? kind "frog") "0.45 0.82 0.4")
+    ((string=? kind "duck") "0.98 0.78 0.28")
+    (else "0.95 0.62 0.45")))
+
+(define (hero-src kind)
+  (string-append "(hero " kind " " (look-rgb kind) ")"))
+
+(define (hero-kind-in form)
+  (if (not (string? form))
+    ""
+    (let ((i (string-find form "(hero ")))
+      (if (< i 0)
+        ""
+        (let ((rest (substring form (+ i 6) (string-length form))))
+          (let ((sp (string-find rest " ")))
+            (if (< sp 1)
+              ""
+              (lower-sym (substring rest 0 sp)))))))))
+
+(define (take-balanced s i)
+  (let ((n (string-length s)))
+    (let loop ((k i) (depth 0))
+      (if (>= k n)
+        ""
+        (let ((c (string-ref s k)))
+          (cond
+            ((= c 40) (loop (+ k 1) (+ depth 1)))
+            ((= c 41)
+             (if (<= depth 1)
+               (substring s i (+ k 1))
+               (loop (+ k 1) (- depth 1))))
+            (else (loop (+ k 1) depth))))))))
+
+(define (strip-hero form)
+  (let ((i (string-find form "(hero")))
+    (if (< i 0)
+      form
+      (let ((clause (take-balanced form i)))
+        (if (string=? clause "")
+          form
+          (string-replace form clause ""))))))
+
+(define (blank? s)
+  (or (not (string? s))
+      (= (string-length (string-replace s " " "")) 0)))
+
+; Drop the hero into the same list. A bare (pal ...) becomes (pals ...).
+(define (join-hero form hero)
+  (let ((n (string-length form)))
+    (if (or (< n 2) (not (= (string-ref form (- n 1)) 41)))
+      (string-append "(pals " form " " hero ")")
+      (if (string-prefix? form "(pals")
+        (string-append (substring form 0 (- n 1)) " " hero ")")
+        (string-append "(pals " form " " hero ")")))))
+
+(define (dress-form form kind)
+  (if (not (string? form))
+    form
+    (let ((cur (if (and (string? kind) (> (string-length kind) 0)) kind "keeper")))
+      (let ((have (hero-kind-in form)))
+        (if (and (> (string-length have) 0) (not (string=? have cur)))
+          form
+          (let ((base (if (> (string-length have) 0) (strip-hero form) form)))
+            (if (blank? base)
+              (hero-src (next-look cur))
+              (join-hero base (hero-src (next-look cur))))))))))
