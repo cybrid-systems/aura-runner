@@ -68,3 +68,26 @@
 (display "fly-step ")
 (display (if (and (< fx 9.97) (> fx 9.94)) 1 0))
 (newline)
+
+; A look word is field 6. log, ribbon and stump are the second look.
+; An unknown word is refused before it can be laid out.
+(define looks "(seq (ground 6) (hurdle 0.4 0.7 log) (ground 5) (gate 0.72 0.8 ribbon) (block 1 1 stump) (ground 4))")
+(define look-laid (layout-form looks rules))
+
+(define (style-of ps k)
+  (let loop ((xs ps))
+    (if (null? xs)
+      -1.0
+      (if (= (piece-k (car xs)) k)
+        (piece-nth (car xs) 6 -1.0)
+        (loop (cdr xs))))))
+
+(display "look-code ")
+(display (if (and look-laid
+                  (= (style-of (hash-ref look-laid "pieces") 3.0) 1.0)
+                  (= (style-of (hash-ref look-laid "pieces") 4.0) 1.0)
+                  (= (style-of (hash-ref look-laid "pieces") 7.0) 1.0))
+           1 0))
+(newline)
+(report "looks" looks)
+(report "spike" "(seq (ground 6) (hurdle 0.4 0.7 spike) (ground 4))")

@@ -962,6 +962,149 @@ export function createRenderer(canvas) {
         push(at.x, y, at.z, s, s, s, 2, pal.coin, 0.12, 0.95);
       }
     }
+    // Look is field 6. 0 keeps the original mesh. New looks stay inside
+    // the same hit: a hurdle tops out near its height, a gate's cloth stays
+    // on the bar, and a block stays about a metre wide and tall.
+    function drawHurdle(q, zc, lane, sc, glow) {
+      const look = q.length > 6 ? q[6] | 0 : 0;
+      const hh = q[3] * sc;
+      const wide = lane < 0;
+      const lat0 = wide ? 0 : laneX(lane);
+      const bar = onRoad(zc, lat0);
+      const span = (wide ? 5.15 : 1.28) * (wide ? 1 : sc);
+      const thick = Math.max(0.45, q[2]);
+      if (look === 1) {
+        const bodyH = Math.max(0.16, hh * 0.78);
+        const cy = hh * 0.42;
+        push(bar.x, cy, bar.z, span * 0.9, bodyH, thick * 0.7, 0, [0.58, 0.38, 0.22], 0.55, 0.06, bar.psi);
+        const cap = Math.min(0.42, bodyH * 1.08);
+        for (const side of [-1, 1]) {
+          const tip = onRoad(zc, lat0 + side * span * 0.46);
+          push(tip.x, cy, tip.z, cap, cap, cap, 1, [0.74, 0.52, 0.32], 0.4, 0.05, tip.psi);
+        }
+      } else if (look === 2) {
+        const posts = wide ? [-2.15, -1.05, 0, 1.05, 2.15] : [lat0 - 0.42, lat0, lat0 + 0.42];
+        const rail = wide ? span * 0.92 : span * 0.86;
+        const railT = Math.max(0.06, hh * 0.16);
+        push(bar.x, hh * 0.72, bar.z, rail, railT, 0.1, 0, pal.hurdle, 0.35, 0.2 + glow, bar.psi);
+        push(bar.x, Math.max(0.08, hh * 0.28), bar.z, rail, railT, 0.1, 0, pal.hurdleTop, 0.35, 0.12, bar.psi);
+        for (let i = 0; i < posts.length; i++) {
+          const post = onRoad(zc, posts[i]);
+          push(post.x, hh * 0.5, post.z, 0.12, Math.max(0.16, hh), 0.12, 0, [0.96, 0.94, 0.88], 0.45, 0.08, post.psi);
+        }
+      } else if (look === 3) {
+        const hedgeH = Math.max(0.14, hh * 0.62);
+        push(bar.x, hedgeH * 0.5, bar.z, span * 0.9, hedgeH, thick * 0.8, 0, pal.leaf, 0.6, 0.06, bar.psi);
+        const blooms = wide ? [-1.7, -0.85, 0, 0.85, 1.7] : [lat0 - 0.32, lat0, lat0 + 0.32];
+        const bulb = Math.max(0.12, Math.min(0.2, hh * 0.38));
+        for (let i = 0; i < blooms.length; i++) {
+          const flower = onRoad(zc, blooms[i]);
+          const fy = Math.min(hedgeH + bulb * 0.2, Math.max(bulb * 0.5, hh - bulb * 0.45));
+          push(flower.x, fy, flower.z, bulb, bulb, bulb, 1, i % 2 ? pal.flower : pal.flower2, 0.3, 0.35, flower.psi);
+        }
+      } else if (look === 4) {
+        const spots = wide ? [-1.8, 0, 1.8] : [lat0];
+        const drumH = Math.max(0.16, hh * 0.8);
+        const drumW = Math.min(0.46, Math.max(0.26, drumH * 0.72));
+        for (let i = 0; i < spots.length; i++) {
+          const drum = onRoad(zc, spots[i]);
+          push(drum.x, drumH * 0.5, drum.z, drumW, drumH, drumW, 0, [0.86, 0.22, 0.32], 0.4, 0.1, drum.psi);
+          push(drum.x, drumH * 0.92, drum.z, drumW * 1.12, 0.07, drumW * 1.12, 0, [1, 0.86, 0.32], 0.3, 0.25, drum.psi);
+        }
+      } else {
+        push(bar.x, hh * 0.42, bar.z, (wide ? span : 1.22 * sc) * 1.14, hh * 1.18, thick * sc * 1.1, 0, [1, 0.98, 0.9], 0.2, 0.92, bar.psi);
+        push(bar.x, hh * 0.42, bar.z, wide ? span : 1.22 * sc, hh, thick * sc, 0, pal.hurdle, 0.4, 0.42 + glow, bar.psi);
+        push(bar.x, hh * 0.92, bar.z, (wide ? span * 0.98 : 1.28 * sc), Math.max(0.12, hh * 0.22), thick * 0.9 * sc, 0, pal.hurdleTop, 0.35, 0.28 + glow, bar.psi);
+      }
+    }
+
+    function drawGate(q, zc, sc, glow) {
+      const look = q.length > 6 ? q[6] | 0 : 0;
+      const bottom = q[4];
+      const barH = q[3];
+      const gate = onRoad(zc, 0);
+      const postL = onRoad(zc, -2.35);
+      const postR = onRoad(zc, 2.35);
+      const gy = (bottom + barH * 0.5) * sc + (1 - sc) * 0.2;
+      const solid = gateBarDepth(q[2]);
+      const span = 5.2 * sc;
+      const postRgb = look === 2 ? pal.trunk : look === 1 ? [1, 0.82, 0.38] : look === 4 ? [0.95, 0.55, 0.62] : pal.gate;
+      push(postL.x, bottom * 0.5 * sc, postL.z, 0.28, bottom * sc, 0.28, 0, postRgb, 0.4, 0.12, postL.psi);
+      push(postR.x, bottom * 0.5 * sc, postR.z, 0.28, bottom * sc, 0.28, 0, postRgb, 0.4, 0.12, postR.psi);
+      if (look === 1) {
+        push(gate.x, gy, gate.z, span, barH * sc * 0.62, solid * 0.85, 0, [1, 0.55, 0.72], 0.25, 0.35 + glow, gate.psi);
+        push(gate.x, gy, gate.z, span, Math.max(0.05, barH * sc * 0.2), solid * 0.55, 0, [1, 0.82, 0.38], 0.2, 0.45, gate.psi);
+        const bow = 0.3 * sc;
+        push(gate.x, gy + barH * sc * 0.28, gate.z, bow, bow, bow, 1, [1, 0.42, 0.58], 0.22, 0.4, gate.psi);
+      } else if (look === 2) {
+        push(gate.x, gy, gate.z, span, barH * sc, solid, 0, pal.leaf, 0.45, 0.12 + glow, gate.psi);
+        const leaves = [-1.6, -0.8, 0, 0.8, 1.6];
+        const bulb = 0.18 * sc;
+        for (let i = 0; i < leaves.length; i++) {
+          const leaf = onRoad(zc, leaves[i]);
+          push(leaf.x, gy + barH * sc * 0.22, leaf.z, bulb, bulb, bulb, 1, i % 2 ? pal.leaf2 : pal.leaf, 0.4, 0.1, leaf.psi);
+        }
+      } else if (look === 3) {
+        push(gate.x, gy, gate.z, span, Math.max(0.05, barH * sc * 0.22), solid * 0.7, 0, [0.42, 0.32, 0.2], 0.4, 0.08, gate.psi);
+        const bulbs = [-1.8, -0.9, 0, 0.9, 1.8];
+        const bulb = 0.18 * sc;
+        for (let i = 0; i < bulbs.length; i++) {
+          const lamp = onRoad(zc, bulbs[i]);
+          push(lamp.x, gy, lamp.z, bulb, bulb, bulb, 1, [1, 0.92, 0.55], 0.15, 0.9, lamp.psi);
+        }
+      } else if (look === 4) {
+        const a = onRoad(zc - 0.04, 0);
+        const b = onRoad(zc + 0.05, 0);
+        push(a.x, gy, a.z, span * 0.98, barH * sc * 0.7, solid * 0.72, 0, [0.95, 0.42, 0.55], 0.3, 0.22 + glow, a.psi);
+        push(b.x, gy, b.z, span, barH * sc * 0.42, solid * 0.55, 0, [0.98, 0.82, 0.55], 0.28, 0.18, b.psi);
+      } else {
+        const thick = Math.max(0.45, q[2]);
+        push(gate.x, gy, gate.z, 5.45 * sc, barH * sc * 1.45, Math.max(0.28, thick * 0.5), 0, [1, 0.97, 0.86], 0.18, 0.95, gate.psi);
+        push(gate.x, gy, gate.z, span, barH * sc, solid, 0, pal.gate, 0.28, 0.78 + glow, gate.psi);
+      }
+    }
+
+    function drawBlock(q, zc, lane, sc, glow) {
+      const look = q.length > 6 ? q[6] | 0 : 0;
+      const lat = laneX(lane < 0 ? 1 : lane);
+      const here = onRoad(zc, lat);
+      const yaw = here.psi;
+      if (look === 1) {
+        push(here.x, 0.4 * sc, here.z, 0.72 * sc, 0.8 * sc, 0.72 * sc, 0, [0.52, 0.34, 0.2], 0.6, 0.05, yaw);
+        push(here.x, 0.86 * sc, here.z, 0.92 * sc, 0.16 * sc, 0.92 * sc, 0, [0.7, 0.5, 0.32], 0.45, 0.08, yaw);
+        push(here.x, 1.0 * sc, here.z, 0.62 * sc, 0.12 * sc, 0.62 * sc, 0, [0.62, 0.42, 0.26], 0.5, 0.06, yaw);
+      } else if (look === 2) {
+        push(here.x, 0.3 * sc, here.z, 0.36 * sc, 0.6 * sc, 0.36 * sc, 0, [0.96, 0.9, 0.78], 0.4, 0.06, yaw);
+        push(here.x, 0.74 * sc, here.z, 1.08 * sc, 0.26 * sc, 1.08 * sc, 0, [0.9, 0.24, 0.3], 0.35, 0.1, yaw);
+        push(here.x, 0.92 * sc, here.z, 0.4 * sc, 0.4 * sc, 0.4 * sc, 1, [0.92, 0.28, 0.32], 0.3, 0.12, yaw);
+        const spots = [[-0.22, 0.04], [0.2, -0.08], [0.02, 0.16]];
+        for (let i = 0; i < spots.length; i++) {
+          const spot = onRoad(zc + spots[i][1], lat + spots[i][0]);
+          push(spot.x, 0.9 * sc, spot.z, 0.12 * sc, 0.12 * sc, 0.12 * sc, 1, [1, 0.97, 0.92], 0.2, 0.25, spot.psi);
+        }
+      } else if (look === 3) {
+        push(here.x, 0.38 * sc, here.z, 0.9 * sc, 0.76 * sc, 0.9 * sc, 0, [0.76, 0.52, 0.28], 0.5, 0.06, yaw);
+        push(here.x, 0.52 * sc, here.z, 0.96 * sc, 0.08 * sc, 0.96 * sc, 0, [0.5, 0.32, 0.16], 0.45, 0.04, yaw);
+        push(here.x, 0.9 * sc, here.z, 0.28 * sc, 0.28 * sc, 0.28 * sc, 1, [0.95, 0.32, 0.38], 0.3, 0.2, yaw);
+        push(here.x, 1.05 * sc, here.z, 0.05 * sc, 0.08 * sc, 0.05 * sc, 0, pal.leaf, 0.4, 0.08, yaw);
+      } else if (look === 4) {
+        const blobs = [[0, 0.4, 0.56, pal.leaf], [-0.24, 0.34, 0.44, pal.leaf2], [0.22, 0.32, 0.46, pal.leaf], [0.02, 0.66, 0.4, pal.leaf2]];
+        for (let i = 0; i < blobs.length; i++) {
+          const blob = blobs[i];
+          const at = onRoad(zc, lat + blob[0]);
+          push(at.x, blob[1] * sc, at.z, blob[2] * sc, blob[2] * sc, blob[2] * sc, 1, blob[3], 0.45, 0.08, at.psi);
+        }
+        const bloom = onRoad(zc, lat + 0.05);
+        push(bloom.x, 0.92 * sc, bloom.z, 0.18 * sc, 0.18 * sc, 0.18 * sc, 1, pal.flower, 0.3, 0.45, bloom.psi);
+      } else {
+        const pot = 1.05 * sc;
+        push(here.x, 0.28 * sc, here.z, pot * 1.16, 0.58 * sc, pot * 1.16, 0, [1, 0.96, 0.84], 0.2, 0.9, yaw);
+        push(here.x, 0.28 * sc, here.z, pot, 0.5 * sc, pot, 0, pal.pot, 0.38, 0.48 + glow, yaw);
+        push(here.x, 0.62 * sc, here.z, pot * 1.05, 0.16 * sc, pot * 1.05, 0, pal.potRim, 0.35, 0.05, yaw);
+        push(here.x, 0.95 * sc, here.z, 0.55 * sc, 0.42 * sc, 0.55 * sc, 1, pal.leaf, 0.55, 0.08, yaw);
+      }
+    }
+
     for (let i = 0; i < pieces.length; i++) {
       const q = pieces[i];
       const k = q[0];
@@ -970,29 +1113,13 @@ export function createRenderer(canvas) {
       if (zc < z0 || zc > z1) continue;
       const lane = q.length > 5 ? q[5] : -1;
       const sc = sproutOf(q, pz);
-      const depth = Math.max(0.45, q[2]);
       const glow = q.born ? 0.16 : 0;
       const lootKind = typeof st.loot === "string" ? st.loot : "coin";
       const here = onRoad(zc, laneX(lane < 0 ? 1 : lane));
       if (k === 3) {
-        const hh = q[3] * sc;
-        const wide = lane < 0;
-        const bar = wide ? onRoad(zc, 0) : here;
-        const span = (wide ? 5.15 : 1.28) * (wide ? 1 : sc);
-        push(bar.x, hh * 0.42, bar.z, (wide ? span : 1.22 * sc) * 1.14, hh * 1.18, depth * sc * 1.1, 0, [1, 0.98, 0.9], 0.2, 0.92, bar.psi);
-        push(bar.x, hh * 0.42, bar.z, wide ? span : 1.22 * sc, hh, depth * sc, 0, pal.hurdle, 0.4, 0.42 + glow, bar.psi);
-        push(bar.x, hh * 0.92, bar.z, (wide ? span * 0.98 : 1.28 * sc), Math.max(0.12, hh * 0.22), depth * 0.9 * sc, 0, pal.hurdleTop, 0.35, 0.28 + glow, bar.psi);
+        drawHurdle(q, zc, lane, sc, glow);
       } else if (k === 4) {
-        const bottom = q[4];
-        const barH = q[3];
-        const gate = onRoad(zc, 0);
-        const postL = onRoad(zc, -2.35);
-        const postR = onRoad(zc, 2.35);
-        const gy = (bottom + barH * 0.5) * sc + (1 - sc) * 0.2;
-        push(gate.x, gy, gate.z, 5.45 * sc, barH * sc * 1.45, Math.max(0.28, depth * 0.5), 0, [1, 0.97, 0.86], 0.18, 0.95, gate.psi);
-        push(gate.x, gy, gate.z, 5.2 * sc, barH * sc, gateBarDepth(q[2]), 0, pal.gate, 0.28, 0.78 + glow, gate.psi);
-        push(postL.x, bottom * 0.5 * sc, postL.z, 0.28, bottom * sc, 0.28, 0, pal.gate, 0.4, 0.12, postL.psi);
-        push(postR.x, bottom * 0.5 * sc, postR.z, 0.28, bottom * sc, 0.28, 0, pal.gate, 0.4, 0.12, postR.psi);
+        drawGate(q, zc, sc, glow);
       } else if (k === 5) {
         const bobc = reduced ? 0 : Math.sin(st.time * 3.2 + q[1]) * 0.08;
         const s = 0.34 * sc;
@@ -1003,11 +1130,7 @@ export function createRenderer(canvas) {
         push(here.x, 0.06, here.z, Math.max(0.7, q[2]) * sc, 0.1, 0.72 * sc, 0, pal.spring, 0.35, 0.2, here.psi);
         push(here.x, 0.28 * sc, here.z, 0.32 * sc, 0.32 * sc, 0.32 * sc, 1, pal.spring, 0.3, 0.55, here.psi);
       } else if (k === 7) {
-        const pot = 1.05 * sc;
-        push(here.x, 0.28 * sc, here.z, pot * 1.16, 0.58 * sc, pot * 1.16, 0, [1, 0.96, 0.84], 0.2, 0.9, here.psi);
-        push(here.x, 0.28 * sc, here.z, pot, 0.5 * sc, pot, 0, pal.pot, 0.38, 0.48 + glow, here.psi);
-        push(here.x, 0.62 * sc, here.z, pot * 1.05, 0.16 * sc, pot * 1.05, 0, pal.potRim, 0.35, 0.05, here.psi);
-        push(here.x, 0.95 * sc, here.z, 0.55 * sc, 0.42 * sc, 0.55 * sc, 1, pal.leaf, 0.55, 0.08, here.psi);
+        drawBlock(q, zc, lane, sc, glow);
       } else if (k === 8) {
         const vis = q.length > 6 ? q[6] : 0;
         const bob = reduced ? 0 : Math.sin((st.time || 0) * 5 + q[1]) * 0.08;
