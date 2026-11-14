@@ -1,7 +1,7 @@
 default 1 fair A kitten came to play
 car 1 fair A little car rolled in
 bird 1 fair A bird flew along
-puppy 1 fair A new friend came along
+puppy 1 fair A puppy bounded in
 dark 0 color
 motion 0 motion
 digit 0 kind
@@ -14,7 +14,7 @@ count 0 count
 example 1 fair A bird flew along
 merge 1
 update 1
-plan friend
+plan puppy
 round 1
 cap 1
 roster mochi kitten, beep car, hopp frog, wadd duck, bun bunny, flip butterfly
@@ -30,7 +30,7 @@ mixed 1
 hero-round 1
 no-hero 1
 keeper-omit 1
-hero-plan friend
+hero-plan puppy
 roster5 1
 dress 1
 dress-keep 1

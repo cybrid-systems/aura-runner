@@ -730,6 +730,44 @@ export function createRenderer(canvas) {
     eyes(x, y + 0.54, z + 0.24);
   }
 
+  function drawPuppy(x, y, z, rgb) {
+    push(x, y + 0.26, z, 0.52, 0.3, 0.64, 1, rgb, 0.35, 0.05);
+    push(x, y + 0.5, z + 0.22, 0.34, 0.28, 0.32, 1, shade(rgb, 1.06), 0.25, 0.08);
+    push(x - 0.12, y + 0.7, z + 0.16, 0.14, 0.2, 0.08, 0, shade(rgb, 0.78), 0.4, 0);
+    push(x + 0.12, y + 0.7, z + 0.16, 0.14, 0.2, 0.08, 0, shade(rgb, 0.78), 0.4, 0);
+    push(x, y + 0.46, z + 0.38, 0.12, 0.08, 0.12, 1, [0.98, 0.72, 0.64], 0.3, 0.06);
+    push(x, y + 0.32, z - 0.4, 0.16, 0.16, 0.22, 1, shade(rgb, 0.72), 0.4, 0);
+    eyes(x, y + 0.54, z + 0.34);
+  }
+
+  function drawFox(x, y, z, rgb) {
+    const chest = [0.98, 0.94, 0.88];
+    push(x, y + 0.3, z, 0.34, 0.26, 0.56, 1, rgb, 0.32, 0.06);
+    push(x, y + 0.32, z + 0.06, 0.2, 0.14, 0.22, 1, chest, 0.3, 0.05);
+    push(x, y + 0.54, z + 0.2, 0.26, 0.22, 0.26, 1, rgb, 0.28, 0.08);
+    push(x - 0.08, y + 0.76, z + 0.18, 0.08, 0.18, 0.06, 0, shade(rgb, 0.8), 0.35, 0);
+    push(x + 0.08, y + 0.76, z + 0.18, 0.08, 0.18, 0.06, 0, shade(rgb, 0.8), 0.35, 0);
+    push(x, y + 0.4, z - 0.42, 0.24, 0.22, 0.3, 1, shade(rgb, 1.08), 0.3, 0.05);
+    eyes(x, y + 0.58, z + 0.3);
+  }
+
+  function drawTurtle(x, y, z, rgb) {
+    push(x, y + 0.12, z, 0.5, 0.12, 0.56, 1, [0.9, 0.74, 0.48], 0.4, 0.05);
+    push(x, y + 0.32, z, 0.48, 0.24, 0.52, 1, shade(rgb, 0.7), 0.45, 0.08);
+    push(x, y + 0.44, z, 0.24, 0.08, 0.26, 1, [0.72, 0.9, 0.48], 0.35, 0.12);
+    push(x, y + 0.22, z + 0.38, 0.2, 0.16, 0.2, 1, shade(rgb, 1.15), 0.3, 0.08);
+    eyes(x, y + 0.28, z + 0.46);
+  }
+
+  function drawBee(x, y, z, rgb, t, reduced) {
+    const wing = reduced ? 0.16 : 0.1 + Math.abs(Math.sin((t || 0) * 14)) * 0.1;
+    push(x, y + 0.4, z, 0.26, 0.22, 0.38, 1, rgb, 0.3, 0.12);
+    push(x, y + 0.4, z, 0.28, 0.08, 0.1, 0, [0.22, 0.16, 0.12], 0.4, 0.05);
+    push(x - 0.16, y + 0.54, z, wing, 0.06, 0.18, 0, [0.86, 0.93, 1], 0.15, 0.3);
+    push(x + 0.16, y + 0.54, z, wing, 0.06, 0.18, 0, [0.86, 0.93, 1], 0.15, 0.3);
+    eyes(x, y + 0.46, z + 0.16);
+  }
+
   function drawFriend(x, y, z, rgb) {
     push(x, y + 0.36, z, 0.4, 0.4, 0.4, 1, rgb, 0.28, 0.08);
     push(x, y + 0.66, z + 0.04, 0.28, 0.26, 0.26, 1, shade(rgb, 1.12), 0.22, 0.12);
@@ -745,6 +783,10 @@ export function createRenderer(canvas) {
     else if (plan === "butterfly") drawButterfly(x, y, z, rgb, t, reduced);
     else if (plan === "frog") drawFrog(x, y, z, rgb);
     else if (plan === "duck") drawDuck(x, y, z, rgb);
+    else if (plan === "puppy") drawPuppy(x, y, z, rgb);
+    else if (plan === "fox") drawFox(x, y, z, rgb);
+    else if (plan === "turtle") drawTurtle(x, y, z, rgb);
+    else if (plan === "bee") drawBee(x, y, z, rgb, t, reduced);
     else drawFriend(x, y, z, rgb);
   }
 
@@ -754,17 +796,17 @@ export function createRenderer(canvas) {
     for (let i = 0; i < nPals; i++) {
       const pal = list[i];
       const side = i % 2 === 0 ? 1 : -1;
-      const rank = Math.floor(i / 2);
+      const file = i % 3;
       const motion = pal.motion || "pace";
       let hop = 0;
-      if (motion === "float") hop = reduced ? 0.7 : 0.62 + Math.sin(t * 2 + i) * 0.16;
-      else if (!reduced && motion === "hop") hop = Math.abs(Math.sin(t * 6 + i)) * 0.38;
-      else if (!reduced && motion === "follow") hop = Math.abs(Math.sin(t * 5 + i)) * 0.1;
-      else if (!reduced) hop = Math.abs(Math.sin(t * 4 + i)) * 0.05;
-      const weave = !reduced && motion === "side" ? Math.sin(t * 1.4 + i) * 0.22 : 0;
-      // side > 0 used to be world +X (screen-left). Sim lateral is the opposite.
-      const lat = -(side * (2.95 + rank * 0.15) + weave);
-      const z = pz + 1.6 + rank * 1.8 + (reduced ? 0 : Math.sin(t * 0.8 + i) * 0.2);
+      if (motion === "float") hop = reduced ? 0.85 : 0.78 + Math.sin(t * 2.2 + i) * 0.22;
+      else if (!reduced && motion === "hop") hop = Math.abs(Math.sin(t * 6 + i)) * 0.55;
+      else if (!reduced && motion === "follow") hop = Math.abs(Math.sin(t * 5 + i)) * 0.16;
+      else if (!reduced) hop = Math.abs(Math.sin(t * 4 + i)) * 0.08;
+      const weave = !reduced && motion === "side" ? Math.sin(t * 1.4 + i) * 0.4 : 0;
+      // Beside the lanes, spread along the road so six friends read as a crowd.
+      const lat = -(side * (2.25 + file * 0.22) + weave);
+      const z = pz - 0.8 + i * 1.45 + (reduced ? 0 : Math.sin(t * 0.8 + i) * 0.25);
       const at = sample(z, lat);
       spin = at.psi;
       push(at.x, 0.02, at.z, 0.55, 0.02, 0.4, 0, [0.18, 0.12, 0.08], 1, 0);
@@ -962,11 +1004,17 @@ export function createRenderer(canvas) {
         push(at.x, y, at.z, s, s, s, 2, pal.coin, 0.12, 0.95);
       }
     }
-    // Look is field 6. 0 keeps the original mesh. New looks stay inside
-    // the same hit: a hurdle tops out near its height, a gate's cloth stays
-    // on the bar, and a block stays about a metre wide and tall.
+    // Look is field 6. A stored look is kept. A phrase that left the word
+    // out stays the first mesh until it blooms; a bloomed one changes
+    // along the road. Heights stay inside the same hit.
+    function variedLook(q, k) {
+      const raw = q.length > 6 ? q[6] | 0 : 0;
+      if (raw > 0 || !q.born) return raw;
+      return 1 + (Math.floor(Math.abs(q[1]) * 0.37 + k) % 4);
+    }
+
     function drawHurdle(q, zc, lane, sc, glow) {
-      const look = q.length > 6 ? q[6] | 0 : 0;
+      const look = variedLook(q, 3);
       const hh = q[3] * sc;
       const wide = lane < 0;
       const lat0 = wide ? 0 : laneX(lane);
@@ -1019,7 +1067,7 @@ export function createRenderer(canvas) {
     }
 
     function drawGate(q, zc, sc, glow) {
-      const look = q.length > 6 ? q[6] | 0 : 0;
+      const look = variedLook(q, 4);
       const bottom = q[4];
       const barH = q[3];
       const gate = onRoad(zc, 0);
@@ -1065,7 +1113,7 @@ export function createRenderer(canvas) {
     }
 
     function drawBlock(q, zc, lane, sc, glow) {
-      const look = q.length > 6 ? q[6] | 0 : 0;
+      const look = variedLook(q, 7);
       const lat = laneX(lane < 0 ? 1 : lane);
       const here = onRoad(zc, lat);
       const yaw = here.psi;

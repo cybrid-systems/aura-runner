@@ -18,7 +18,7 @@
   "You redesign the garden backdrop for a children's 3D endless runner called Lumen Run. No markdown. Form: (garden (sky R G B) (ground R G B) (flower KIND DENSITY) (light L)). KIND is one of daisy, tulip, blossom, buttercup. Sky channels are 0.25 to 1 and the sky stays bright. Ground is green: G is at least 0.30 and at least as large as R, and not much smaller than B. Density is 0.15 to 1. Light is 0.50 to 1, never night. Optional (fog F) is 0 to 0.38; do not ask for thicker fog. No violence, fear, weapons, or scary words. Make it look different from a plain blue sky and daisies. First write one short bright English sentence with no parentheses, then the s-expression. That sentence is what the child reads. Example: (garden (sky 0.95 0.45 0.55) (ground 0.35 0.72 0.32) (flower tulip 0.85) (light 0.9))")
 
 (define PALS-SYS
-  "You change one friendly companion in a children's 3D endless runner called Lumen Run. No markdown. Restyle a friend who is already here by keeping the same name, or add one new gentle friend. Form: (pal KIND NAME R G B MOTION). KIND is kitten, car, bunny, bird, butterfly, frog, duck, or a new gentle word of 3 to 12 letters. NAME is 2 to 12 letters. R G B are 0.25 to 1 and the colour stays bright. MOTION is hop, pace, float, follow, or side. No violence, fear, weapons, or scary words. Always restyle the runner in that same answer with (hero KIND R G B), alone or as one clause inside (pals ...). Pick a KIND different from the runner's current look. KIND is keeper, kitten, car, bunny, bird, butterfly, frog, or duck. keeper is the light-keeper. R G B stay bright, from 0.25 to 1. A hero clause changes the runner only and does not add a friend. First write one short bright English sentence with no parentheses, then the s-expression. That sentence is what the child reads. Example: (pal bird lark 0.95 0.86 0.35 float)")
+  "You change one friendly companion in a children's 3D endless runner called Lumen Run. No markdown. Restyle a friend who is already here by keeping the same name, or add one new gentle friend. Form: (pal KIND NAME R G B MOTION). KIND is kitten, car, bunny, bird, butterfly, frog, duck, puppy, fox, turtle, bee, or a new gentle word of 3 to 12 letters. NAME is 2 to 12 letters. R G B are 0.25 to 1 and the colour stays bright. MOTION is hop, pace, float, follow, or side. No violence, fear, weapons, or scary words. Always restyle the runner in that same answer with (hero KIND R G B), alone or as one clause inside (pals ...). Pick a KIND different from the runner's current look. KIND is keeper, kitten, car, bunny, bird, butterfly, frog, or duck. keeper is the light-keeper. R G B stay bright, from 0.25 to 1. A hero clause changes the runner only and does not add a friend. First write one short bright English sentence with no parentheses, then the s-expression. That sentence is what the child reads. Example: (pal bird lark 0.95 0.86 0.35 float)")
 
 (define g-now 32.0)
 (define jump-now 11.2)
@@ -259,7 +259,8 @@
 (define llm-kind "motif")
 (define motif-next 2500.0)
 (define scene-next 5000.0)
-(define pals-next 8000.0)
+(define pals-next 5000.0)
+(define guest-at 0)
 
 (define (hash-put! h k v)
   (try (begin (hash-set! h k v) #t) (catch (e) #f)))
@@ -413,7 +414,9 @@
 (define (spawn-chunk!)
   (let ((why (choose-band)))
     (apply-feel! why)
-    (if (and (pair? motif-pieces) (> motif-span 0.5) (= (modulo next-id 3) 2))
+    ; Every other stretch uses the latest kept phrase, so a mutation
+    ; shows up before the seeded road has repeated itself.
+    (if (and (pair? motif-pieces) (> motif-span 0.5) (= (modulo next-id 2) 1))
       (add-chunk! "motif" motif-pieces motif-span band hue-now)
       (let ((ch (chunk-or-fallback (pattern-chunk seed next-id band))))
         (if ch
@@ -478,7 +481,7 @@
   (set! next-dream 1500.0)
   (set! motif-next 2500.0)
   (set! scene-next 5000.0)
-  (set! pals-next 8000.0)
+  (set! pals-next 5000.0)
   (set! dream-phase 0)
   (set! hold-phase 0)
   (if (not speed-lock) (set! speed-now 5.0) #f)
@@ -1198,7 +1201,7 @@
     ((string=? kind "pals")
      (string-append "Friends already here: " (pal-names pals-rows)
                     ". The runner is now " (runner-kind)
-                    ". Restyle one friend already here by keeping the same name, or add one new gentle friend who is not in that list. Always include (hero KIND R G B) with a different gentle kind. Start with one short sentence."))
+                    ". Restyle one friend already here by keeping the same name, or add one new gentle friend who is not in that list. A puppy, fox, turtle, or bee is welcome. Always include (hero KIND R G B) with a different gentle kind. Start with one short sentence."))
     (else
      (string-append "Difficulty band " (number->string band)
                     ". Pickups are " loot-now
@@ -1224,11 +1227,11 @@
 (define (watchdog-ms)
   (* (+ llm-timeout-s 10.0) 1000.0))
 
-; Tests can ask for obstacles less often. The live game stays at 16 seconds.
+; Tests can ask for obstacles less often. The live game stays at 10 seconds.
 (define (motif-gap-ms)
   (let ((raw (try (getenv "LUMEN_MOTIF_GAP_MS") (catch (e) ""))))
     (let ((n (if (and (string? raw) (> (string-length raw) 0)) (string->number raw) #f)))
-      (if (and (number? n) (> n 0)) (exact->inexact n) 16000.0))))
+      (if (and (number? n) (> n 0)) (exact->inexact n) 10000.0))))
 
 (define (sync-llm-busy!)
   (set! llm-busy (or motif-busy scene-busy pals-busy)))
@@ -1352,7 +1355,7 @@
 (define (pals-gap-ms)
   (let ((raw (try (getenv "LUMEN_PALS_GAP_MS") (catch (e) ""))))
     (let ((n (if (and (string? raw) (> (string-length raw) 0)) (string->number raw) #f)))
-      (if (and (number? n) (> n 0)) (exact->inexact n) 18000.0))))
+      (if (and (number? n) (> n 0)) (exact->inexact n) 11000.0))))
 
 (define (ask-pals!)
   (if (or pals-working (not pals-req))
@@ -1505,6 +1508,7 @@
       #f)
     (maybe-hold!)
     (maybe-dream!)
+    (maybe-guests!)
     (ensure-ahead!)
     (poll-llm! c)
     (send-new-chunks c)
@@ -1841,6 +1845,44 @@
                (string->number raw)
                8765)))
       (if (and (number? n) (> n 0)) n 8765))))
+
+(define (guest-text i)
+  (cond
+    ((= i 0) "(pal bunny bun 0.98 0.78 0.86 hop)")
+    ((= i 1) "(pal puppy pip 0.92 0.62 0.42 hop)")
+    ((= i 2) "(pal bird wren 0.95 0.86 0.35 float)")
+    ((= i 3) "(pal butterfly flip 0.72 0.55 0.98 float)")
+    (else "")))
+
+; Mochi and the car are already here. Four more friends arrive on their
+; own so the path is crowded before a model phrase lands. A full roster
+; waits, and a call in flight is left alone.
+(define (maybe-guests!)
+  (if (or (not (player-alive? player))
+          (llm-posting?)
+          (>= guest-at 4)
+          (>= (length pals-rows) 6)
+          (< run-ms (+ 400.0 (* (exact->inexact guest-at) 1800.0))))
+    #f
+    (let ((text (guest-text guest-at)))
+      (set! guest-at (+ guest-at 1))
+      (let ((found (check-pals text)))
+        (if (not (and (hash? found) (hash-ref found "ok")))
+          #f
+          (let ((incoming (hash-ref found "pals")))
+            (if (or (not (pair? incoming))
+                    (find-row pals-rows (hash-ref (car incoming) "name" "")))
+              #f
+              (let ((merged (merge-pals pals-rows incoming)))
+                (if (not (and (hash? merged) (hash-ref merged "ok")))
+                  #f
+                  (begin
+                    (set! pals-rows (hash-ref merged "rows"))
+                    (set! pals-now (roster-text pals-rows hero-now))
+                    (set! rules-dirty #t)
+                    (note! "KEEP" "fair" "guest"
+                           (hash-ref merged "cue" "A new friend came along"))
+                    #t))))))))))
 
 (define (boot-pals!)
   (let ((found (check-pals default-pals)))
