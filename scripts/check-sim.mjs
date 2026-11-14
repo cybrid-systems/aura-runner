@@ -63,6 +63,35 @@ for (let i = 0; i < 220; i++) {
     bumpGrace = hp[11];
   }
 }
+const potPs = [[7, 4.9, 1.1, 1.65, 0, 1]];
+function potEvent(p) {
+  return step(p, potPs.map((q) => q.slice()), rules, DT);
+}
+function edgePlayer() {
+  const p = makePlayer(5);
+  p[10] = 0.88;
+  return p;
+}
+function clearPlayer() {
+  const p = makePlayer(5);
+  p[1] = 1.05;
+  return p;
+}
+const flyPs = [[8, 4.8, 0.72, 0.5, 0.7, 1, 0, 0]];
+function flyEvent(p) {
+  return step(p, flyPs.map((q) => q.slice()), rules, DT);
+}
+function gateRun(slider) {
+  const p = makePlayer(7.6);
+  const ps = [[4, 8, 0.7, 0.34, 0.66]];
+  if (slider) pressSlide(p);
+  let bumped = 0;
+  for (let i = 0; i < 90; i++) {
+    if (step(p, ps, rules, DT) === "bump") bumped = 1;
+  }
+  return { bumped, x: p[0] };
+}
+
 const pit = [[1, 0, 4, 0.45, 0], [2, 4, 5, 1.2, -1.2], [1, 9, 20, 0.45, 0]];
 const pp = makePlayer(1);
 let pitGrace = 0;
@@ -89,9 +118,20 @@ const got = [
   `bump-grace ${bumpGrace > 1 ? 1 : 0}`,
   `pit-alive ${sawOops === 1 && pp[5] > 0 && pp[0] > 12 && pp[1] <= 0.001 ? 1 : 0}`,
   `pit-grace ${pitGrace > 1 ? 1 : 0}`,
+  `pot-centre ${potEvent(makePlayer(5)) === "bump" ? 1 : 0}`,
+  `pot-edge ${potEvent(edgePlayer()) === "ok" ? 1 : 0}`,
+  `pot-clear ${potEvent(clearPlayer()) === "ok" ? 1 : 0}`,
+  `fly-centre ${flyEvent(makePlayer(5)) === "bump" ? 1 : 0}`,
+  `fly-edge ${flyEvent(edgePlayer()) === "ok" ? 1 : 0}`,
+  `gate-stand ${gateRun(false).bumped}`,
+  `gate-slide ${gateRun(true).bumped === 0 && gateRun(true).x > 9 ? 1 : 0}`,
 ];
 // apex/air are analytic and already in the golden; compare the sim lines.
 const simGolden = golden.filter((l) => !l.startsWith("apex ") && !l.startsWith("air "));
+if (simGolden.length !== got.length) {
+  console.error(`line count aura ${simGolden.length} js ${got.length}`);
+  process.exit(1);
+}
 let bad = 0;
 for (let i = 0; i < simGolden.length; i++) {
   if (simGolden[i] !== got[i]) {

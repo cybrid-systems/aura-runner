@@ -149,6 +149,46 @@ function laneX(lane) {
   return lane < 0 ? 0 : (lane - 1) * 1.8;
 }
 
+// Solid gate bar. lib/phys.aura gate-span and web/sim.mjs use this thickness.
+export function gateBarDepth(w) {
+  const depth = Math.max(0.45, w);
+  return Math.max(0.22, depth * 0.35);
+}
+
+// A pot is about 1.05 across and its leaves top out near 1.16.
+// A toy is smaller than the lane it flies in. Twins: lib/phys.aura, web/sim.mjs.
+export const POT_REACH = 0.84;
+export const POT_TOP = 1.12;
+export const POT_HALF = 0.56;
+export const FLY_REACH = 0.62;
+export const FLY_HALF = 0.22;
+
+// Kind-2 holes overlapping [s0, s1] on one lane. A piece lane below 0
+// covers every lane. The tile centre used to paint the whole slab, so a
+// hole that missed that centre stayed grass while the body still fell in.
+export function gapSpans(pieces, s0, s1, lane) {
+  if (!pieces || !(s1 > s0)) return [];
+  const raw = [];
+  for (let i = 0; i < pieces.length; i++) {
+    const q = pieces[i];
+    if (!q || q[0] !== 2) continue;
+    const pl = q.length > 5 ? q[5] : -1;
+    if (pl >= 0 && pl !== lane) continue;
+    const a = Math.max(s0, q[1]);
+    const b = Math.min(s1, q[1] + q[2]);
+    if (b > a) raw.push([a, b]);
+  }
+  raw.sort((u, v) => u[0] - v[0]);
+  const out = [];
+  for (let i = 0; i < raw.length; i++) {
+    const span = raw[i];
+    const last = out[out.length - 1];
+    if (last && span[0] <= last[1]) last[1] = Math.max(last[1], span[1]);
+    else out.push([span[0], span[1]]);
+  }
+  return out;
+}
+
 export const FOG_CAP = 0.38;
 
 // Same curve as the mesh shader: haze tops out at 0.38, and emissive
@@ -590,17 +630,6 @@ export function createRenderer(canvas) {
     n++;
   }
 
-  function gapAt(pieces, z, lane) {
-    for (let i = 0; i < pieces.length; i++) {
-      const q = pieces[i];
-      if (q[0] !== 2) continue;
-      const pl = q.length > 5 ? q[5] : -1;
-      if (pl >= 0 && pl !== lane) continue;
-      if (z >= q[1] && z < q[1] + q[2]) return true;
-    }
-    return false;
-  }
-
   function burst(x, y, z, rgb, count, lift) {
     let left = count;
     for (let i = 0; i < 36 && left > 0; i++) {
@@ -862,14 +891,29 @@ export function createRenderer(canvas) {
     const onRoad = (s, lateral) => sample(s, lateral);
     for (let z = Math.floor(z0 / 2) * 2; z < z1; z += 2) {
       const cz = z + 1;
+      const s0 = cz - 1;
+      const s1 = cz + 1;
       const dist = cz - pz;
       for (let lane = 0; lane < 3; lane++) {
-        const tile = onRoad(cz, laneX(lane));
-        if (gapAt(pieces, cz, lane)) {
-          push(tile.x, -0.06, tile.z, 1.72, 0.1, 2.02, 0, pal.water, 0.12, 0.1, tile.psi);
-        } else {
-          const top = lane === 1 ? pal.path : lane === 0 ? pal.grassL : pal.grassR;
-          push(tile.x, 0.02, tile.z, 1.74, 0.12, 2.02, 0, top, lane === 1 ? 0.55 : 0.8, 0, tile.psi);
+        const lat = laneX(lane);
+        const spans = gapSpans(pieces, s0, s1, lane);
+        const top = lane === 1 ? pal.path : lane === 0 ? pal.grassL : pal.grassR;
+        let cursor = s0;
+        for (let i = 0; i <= spans.length; i++) {
+          const end = i < spans.length ? spans[i][0] : s1;
+          if (end - cursor > 0.04) {
+            const mid = (cursor + end) / 2;
+            const tile = onRoad(mid, lat);
+            push(tile.x, 0.02, tile.z, 1.74, 0.12, end - cursor + 0.02, 0, top, lane === 1 ? 0.55 : 0.8, 0, tile.psi);
+          }
+          if (i < spans.length) cursor = spans[i][1];
+        }
+        for (let i = 0; i < spans.length; i++) {
+          const a = spans[i][0];
+          const b = spans[i][1];
+          const mid = (a + b) / 2;
+          const tile = onRoad(mid, lat);
+          push(tile.x, -0.06, tile.z, 1.72, 0.1, b - a + 0.04, 0, pal.water, 0.12, 0.1, tile.psi);
         }
       }
       if (dist < 36 && ((z / 2) | 0) % 2 === 0) {
@@ -946,7 +990,7 @@ export function createRenderer(canvas) {
         const postR = onRoad(zc, 2.35);
         const gy = (bottom + barH * 0.5) * sc + (1 - sc) * 0.2;
         push(gate.x, gy, gate.z, 5.45 * sc, barH * sc * 1.45, Math.max(0.28, depth * 0.5), 0, [1, 0.97, 0.86], 0.18, 0.95, gate.psi);
-        push(gate.x, gy, gate.z, 5.2 * sc, barH * sc, Math.max(0.22, depth * 0.35), 0, pal.gate, 0.28, 0.78 + glow, gate.psi);
+        push(gate.x, gy, gate.z, 5.2 * sc, barH * sc, gateBarDepth(q[2]), 0, pal.gate, 0.28, 0.78 + glow, gate.psi);
         push(postL.x, bottom * 0.5 * sc, postL.z, 0.28, bottom * sc, 0.28, 0, pal.gate, 0.4, 0.12, postL.psi);
         push(postR.x, bottom * 0.5 * sc, postR.z, 0.28, bottom * sc, 0.28, 0, pal.gate, 0.4, 0.12, postR.psi);
       } else if (k === 5) {

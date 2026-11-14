@@ -16,3 +16,10 @@ bump-score 10.0
 bump-grace 1
 pit-alive 1
 pit-grace 1
+pot-centre 1
+pot-edge 1
+pot-clear 1
+fly-centre 1
+fly-edge 1
+gate-stand 1
+gate-slide 1

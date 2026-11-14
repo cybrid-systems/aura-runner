@@ -1,6 +1,9 @@
 // Twin of lib/phys.aura. Fixed step. The hot path mutates the player
 // Float64Array. A coin flips its kind to 0 in place, matching the
 // server's spent-piece mark.
+// Pot, toy and gate footprints match the mesh (web/render.mjs).
+
+import { FLY_HALF, FLY_REACH, POT_HALF, POT_REACH, POT_TOP, gateBarDepth } from "./render.mjs";
 
 export const DT = 1 / 60;
 // Twin of TAKEOFF-S / LANE-A / LANE-V in lib/phys.aura.
@@ -213,6 +216,29 @@ export function step(p, pieces, rules, dt) {
   return ev;
 }
 
+function hitSpan(q) {
+  const k = q[0];
+  const x = q[1];
+  const w = q[2];
+  const mid = x + w * 0.5;
+  if (k === 4) {
+    const half = gateBarDepth(w) * 0.5;
+    return [mid - half, mid + half];
+  }
+  if (k === 8) return [mid - FLY_HALF, mid + FLY_HALF];
+  if (k === 7) {
+    const half = Math.min(w * 0.5, POT_HALF);
+    return [mid - half, mid + half];
+  }
+  return [x, x + w];
+}
+
+function meetsSide(lx, lane, reach) {
+  if (lane < -0.5) return true;
+  const d = lx - (lane - 1) * LANE_W;
+  return (d < 0 ? -d : d) < reach;
+}
+
 function collide(p, pieces, rules) {
   const forgive = rules.forgive;
   const h = p[3] > 0 ? rules.sh : rules.ph;
@@ -226,11 +252,15 @@ function collide(p, pieces, rules) {
     if (p[5] <= 0) return "dead";
     const q = pieces[i];
     const k = q[0];
-    const x1 = q[1];
+    const span = hitSpan(q);
+    const x1 = span[0];
+    const x2 = span[1];
     const y1 = q[4];
-    const x2 = x1 + q[2];
-    const y2 = y1 + q[3];
-    const hit = hitsLane(q, lane) && overlap(left, bottom, right, top, x1, y1, x2, y2);
+    const y2 = k === 7 ? Math.min(y1 + q[3], POT_TOP) : y1 + q[3];
+    const side = k === 7 || k === 8
+      ? meetsSide(p[10], pieceLane(q), k === 7 ? POT_REACH : FLY_REACH)
+      : hitsLane(q, lane);
+    const hit = side && overlap(left, bottom, right, top, x1, y1, x2, y2);
     if (hit && (k === 3 || k === 4 || k === 7 || k === 8)) {
       if (rules.strict) {
         p[5] = 0;
