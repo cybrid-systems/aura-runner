@@ -120,3 +120,16 @@
 
 (define b1 (offline-chunk 42 0 1 rules1))
 (show "band1" (if b1 1 0))
+
+(define (chunk-flyers seed index band)
+  (let ((ch (pattern-chunk seed index band)))
+    (if (not ch) -1 (count-kind (hash-ref ch "pieces") 8.0))))
+
+(show "toys" (if (and (= (chunk-flyers 1 0 0) 1)
+                      (= (chunk-flyers 42 1 0) 1)
+                      (= (chunk-flyers 99 2 0) 1)
+                      (= (chunk-flyers 3 0 1) 1)
+                      (= (chunk-flyers 5 0 2) 1)
+                      (= (chunk-flyers 7 0 3) 1)
+                      (= (chunk-flyers 9 0 4) 1))
+               1 0))
