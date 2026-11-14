@@ -14,21 +14,31 @@ That pulls `ghcr.io/cybrid-systems/aura:e7d85162c` if you do not already have th
 
 The world code on the badge (`LUMEN-42`) is the seed. Open `http://127.0.0.1:8080/?seed=42` to share the same course. Tap the badge for the last few garden notes. Add `?stats=1` for frame-time numbers, `?bench=1` to drop a JSON summary into the page after 180 frames.
 
-An OpenAI-compatible model is optional. `LLM_API_KEY` is required for that path. Without it the offline generator in Aura builds every chunk, and the garden still tries one new phrase on its own.
+An OpenAI-compatible model is optional. Without a key, the offline generator in Aura builds every chunk. The garden still starts with a kitten and a little car.
+
+`./run.sh` reads two key files and probes each endpoint before the core listens. DeepSeek V4.1 Flash is the default (`deepseek-flash` at `https://api.deepseek.com/v1`). MiniMax is the other choice. A button in the garden switches between the ones the probe kept. HTTP 401 or 403 drops that key. If the network does not answer, the key file is still used and the status line says the probe was unconfirmed.
 
 ```bash
-export LLM_API_KEY=...                           # required for a model; omit for offline generation
-export LLM_BASE_URL=https://api.minimaxi.com/v1  # MiniMax in China. https://api.minimax.io returns 401 for a China key
-export LLM_MODEL=MiniMax-M3.1-Flash
+./run.sh                 # DeepSeek V4.1 Flash
+./run.sh minimax         # prefer MiniMax when that key is usable
+```
+
+The files are one token each and are not printed:
+
+- `~/code/keys/deepseek`, or `DEEPSEEK_KEY_FILE`
+- `~/code/keys/minimax`, or `MINIMAX_KEY_FILE`
+
+MiniMax uses `https://api.minimaxi.com/v1` and `MiniMax-M3.1-Flash`. `https://api.minimax.io` returns 401 for a China key, so the probe does not call it. An `LLM_API_KEY` already in the environment is left as it is, which is how the mock tests point at a local server.
+
+```bash
 # optional. Aura main (b4e0ce31 and later) defaults the HTTP budget to 120 seconds.
 # export LLM_TIMEOUT=120
 # export AURA_HTTP_TIMEOUT=120
-./run.sh
 ```
 
-This pin is past the v0.2.2 `http-post` bugs ([cybrid-systems/aura#5267](https://github.com/cybrid-systems/aura/issues/5267), [#5268](https://github.com/cybrid-systems/aura/issues/5268)): a 200 response has a body, and the HTTP budget defaults to 120 seconds (`LLM_TIMEOUT` or `AURA_HTTP_TIMEOUT` overrides it). `llm:chat` is called as `(llm:chat sys user extra)` with `reasoning_effort` `minimal` and `max_tokens` 2048. If that arity is refused, the game keeps the two-argument call. A new page clears the in-flight flag, so the next run can ask again.
+This pin is past the v0.2.2 `http-post` bugs ([cybrid-systems/aura#5267](https://github.com/cybrid-systems/aura/issues/5267), [#5268](https://github.com/cybrid-systems/aura/issues/5268)): a 200 response has a body, and the HTTP budget defaults to 120 seconds (`LLM_TIMEOUT` or `AURA_HTTP_TIMEOUT` overrides it). With a single `LLM_API_KEY`, `llm:chat` is called as `(llm:chat sys user extra)` with `reasoning_effort` `minimal` and `max_tokens` 2048. If that arity is refused, the game keeps the two-argument call. When `./run.sh` probed a provider, the core posts that provider's own key and URL, so the garden button can switch without a restart. A new page clears the in-flight flag, so the next run can ask again.
 
-The model is asked for an obstacle phrase and, a few seconds later, a garden phrase. Aura checks each one before it can appear. A rejected phrase is rolled back and the run continues. The call runs on a fiber, so the run does not wait for it. The first ask is a couple of seconds in, then about every 12–16 seconds, so a short run shows a change.
+The model is asked for an obstacle phrase, a garden phrase, and one new friend. Aura checks each one before it can appear. A rejected phrase is rolled back and the run continues. The calls run on fibers, so the run does not wait. The first asks are a few seconds in, then about every 12–18 seconds, so a short run shows a change. A friend the model names, such as a bird or a made-up puppy, joins the kitten and the car beside the path. At most six friends stay. The two who were there first keep their places.
 
 Hitting a hurdle, a gate, a pot or a gap does not end the run. The keeper flashes for about 1.5 seconds, slows down, loses a few points, and a line says "Oops! Keep going" (a gap says "Back on the path" and sets them down on the ground ahead). There is no "The light rested" card. Old chunks behind the runner are dropped so a long run does not keep the whole trail.
 
@@ -43,6 +53,8 @@ The browser predicts the runner from the latest rule snapshot, so a slow server 
 | The garden gets a little faster, lighter, and longer to slide as you clear chunks, and eases off if you do not. A short line names it ("A little faster", "A gentler pace"). The trail, the sun and the jump follow the new numbers on the next snapshot | `(mutate :rebind)` on the live defines in `core/hot.aura`, installed once with `set-code` | `lib/live.aura`, `apply-feel!` in `core/main.aura` |
 | A phrase that is too wide drifts away, then a fair one blooms into the course a moment later. The toast says which | `evo:trial` and `evo:commit!`. The autopilot is sliced across ticks so the check does not stall the run; geometry that already fails does not run it | `maybe-dream!`, `consider-form!`, `lib/gen.aura` |
 | The sky, the grass, the flowers and the light ease into a new garden. The toast names it ("The sky turned rosy", "Tulips opened up") | the same trial and rebind, on `scene-form`. Out of range, too dark, or not a known flower rolls back | `consider-scene!`, `lib/scene.aura`, `web/render.mjs` |
+| A kitten and a little car run beside the path. A bird, a bunny, or a friend the model names can join them. The toast says who arrived | the same trial and rebind, on `pals-form`. A dark colour, a banned word, or a bad motion rolls back. An unknown gentle kind is drawn as a round friend | `consider-pals!`, `lib/pals.aura`, `web/render.mjs` |
+| The model button swaps DeepSeek and MiniMax. The next phrase uses that key | `./run.sh` probes the key files and exports both. The core posts the selected provider | `scripts/probe-llm.sh`, `on-provider` |
 | A bump or a drop does not end the run. The keeper blinks, slows, and keeps the distance | the playing step stumbles; the fairness autopilot still uses strict rules, so an unfair phrase is not kept | `lib/phys.aura`, `web/sim.mjs` |
 | The check is executable: jump reach, gate height, a lane left open beside a pot, and an autopilot that has to finish the chunk | pure step in `lib/phys.aura` | `constraint-hash`, `autopilot-slice` |
 | Later chunks open one notch at a time, and only after the current notch is being cleared. A fall does not unlock a crueller arm | `std/evo` UCB (`evo:policy`, `evo:policy-select`, `evo:policy-report`) plus `evo:record!` | `choose-band`, `open-next-arm!` |
@@ -65,6 +77,7 @@ No new Aura issue was filed.
 - `lib/phys.aura` — fixed-step lanes, jump, slide (twin: `web/sim.mjs`)
 - `lib/gen.aura` — seeded chunks and the constraint gate
 - `lib/scene.aura` — garden phrase, ranges, and the child-facing cue
+- `lib/pals.aura` — companions: kitten, car, and friends the model adds
 - `web/` — WebGL2 third-person view
 - `bridge/server.mjs` — static files and the WebSocket bridge
 - `./run.sh` — one command
@@ -77,6 +90,7 @@ node scripts/check-sim.mjs
 node scripts/smoke.mjs    # seeded run, then a WebSocket hello
 node scripts/mock-llm-e2e.mjs
 node scripts/check-lanes.mjs
+node scripts/check-probe.mjs
 bash scripts/check-install.sh
 ```
 

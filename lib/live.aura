@@ -4,6 +4,7 @@
 ; fallback if a rebind refuses. A second set-code replaces the workspace
 ; the running modules were compiled against, so it is not the keep path.
 (require "std/string" all:)
+(require "lib/pals")
 
 (define (num-src n)
   (let ((s (number->string (exact->inexact n))))
@@ -12,7 +13,7 @@
 (define default-scene
   "(garden (sky 0.55 0.72 0.95) (ground 0.42 0.68 0.38) (flower daisy 0.45) (light 0.82))")
 
-(define (hot-source g jump slide speed coyote forgive hue motif scene)
+(define (hot-source g jump slide speed coyote forgive hue motif scene pals)
   (string-append
     "(define (rule-gravity) " (num-src g) ")\n"
     "(define (rule-jump-v) " (num-src jump) ")\n"
@@ -23,6 +24,7 @@
     "(define (rule-hue) " (num-src hue) ")\n"
     "(define (motif-form) \"" motif "\")\n"
     "(define (scene-form) \"" (if (and (string? scene) (> (string-length scene) 0)) scene default-scene) "\")\n"
+    "(define (pals-form) \"" (if (and (string? pals) (> (string-length pals) 0)) pals default-pals) "\")\n"
     "0"))
 
 ; hot.aura writes (define (motif-form) "…"). The live workspace stores
@@ -35,6 +37,9 @@
   (string-append "(lambda () \"" (if (string? text) text "") "\")"))
 
 (define (scene-body text)
+  (string-append "(lambda () \"" (if (string? text) text "") "\")"))
+
+(define (pals-body text)
   (string-append "(lambda () \"" (if (string? text) text "") "\")"))
 
 (define (env-on? name)

@@ -207,7 +207,23 @@ html, body {
 #motion { right: max(16px, env(safe-area-inset-right)); }
 #mute { right: max(78px, calc(env(safe-area-inset-right) + 62px)); }
 #motion[aria-pressed="true"], #mute[aria-pressed="true"] { background: #ffe08a; }
-#motion:focus-visible, #mute:focus-visible, #badge:focus-visible {
+#model {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(14px, env(safe-area-inset-bottom));
+  height: 44px;
+  margin: 0;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 246, 232, 0.94);
+  color: var(--ink);
+  font: 800 15px/1 ui-rounded, "Segoe UI", system-ui, sans-serif;
+  box-shadow: 0 8px 22px rgba(92, 52, 20, 0.16);
+  cursor: pointer;
+}
+#model[hidden] { display: none; }
+#motion:focus-visible, #mute:focus-visible, #badge:focus-visible, #model:focus-visible {
   outline: 3px solid white;
   outline-offset: 3px;
 }

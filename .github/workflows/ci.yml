@@ -36,12 +36,15 @@ jobs:
           node --check scripts/check-contrast.mjs
           node --check scripts/check-setcode.mjs
           node --check scripts/check-play.mjs
+          node --check scripts/check-probe.mjs
       - name: Physics parity with the Aura golden
         run: node scripts/check-sim.mjs
       - name: Left moves toward screen-left
         run: node scripts/check-lanes.mjs
       - name: Pink garden keeps obstacle contrast
         run: node scripts/check-contrast.mjs
+      - name: Startup model probe
+        run: node scripts/check-probe.mjs
 
   smoke:
     runs-on: ubuntu-latest

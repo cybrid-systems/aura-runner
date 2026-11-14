@@ -9,12 +9,16 @@
 (require "lib/gen")
 (require "lib/live")
 (require "lib/scene")
+(require "lib/pals")
 
 (define SYS
   "You design one obstacle phrase for a children's 3D endless runner called Lumen Run. The runner has three lanes (0 left, 1 centre, 2 right), jumps, and slides. Reply with ONLY one s-expression and no markdown. Allowed pieces: (seq (ground W) (gap W) (hurdle H W) (gate BOTTOM W) (coin Y) (spring W) (block LANE DEPTH) (coin-lane LANE Y)). Every parameter is a number; never write the words BOTTOM, W, H, LANE, DEPTH or other placeholders. Ranges in meters: spring W 0.45-1.6, hurdle W 0.35-2.2 and H 0.15-0.9, gate W 0.35-2.0 and BOTTOM 0.58-0.85, coin Y 0.4-2.4, coin-lane LANE 0, 1 or 2 and Y 0.4-2.4, ground W 0.8-18, gap W 0.4-2.0, block LANE 0, 1 or 2 and DEPTH 0.5-2.2. Start and end with ground. Leave at least one lane open beside every block. No violence, fear, weapons, or scary words. Bright garden, friendly shapes. Example: (seq (ground 6) (block 0 1) (hurdle 0.4 0.7) (ground 5) (gate 0.72 0.8) (ground 5) (gap 1.1) (ground 5))")
 
 (define SCENE-SYS
   "You redesign the garden backdrop for a children's 3D endless runner called Lumen Run. Reply with ONLY one s-expression and no markdown. Form: (garden (sky R G B) (ground R G B) (flower KIND DENSITY) (light L)). KIND is one of daisy, tulip, blossom, buttercup. Sky channels are 0.25 to 1 and the sky stays bright. Ground is green: G is at least 0.30 and at least as large as R, and not much smaller than B. Density is 0.15 to 1. Light is 0.50 to 1, never night. Optional (fog F) is 0 to 0.38; do not ask for thicker fog. No violence, fear, weapons, or scary words. Make it look different from a plain blue sky and daisies. Example: (garden (sky 0.95 0.45 0.55) (ground 0.35 0.72 0.32) (flower tulip 0.85) (light 0.9))")
+
+(define PALS-SYS
+  "You add one friendly companion to a children's 3D endless runner called Lumen Run. Reply with ONLY one s-expression and no markdown. Form: (pal KIND NAME R G B MOTION). KIND is kitten, car, bunny, bird, butterfly, frog, duck, or a new gentle word of 3 to 12 letters. NAME is 2 to 12 letters. R G B are 0.25 to 1 and the colour stays bright. MOTION is hop, pace, float, follow, or side. No violence, fear, weapons, or scary words. Example: (pal bird lark 0.95 0.86 0.35 float)")
 
 (define g-now 32.0)
 (define jump-now 11.2)
@@ -27,6 +31,8 @@
 (define motif-pieces (list))
 (define motif-span 0.0)
 (define scene-now default-scene)
+(define pals-now default-pals)
+(define pals-rows (list))
 (define sky-r 0.55)
 (define sky-g 0.72)
 (define sky-b 0.95)
@@ -60,18 +66,26 @@
 (define llm-busy #f)
 (define motif-busy #f)
 (define scene-busy #f)
+(define pals-busy #f)
 (define motif-asked-at -1.0)
 (define scene-asked-at -1.0)
+(define pals-asked-at -1.0)
 (define motif-token 0)
 (define scene-token 0)
+(define pals-token 0)
 (define motif-accept -1)
 (define scene-accept -1)
+(define pals-accept -1)
 (define motif-working #f)
 (define scene-working #f)
+(define pals-working #f)
 (define motif-req #f)
 (define scene-req #f)
+(define pals-req #f)
 (define motif-res #f)
 (define scene-res #f)
+(define pals-res #f)
+(define llm-provider "")
 (define llm-timeout-s 120.0)
 (define llm-watchdogs 0)
 (define stall-ch #f)
@@ -94,7 +108,7 @@
   (rules-of g-now jump-now speed-now slide-now coyote-now forgive-now))
 
 (define (full-src)
-  (hot-source g-now jump-now slide-now speed-now coyote-now forgive-now hue-now motif-now scene-now))
+  (hot-source g-now jump-now slide-now speed-now coyote-now forgive-now hue-now motif-now scene-now pals-now))
 
 (define (rule-body n)
   (string-append "(lambda () " (num-src n) ")"))
@@ -187,6 +201,7 @@
 (define llm-kind "motif")
 (define motif-next 2500.0)
 (define scene-next 5000.0)
+(define pals-next 8000.0)
 
 (define (hash-put! h k v)
   (try (begin (hash-set! h k v) #t) (catch (e) #f)))
@@ -235,7 +250,7 @@
       ; itself is still fatal on this pin while a fiber is inside
       ; llm:chat (#5274), so the write waits only for that call to leave
       ; the interpreter. A trial skips it too.
-      (if (or (has-arm? rows nxt) trial-open motif-working scene-working
+      (if (or (has-arm? rows nxt) trial-open motif-working scene-working pals-working
               (env-on? "LUMEN_SKIP_ARM"))
         #f
         (let ((row (find-arm rows (arm-name band))))
@@ -364,10 +379,13 @@
   (set! llm-busy #f)
   (set! motif-busy #f)
   (set! scene-busy #f)
+  (set! pals-busy #f)
   (set! motif-accept -1)
   (set! scene-accept -1)
+  (set! pals-accept -1)
   (set! motif-asked-at -1.0)
   (set! scene-asked-at -1.0)
+  (set! pals-asked-at -1.0)
   (set! slide-hinted #f)
   (set! player (make-player 1.2))
   (set! world (list))
@@ -390,6 +408,7 @@
   (set! next-dream 1500.0)
   (set! motif-next 2500.0)
   (set! scene-next 5000.0)
+  (set! pals-next 8000.0)
   (set! dream-phase 0)
   (if (not speed-lock) (set! speed-now 5.0) #f)
   (if tuned
@@ -421,7 +440,9 @@
         "ground" (list ground-r ground-g ground-b)
         "flower" flower-now "density" density-now "light" light-now
         "fog" fog-now
-        "motif" motif-now "scene" scene-now))
+        "motif" motif-now "scene" scene-now
+        "pals" pals-rows "provider" llm-provider
+        "model" (active-model) "providers" (ready-providers)))
 
 (define (welcome-msg)
   (hash "op" "welcome" "seed" seed
@@ -434,7 +455,9 @@
         "ground" (list ground-r ground-g ground-b)
         "flower" flower-now "density" density-now "light" light-now
         "fog" fog-now
-        "motif" motif-now "scene" scene-now))
+        "motif" motif-now "scene" scene-now
+        "pals" pals-rows "provider" llm-provider
+        "model" (active-model) "providers" (ready-providers)))
 
 ; The event is part of the hash when it is built. A later hash-set! on
 ; this value is the site cybrid-systems/aura #5274 exits from.
@@ -469,9 +492,14 @@
         "motif" motif-now
         "scene" scene-now
         "ahead" (obstacles-ahead)
-        "llm-busy" (if (or motif-busy scene-busy) #t #f)
+        "pals" pals-rows
+        "provider" llm-provider
+        "model" (active-model)
+        "providers" (ready-providers)
+        "llm-busy" (if (or motif-busy scene-busy pals-busy) #t #f)
         "motif-busy" (if motif-busy #t #f)
         "scene-busy" (if scene-busy #t #f)
+        "pals-busy" (if pals-busy #t #f)
         "watchdogs" llm-watchdogs
         "stall" (if stall-waiting #t #f)))
 
@@ -613,13 +641,26 @@
   (let ((got (try (scene-form) (catch (e) ""))))
     (if (string? got) got "")))
 
+(define (live-pals)
+  (let ((got (try (pals-form) (catch (e) ""))))
+    (if (string? got) got "")))
+
+(define (body-for target text)
+  (cond
+    ((string=? target "scene-form") (scene-body text))
+    ((string=? target "pals-form") (pals-body text))
+    (else (motif-body text))))
+
+(define (live-for name)
+  (cond
+    ((string=? name "scene-form") (live-scene))
+    ((string=? name "pals-form") (live-pals))
+    (else (live-motif))))
+
 (define (phrase-apply target)
   (lambda (s c)
     (let ((genome (evo:candidate-genome c)))
-      (let ((body (if (string=? target "scene-form")
-                    (scene-body genome)
-                    (motif-body genome))))
-        (not (string=? (publish-rule! target body (full-src)) "fail"))))))
+      (not (string=? (publish-rule! target (body-for target genome) (full-src)) "fail")))))
 
 (define (phrase-search target)
   (evo:search
@@ -628,11 +669,11 @@
           "apply" (phrase-apply target))))
 
 (define (binding-landed? name body expected)
-  (let ((live (if (string=? name "scene-form") (live-scene) (live-motif))))
+  (let ((live (live-for name)))
     (if (string=? live expected)
       #t
       (and (not (string=? (publish-rule! name body (full-src)) "fail"))
-           (string=? (if (string=? name "scene-form") (live-scene) (live-motif)) expected)))))
+           (string=? (live-for name) expected)))))
 
 (define (try-tell-commit! search cand ev)
   (try (begin (evo:tell! search (list cand) (list ev))
@@ -835,14 +876,78 @@
                   (set! scene-now prev-form)
                   (note! "ROLLBACK" "commit" "scene" "The garden stayed"))))))))))
 
+(define (keep-pals! canon merged)
+  (let ((found #f))
+    (let* ((cand (evo:candidate canon (hash "id" (string-append "p" (int-str next-id))
+                                            "target" "pals-form")))
+           (trial (open-trial cand
+                              (hash "timeout-ms" 4000
+                                    "apply" (lambda (c) #t)
+                                    "evaluate"
+                                    (lambda (c)
+                                      (set! found (check-pals canon))
+                                      (hash "status" "ok"
+                                            "objectives"
+                                            (hash "fair" (if (and found (hash-ref found "ok")) 1.0 0.0))
+                                            "constraints"
+                                            (if (and found (hash? (hash-ref found "violations")))
+                                              (hash-ref found "violations")
+                                              (hash "reachable" 1.0))
+                                            "behavior" (hash "band" (exact->inexact band))))))))
+      (if (or (not found) (not (hash-ref found "ok"))
+              (not trial) (not (evo:trial-ok? trial)) (not (evo:feasible? trial)))
+        (note! "ROLLBACK" (if (and found (string? (hash-ref found "why")))
+                            (hash-ref found "why")
+                            "trial")
+               "pals" "The friends stayed")
+        (let ((prev-form pals-now)
+              (prev-rows pals-rows))
+          (set! pals-now canon)
+          (set! pals-rows (hash-ref merged "rows"))
+          (let ((ev (hash "status" "ok"
+                          "objectives" (hash "fair" 1.0)
+                          "constraints" (hash-ref found "violations")
+                          "behavior" (hash "band" (exact->inexact band))))
+                (search (phrase-search "pals-form")))
+            (try-tell-commit! search cand ev)
+            (if (binding-landed? "pals-form" (pals-body canon) canon)
+              (begin
+                (set! rule-rev (+ rule-rev 1))
+                (set! rules-dirty #t)
+                (note! "KEEP" "fair" "pals" (hash-ref merged "cue" "A new friend came along")))
+              (begin
+                (set! pals-now prev-form)
+                (set! pals-rows prev-rows)
+                (note! "ROLLBACK" "commit" "pals" "The friends stayed")))))))))
+
+(define (consider-pals! text)
+  (let ((incoming (one-line (if (string? text) text ""))))
+    (let ((found (check-pals incoming)))
+      (if (not (and (hash? found) (hash-ref found "ok")))
+        (note! "ROLLBACK" (if (hash? found) (hash-ref found "why" "shape") "shape")
+               "pals" "The friends stayed")
+        (let ((merged (merge-pals pals-rows (hash-ref found "pals"))))
+          (if (not (and (hash? merged) (hash-ref merged "ok")))
+            (note! "ROLLBACK" (if (hash? merged) (hash-ref merged "why" "empty") "empty")
+                   "pals" "The friends stayed")
+            (let ((canon (hash-ref merged "form" "")))
+              (if (string=? canon pals-now)
+                (note! "ROLLBACK" "same" "pals" "The friends stayed")
+                (keep-pals! canon merged)))))))))
+
 (define (llm-prompt kind)
-  (if (string=? kind "scene")
-    (string-append "Flowers now: " flower-now
-                   ". Sky is " (num-src sky-r) " " (num-src sky-g) " " (num-src sky-b)
-                   ". Suggest a different bright garden.")
-    (string-append "Difficulty band " (number->string band)
-                   ". Jump speed is " (num-src speed-now)
-                   " m/s. Invent a different rhythm from a straight row of hurdles.")))
+  (cond
+    ((string=? kind "scene")
+     (string-append "Flowers now: " flower-now
+                    ". Sky is " (num-src sky-r) " " (num-src sky-g) " " (num-src sky-b)
+                    ". Suggest a different bright garden."))
+    ((string=? kind "pals")
+     (string-append "Friends already here: " (pal-names pals-rows)
+                    ". Add one new gentle friend who is not in that list."))
+    (else
+     (string-append "Difficulty band " (number->string band)
+                    ". Jump speed is " (num-src speed-now)
+                    " m/s. Invent a different rhythm from a straight row of hurdles."))))
 
 ; Game-side budget. The runtime's own HTTP cap is LLM_TIMEOUT; if that
 ; call never comes back, give up LLM_TIMEOUT+10 seconds later and drop
@@ -869,7 +974,7 @@
       (if (and (number? n) (> n 0)) (exact->inexact n) 16000.0))))
 
 (define (sync-llm-busy!)
-  (set! llm-busy (or motif-busy scene-busy)))
+  (set! llm-busy (or motif-busy scene-busy pals-busy)))
 
 (define (expire-one! busy asked accept-now arm cue)
   (if (and busy (> asked 0.0) (> (- (monotonic-ms) asked) (watchdog-ms)))
@@ -885,6 +990,9 @@
     #f)
   (if (expire-one! motif-busy motif-asked-at motif-accept "llm" "Still thinking")
     (begin (set! motif-accept -1) (set! motif-busy #f))
+    #f)
+  (if (expire-one! pals-busy pals-asked-at pals-accept "pals" "The friends waited")
+    (begin (set! pals-accept -1) (set! pals-busy #f))
     #f)
   (sync-llm-busy!))
 
@@ -904,6 +1012,27 @@
             (note! "ROLLBACK" "no-garden" "scene" "The garden stayed")))
         (note! "ROLLBACK" (if (hash? ans) (hash-ref ans "error" "llm") "llm")
                "scene" "The garden stayed"))
+      (send c (rules-msg))
+      (set! rules-dirty #f))))
+
+(define (extract-pals s)
+  (let ((full (extract-balanced s "(pals")))
+    (if full full (extract-balanced s "(pal"))))
+
+(define (take-pals! c msg)
+  (if (not (accept-reply! (hash-ref msg "token" -1) pals-accept))
+    #f
+    (let ((ans (hash-ref msg "ans" #f)))
+      (set! pals-busy #f)
+      (set! pals-accept -1)
+      (if (and (hash? ans) (hash-ref ans "ok"))
+        (let ((raw (hash-ref ans "content" "")))
+          (let ((form (extract-pals (if (string? raw) raw ""))))
+            (if form
+              (consider-pals! form)
+              (note! "ROLLBACK" "no-pal" "pals" "The friends stayed"))))
+        (note! "ROLLBACK" (if (hash? ans) (hash-ref ans "error" "llm") "llm")
+               "pals" "The friends stayed"))
       (send c (rules-msg))
       (set! rules-dirty #f))))
 
@@ -938,6 +1067,23 @@
       (channel:send scene-req (hash "kind" "scene" "token" tok "user" (llm-prompt "scene")))
       (sync-llm-busy!))))
 
+(define (pals-gap-ms)
+  (let ((raw (try (getenv "LUMEN_PALS_GAP_MS") (catch (e) ""))))
+    (let ((n (if (and (string? raw) (> (string-length raw) 0)) (string->number raw) #f)))
+      (if (and (number? n) (> n 0)) (exact->inexact n) 18000.0))))
+
+(define (ask-pals!)
+  (if (or pals-working (not pals-req))
+    #f
+    (let ((tok (+ pals-token 1)))
+      (set! pals-token tok)
+      (set! pals-accept tok)
+      (set! pals-asked-at (exact->inexact (monotonic-ms)))
+      (set! pals-busy #t)
+      (set! pals-next (+ run-ms (pals-gap-ms)))
+      (channel:send pals-req (hash "kind" "pals" "token" tok "user" (llm-prompt "pals")))
+      (sync-llm-busy!))))
+
 (define (ask-motif!)
   (if (or motif-working (not motif-req))
     #f
@@ -961,7 +1107,7 @@
       ; try-recv only while a call is outstanding. An idle poll that still
       ; touches the channel every tick retains a capture frame per call on
       ; this Aura pin and a long run exhausts the arena.
-      (if (or scene-busy motif-busy) (expire-llm!) #f)
+      (if (or scene-busy motif-busy pals-busy) (expire-llm!) #f)
       (if scene-busy
         (let ((scene-msg (channel:try-recv scene-res)))
           (if (hash? scene-msg) (take-scene! c scene-msg) #f))
@@ -970,12 +1116,24 @@
         (let ((motif-msg (channel:try-recv motif-res)))
           (if (hash? motif-msg) (take-motif! c motif-msg) #f))
         #f)
+      (if pals-busy
+        (let ((pals-msg (channel:try-recv pals-res)))
+          (if (hash? pals-msg) (take-pals! c pals-msg) #f))
+        #f)
       (sync-llm-busy!)
       (if (and (not scene-busy) (not scene-working) (>= run-ms scene-next))
         (ask-scene!)
         #f)
       (if (and (not motif-busy) (not motif-working) (>= run-ms motif-next))
         (ask-motif!)
+        #f)
+      ; The watchdog test parks one garden call and still expects
+      ; obstacle phrases. A companion call beside both of those wedges
+      ; llm:chat on this pin, so that test leaves the roster alone.
+      (if (and (not pals-busy) (not pals-working)
+               (not (env-on? "LUMEN_STALL_SCENE"))
+               (>= run-ms pals-next))
+        (ask-pals!)
         #f))))
 
 (define (on-hello c msg)
@@ -1072,9 +1230,10 @@
 
 (define (on-propose c msg)
   (let ((text (hash-ref msg "form" "")))
-    (if (and (string? text) (string-contains? text "(garden"))
-      (consider-scene! text)
-      (consider-form! text)))
+    (cond
+      ((and (string? text) (string-contains? text "(pal")) (consider-pals! text))
+      ((and (string? text) (string-contains? text "(garden")) (consider-scene! text))
+      (else (consider-form! text))))
   (flush-notes! c)
   (send c (rules-msg))
   (set! rules-dirty #f)
@@ -1082,6 +1241,128 @@
 
 (define (on-audit c msg)
   (send c (hash "op" "audit" "items" audit "via" publish-via "rev" rule-rev)))
+
+(define (env-str name)
+  (let ((v (try (getenv name) (catch (e) ""))))
+    (if (and (string? v) (> (string-length v) 0)) v "")))
+
+(define (provider-key name)
+  (cond
+    ((string=? name "deepseek") (env-str "LUMEN_DEEPSEEK_KEY"))
+    ((string=? name "minimax") (env-str "LUMEN_MINIMAX_KEY"))
+    (else "")))
+
+(define (provider-url name)
+  (cond
+    ((string=? name "deepseek") (env-str "LUMEN_DEEPSEEK_URL"))
+    ((string=? name "minimax") (env-str "LUMEN_MINIMAX_URL"))
+    (else "")))
+
+(define (provider-model name fallback)
+  (let ((m (cond
+             ((string=? name "deepseek") (env-str "LUMEN_DEEPSEEK_MODEL"))
+             ((string=? name "minimax") (env-str "LUMEN_MINIMAX_MODEL"))
+             (else ""))))
+    (if (string=? m "") fallback m)))
+
+(define (provider-ready? name)
+  (and (or (string=? name "deepseek") (string=? name "minimax"))
+       (> (string-length (provider-key name)) 0)
+       (> (string-length (provider-url name)) 0)))
+
+(define (ready-providers)
+  (let ((xs (list)))
+    (if (provider-ready? "deepseek") (set! xs (append xs (list "deepseek"))) #f)
+    (if (provider-ready? "minimax") (set! xs (append xs (list "minimax"))) #f)
+    xs))
+
+(define (choose-provider)
+  (let ((want (env-str "LUMEN_LLM")))
+    (cond
+      ((provider-ready? want) want)
+      ((provider-ready? "deepseek") "deepseek")
+      ((provider-ready? "minimax") "minimax")
+      (else ""))))
+
+(define (active-model)
+  (cond
+    ((string=? llm-provider "minimax") (provider-model "minimax" "MiniMax-M3.1-Flash"))
+    ((string=? llm-provider "deepseek") (provider-model "deepseek" "deepseek-flash"))
+    (else (env-str "LLM_MODEL"))))
+
+(define (provider-label name)
+  (if (string=? name "minimax") "Now asking MiniMax" "Now asking DeepSeek"))
+
+(define (on-provider c msg)
+  (let ((name (hash-ref msg "name" "")))
+    (if (not (provider-ready? name))
+      (send c (hash "op" "err" "why" "provider"))
+      (begin
+        (set! llm-provider name)
+        (note! "KEEP" name "provider" (provider-label name))
+        (flush-notes! c)
+        (send c (rules-msg))
+        (set! rules-dirty #f)))))
+
+(define (chat-url base)
+  (let ((n (string-length base)))
+    (let ((b (if (and (> n 0) (string-suffix? base "/"))
+               (substring base 0 (- n 1))
+               base)))
+      (string-append b "/chat/completions"))))
+
+(define (llm-text data)
+  (let ((choices (hash-ref data "choices" #f)))
+    (if (not (pair? choices))
+      ""
+      (let ((msg (hash-ref (car choices) "message" #f)))
+        (if (not (hash? msg))
+          ""
+          (let ((content (hash-ref msg "content" "")))
+            (if (and (string? content) (> (string-length content) 0))
+              content
+              (let ((reason (hash-ref msg "reasoning_content" "")))
+                (if (and (string? reason) (> (string-length reason) 0)) reason "")))))))))
+
+(define (parse-chat raw)
+  (cond
+    ((not (and (string? raw) (> (string-length raw) 0)))
+     (hash "ok" #f "error" "empty" "content" ""))
+    ((or (string-prefix? raw "http-post:") (string-prefix? raw "http-get:"))
+     (hash "ok" #f "error" raw "content" ""))
+    (else
+     (let ((data (try (json-parse raw) (catch (e) #f))))
+       (if (not (hash? data))
+         (hash "ok" #f "error" "json" "content" "")
+         (let ((err (hash-ref data "error" #f)))
+           (if (hash? err)
+             (hash "ok" #f "error" (hash-ref err "message" "error") "content" "")
+             (let ((text (llm-text data)))
+               (if (> (string-length text) 0)
+                 (hash "ok" #t "error" "" "content" text)
+                 (hash "ok" #f "error" "no-content" "content" ""))))))))))
+
+; llm:chat always posts LLM_API_KEY. A probed provider carries its own
+; key and base URL, so a switch can change the next call without a restart.
+(define (post-chat url body key)
+  (let ((raw (try (http-post url body key llm-timeout-s) (catch (e) #f))))
+    (if (string? raw)
+      raw
+      (let ((raw2 (try (http-post url body key) (catch (e) ""))))
+        (if (string? raw2) raw2 "")))))
+
+(define (chat-via-http sys user)
+  (let ((key (provider-key llm-provider))
+        (base (provider-url llm-provider))
+        (model (active-model)))
+    (let ((body (json-encode
+                  (hash "model" model
+                        "max_tokens" 2048
+                        "reasoning_effort" "minimal"
+                        "messages"
+                        (list (hash "role" "system" "content" sys)
+                              (hash "role" "user" "content" user))))))
+      (parse-chat (post-chat (chat-url base) body key)))))
 
 (define (dispatch c msg)
   (let ((op (hash-ref msg "op" "")))
@@ -1098,6 +1379,7 @@
          #f))
       ((string=? op "rebind") (on-rebind c msg))
       ((string=? op "propose") (on-propose c msg))
+      ((string=? op "provider") (on-provider c msg))
       ((string=? op "audit") (on-audit c msg))
       ((string=? op "bye") #f)
       (else (send c (hash "op" "err" "why" "unknown"))))))
@@ -1135,8 +1417,9 @@
               (begin (dispatch c msg) (loop)))))))))
 
 (define (start-llm!)
-  (let ((key (try (getenv "LLM_API_KEY") (catch (e) ""))))
-    (if (and (string? key) (> (string-length key) 0))
+  (set! llm-provider (choose-provider))
+  (let ((key (env-str "LLM_API_KEY")))
+    (if (or (> (string-length key) 0) (provider-ready? llm-provider))
       (begin
         (require "std/llm" all:)
         (set! llm-on #t)
@@ -1145,17 +1428,20 @@
         ; hash (reasoning_effort, max_tokens). The extra call throws an
         ; arity error before any HTTP request; catch it and keep the
         ; two-argument call. A hash result means the extra argument was
-        ; accepted, including an API error hash.
+        ; accepted, including an API error hash. A probed provider
+        ; bypasses that path so its own key and URL are used.
         (set! llm-reply
           (lambda (sys user)
-            (cond
-              ((= llm-chat-mode 2) (llm:chat sys user))
-              ((= llm-chat-mode 1) (llm:chat sys user llm-extra))
-              (else
-               (let ((tried (try (llm:chat sys user llm-extra) (catch (e) #f))))
-                 (if (hash? tried)
-                   (begin (set! llm-chat-mode 1) tried)
-                   (begin (set! llm-chat-mode 2) (llm:chat sys user))))))))
+            (if (provider-ready? llm-provider)
+              (chat-via-http sys user)
+              (cond
+                ((= llm-chat-mode 2) (llm:chat sys user))
+                ((= llm-chat-mode 1) (llm:chat sys user llm-extra))
+                (else
+                 (let ((tried (try (llm:chat sys user llm-extra) (catch (e) #f))))
+                   (if (hash? tried)
+                     (begin (set! llm-chat-mode 1) tried)
+                     (begin (set! llm-chat-mode 2) (llm:chat sys user)))))))))
         (load-llm-timeout!)
         (set! stall-scene? (env-on? "LUMEN_STALL_SCENE"))
         (set! stall-ch (channel:create 1))
@@ -1163,8 +1449,11 @@
         (set! motif-res (channel:create 2))
         (set! scene-req (channel:create 2))
         (set! scene-res (channel:create 2))
+        (set! pals-req (channel:create 2))
+        (set! pals-res (channel:create 2))
         (fiber:spawn (lambda () (llm-worker motif-req motif-res SYS "motif")))
-        (fiber:spawn (lambda () (llm-worker scene-req scene-res SCENE-SYS "scene"))))
+        (fiber:spawn (lambda () (llm-worker scene-req scene-res SCENE-SYS "scene")))
+        (fiber:spawn (lambda () (llm-worker pals-req pals-res PALS-SYS "pals"))))
       #f)))
 
 ; One worker per phrase kind. A scene call stuck inside llm:chat does not
@@ -1182,7 +1471,10 @@
 (define (llm-worker req res sys kind)
   (let loop ()
     (let ((job (channel:recv req)))
-      (if (string=? kind "scene") (set! scene-working #t) (set! motif-working #t))
+      (cond
+        ((string=? kind "scene") (set! scene-working #t))
+        ((string=? kind "pals") (set! pals-working #t))
+        (else (set! motif-working #t)))
       (if (and stall-scene?
                (= scene-stalled 0)
                (string=? kind "scene"))
@@ -1193,7 +1485,10 @@
           (set! stall-waiting #f))
         #f)
       (deliver! res job (llm-reply sys (if (hash? job) (hash-ref job "user" "") "")))
-      (if (string=? kind "scene") (set! scene-working #f) (set! motif-working #f))
+      (cond
+        ((string=? kind "scene") (set! scene-working #f))
+        ((string=? kind "pals") (set! pals-working #f))
+        (else (set! motif-working #f)))
       (loop))))
 
 (define (port-number)
@@ -1203,9 +1498,18 @@
                8765)))
       (if (and (number? n) (> n 0)) n 8765))))
 
+(define (boot-pals!)
+  (let ((found (check-pals default-pals)))
+    (if (and (hash? found) (hash-ref found "ok"))
+      (begin
+        (set! pals-now default-pals)
+        (set! pals-rows (hash-ref found "pals")))
+      #f)))
+
 (define (main)
   (set-code (read-file "core/hot.aura"))
   (eval-current)
+  (boot-pals!)
   (set! policy (make-policy))
   (publish-all!)
   (start-llm!)

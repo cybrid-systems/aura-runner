@@ -1,0 +1,227 @@
+; Garden companions. A model may add a kitten, a little car, or a new
+; gentle kind. The form is data, checked here, then rebound. Nothing
+; in this file calls eval. Unknown kinds stay in the roster and the
+; view draws them as a round friend.
+(require "lib/sexp")
+(require "lib/gen")
+
+(define default-pals
+  "(pals (pal kitten mochi 0.95 0.62 0.35 hop) (pal car beep 0.3 0.55 0.95 pace))")
+
+(define (pal-viol ok?)
+  (hash "budget" 0.0 "geometry" 0.0 "reachable" (if ok? 0.0 1.0) "safe" 0.0))
+
+(define (pals-refuse why)
+  (hash "ok" #f "why" why "cue" "" "form" "" "pals" (list)
+        "violations" (pal-viol #f)))
+
+(define (num-tok n)
+  (let ((s (number->string (exact->inexact n))))
+    (if (string-contains? s ".") s (string-append s ".0"))))
+
+(define (lower-sym s)
+  (if (string? s) (string-downcase s) #f))
+
+(define (letters? s lo hi)
+  (and (string? s)
+       (>= (string-length s) lo)
+       (<= (string-length s) hi)
+       (let ((n (string-length s)))
+         (let loop ((i 0))
+           (if (>= i n)
+             #t
+             (let ((c (string-ref s i)))
+               (if (or (and (>= c 97) (<= c 122)) (and (>= c 65) (<= c 90)))
+                 (loop (+ i 1))
+                 #f)))))))
+
+(define (reserved? s)
+  (or (string=? s "pal") (string=? s "pals") (string=? s "seq")
+      (string=? s "garden") (string=? s "sky") (string=? s "ground")
+      (string=? s "block") (string=? s "hurdle") (string=? s "gate")
+      (string=? s "gap") (string=? s "coin") (string=? s "spring")))
+
+(define (motion? s)
+  (or (string=? s "hop") (string=? s "pace") (string=? s "float")
+      (string=? s "follow") (string=? s "side")))
+
+(define (plan-of kind)
+  (cond
+    ((or (string=? kind "kitten") (string=? kind "car") (string=? kind "bunny")
+         (string=? kind "bird") (string=? kind "butterfly") (string=? kind "frog")
+         (string=? kind "duck") (string=? kind "friend"))
+     kind)
+    (else "friend")))
+
+(define (pal-cue kind)
+  (cond
+    ((string=? kind "kitten") "A kitten came to play")
+    ((string=? kind "car") "A little car rolled in")
+    ((string=? kind "bunny") "A bunny hopped in")
+    ((string=? kind "bird") "A bird flew along")
+    ((string=? kind "butterfly") "A butterfly drifted by")
+    ((string=? kind "frog") "A frog joined the path")
+    ((string=? kind "duck") "A duck waddled in")
+    (else "A new friend came along")))
+
+(define (color-ok? r g b)
+  (and (number? r) (number? g) (number? b)
+       (>= r 0.15) (<= r 1.0)
+       (>= g 0.15) (<= g 1.0)
+       (>= b 0.15) (<= b 1.0)
+       (>= (+ (* 0.25 r) (* 0.50 g) (* 0.25 b)) 0.45)))
+
+(define (nth xs i)
+  (if (or (null? xs) (< i 0))
+    #f
+    (if (= i 0) (car xs) (nth (cdr xs) (- i 1)))))
+
+; (pal KIND NAME R G B MOTION) or a string why.
+(define (pal-one sp)
+  (if (or (not (pair? sp)) (not (string? (car sp))) (not (string=? (car sp) "pal"))
+          (not (= (length sp) 7)))
+    "shape"
+    (let ((kind (lower-sym (nth sp 1)))
+          (name (lower-sym (nth sp 2)))
+          (r (nth sp 3))
+          (g (nth sp 4))
+          (b (nth sp 5))
+          (motion (lower-sym (nth sp 6))))
+      (cond
+        ((or (not (letters? kind 3 12)) (reserved? kind)) "kind")
+        ((or (not (letters? name 2 12)) (reserved? name)) "name")
+        ((not (and (number? r) (number? g) (number? b))) "shape")
+        ((not (color-ok? r g b)) "color")
+        ((not (motion? motion)) "motion")
+        (else (hash "kind" kind "name" name
+                    "r" (exact->inexact r) "g" (exact->inexact g) "b" (exact->inexact b)
+                    "motion" motion "plan" (plan-of kind) "cue" (pal-cue kind)))))))
+
+(define (pal-items form)
+  (cond
+    ((and (pair? form) (string? (car form)) (string=? (car form) "pals"))
+     (let ((xs (cdr form)))
+       (if (or (null? xs) (> (length xs) 4))
+         "count"
+         xs)))
+    ((and (pair? form) (string? (car form)) (string=? (car form) "pal"))
+     (list form))
+    (else "shape")))
+
+(define (build-rows items)
+  (let loop ((xs items) (acc (list)))
+    (if (null? xs)
+      (reverse acc)
+      (let ((one (pal-one (car xs))))
+        (if (string? one)
+          one
+          (loop (cdr xs) (cons one acc)))))))
+
+(define (find-row rows name)
+  (let loop ((xs rows))
+    (if (null? xs)
+      #f
+      (if (string=? (hash-ref (car xs) "name" "") name)
+        (car xs)
+        (loop (cdr xs))))))
+
+(define (dup-name? rows)
+  (let loop ((xs rows))
+    (if (null? xs)
+      #f
+      (if (find-row (cdr xs) (hash-ref (car xs) "name" ""))
+        #t
+        (loop (cdr xs))))))
+
+(define (pal-clause row)
+  (string-append "(pal "
+                 (hash-ref row "kind") " "
+                 (hash-ref row "name") " "
+                 (num-tok (hash-ref row "r")) " "
+                 (num-tok (hash-ref row "g")) " "
+                 (num-tok (hash-ref row "b")) " "
+                 (hash-ref row "motion") ")"))
+
+(define (pals-text rows)
+  (let loop ((xs rows) (acc "(pals"))
+    (if (null? xs)
+      (string-append acc ")")
+      (loop (cdr xs) (string-append acc " " (pal-clause (car xs)))))))
+
+(define (pals-ok rows)
+  (hash "ok" #t "why" "fair"
+        "cue" (hash-ref (car rows) "cue" "")
+        "form" (pals-text rows)
+        "pals" rows
+        "violations" (pal-viol #t)))
+
+; (pals (pal KIND NAME R G B MOTION) ...)
+; or one (pal ...). At most four friends in a single phrase. Channels
+; stay bright. Kind and name are short words. A kind outside the
+; drawn set is still kept; the view uses the friend body.
+(define (check-pals text)
+  (if (or (not (string? text)) (= (string-length text) 0))
+    (pals-refuse "empty")
+    (if (banned? text)
+      (pals-refuse "banned")
+      (let ((form (sexp-parse text)))
+        (if (not form)
+          (pals-refuse "shape")
+          (let ((items (pal-items form)))
+            (if (string? items)
+              (pals-refuse items)
+              (let ((built (build-rows items)))
+                (if (string? built)
+                  (pals-refuse built)
+                  (if (or (null? built) (dup-name? built))
+                    (pals-refuse (if (null? built) "count" "dup"))
+                    (pals-ok built)))))))))))
+
+(define (replace-row rows name row)
+  (let loop ((xs rows) (acc (list)))
+    (if (null? xs)
+      (reverse acc)
+      (if (string=? (hash-ref (car xs) "name" "") name)
+        (loop (cdr xs) (cons row acc))
+        (loop (cdr xs) (cons (car xs) acc))))))
+
+; The first two stay. A seventh arrival takes the place of the oldest
+; friend who joined after them.
+(define (remove-at xs i)
+  (let loop ((ys xs) (k 0) (acc (list)))
+    (if (null? ys)
+      (reverse acc)
+      (if (= k i)
+        (loop (cdr ys) (+ k 1) acc)
+        (loop (cdr ys) (+ k 1) (cons (car ys) acc))))))
+
+(define (pal-names rows)
+  (let loop ((xs rows) (acc ""))
+    (if (null? xs)
+      (if (string=? acc "") "none" acc)
+      (loop (cdr xs)
+            (if (string=? acc "")
+              (string-append (hash-ref (car xs) "name" "") " " (hash-ref (car xs) "kind" ""))
+              (string-append acc ", "
+                             (hash-ref (car xs) "name" "") " "
+                             (hash-ref (car xs) "kind" "")))))))
+
+; Add incoming rows onto the roster. An existing name is replaced.
+; The cue names the first newcomer, or a quiet change when nobody new arrived.
+(define (merge-pals rows incoming)
+  (if (or (not (pair? incoming)) (null? incoming))
+    (hash "ok" #f "why" "empty" "rows" rows "form" (pals-text rows) "cue" "")
+    (let loop ((xs incoming) (cur rows) (new-cue "") (updated #f))
+      (if (null? xs)
+        (hash "ok" #t "why" "fair" "rows" cur "form" (pals-text cur)
+              "cue" (if (string=? new-cue "")
+                      (if updated "A friend looks different" "")
+                      new-cue))
+        (let ((row (car xs))
+              (name (hash-ref (car xs) "name" "")))
+          (if (find-row cur name)
+            (loop (cdr xs) (replace-row cur name row) new-cue #t)
+            (let ((room (if (>= (length cur) 6) (remove-at cur 2) cur)))
+              (loop (cdr xs) (append room (list row))
+                    (if (string=? new-cue "") (hash-ref row "cue" "A new friend came along") new-cue)
+                    updated))))))))

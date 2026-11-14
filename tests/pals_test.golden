@@ -1,0 +1,20 @@
+default 1 fair A kitten came to play
+car 1 fair A little car rolled in
+bird 1 fair A bird flew along
+puppy 1 fair A new friend came along
+dark 0 color
+motion 0 motion
+digit 0 kind
+short 0 name
+banned 0 banned
+dup 0 dup
+empty 0 empty
+shape 0 shape
+count 0 count
+example 1 fair A bird flew along
+merge 1
+update 1
+plan friend
+round 1
+cap 1
+roster mochi kitten, beep car, hopp frog, wadd duck, bun bunny, flip butterfly
