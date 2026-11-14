@@ -35,6 +35,9 @@ function session(sock) {
   let buf = "";
   const waiters = [];
   sock._queue = [];
+  const fail = (err) => {
+    while (waiters.length) waiters.shift().reject(err);
+  };
   sock.on("data", (c) => {
     buf += c.toString("utf8");
     let i;
@@ -44,17 +47,22 @@ function session(sock) {
       if (!line) continue;
       const msg = JSON.parse(line);
       const w = waiters.shift();
-      if (w) w(msg);
+      if (w) w.resolve(msg);
       else sock._queue.push(msg);
     }
   });
+  sock.on("error", (err) => fail(err));
+  sock.on("close", () => fail(new Error("socket closed")));
   return {
     send(obj) { sock.write(JSON.stringify(obj) + "\n"); },
     next(ms = 90000) {
       if (sock._queue.length) return Promise.resolve(sock._queue.shift());
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => reject(new Error("read timeout")), ms);
-        waiters.push((msg) => { clearTimeout(timer); resolve(msg); });
+        waiters.push({
+          resolve(msg) { clearTimeout(timer); resolve(msg); },
+          reject(err) { clearTimeout(timer); reject(err); },
+        });
       });
     },
   };
@@ -122,6 +130,10 @@ function startAura(extra) {
   let text = "";
   child.stdout.on("data", (c) => { text += c.toString(); });
   child.stderr.on("data", (c) => { text += c.toString(); });
+  child.on("exit", (code, signal) => {
+    if (signal && signal !== "SIGTERM") console.error(`aura signal ${signal}\n${text.slice(-2500)}`);
+    else if (code) console.error(`aura exit ${code}\n${text.slice(-2500)}`);
+  });
   const ready = new Promise((resolve, reject) => {
     const t0 = Date.now();
     const tick = () => {
@@ -157,8 +169,14 @@ async function withAura(extra, fn) {
     await fn(io, core);
   } finally {
     if (sock) sock.destroy();
-    core.child.kill("SIGTERM");
-    await new Promise((r) => core.child.on("exit", r));
+    await new Promise((resolve) => {
+      let done = false;
+      const finish = () => { if (!done) { done = true; resolve(); } };
+      // exit may already have fired if the runtime aborted mid-run.
+      core.child.once("exit", finish);
+      if (core.child.exitCode !== null || core.child.signalCode !== null) finish();
+      else core.child.kill("SIGTERM");
+    });
   }
 }
 
@@ -245,16 +263,18 @@ await withAura({
       if (m.op === "state" && typeof m.scene === "string" && m.scene.includes("tulip")) sawTulip = true;
       if (m.op === "state" && Array.isArray(m.sky) && m.sky[0] > 0.9 && m.sky[1] < 0.6) sawTulip = true;
     }
-    // Simulated time outruns the 2s HTTP timeout on a fast host. Keep
-    // going long enough for the parked garden call to end and the next
-    // one to be kept. The wall deadline above still stops a real hang.
-    if (run > 150000) break;
+    // Layout-only rejects make this loop fast. Give the hung call its
+    // 2s timeout and the next garden time to land, but stop before a
+    // live llm fiber retains enough capture frames to exhaust the arena.
+    // The wall deadline above still stops a real hang.
+    if (run > 400000) break;
   }
-  if (!sawBusy) throw new Error("scene call never looked busy");
-  if (!cleared) throw new Error("watchdog did not clear scene-busy");
-  if (!(mock.hits.motif > motifAtClear)) throw new Error("no later obstacle call " + JSON.stringify(mock.hits));
-  if (!sawTulip) throw new Error("later garden was not kept " + JSON.stringify(mock.hits));
-  if (mock.hits.hung < 1) throw new Error("mock never hung a request");
+  const pace = ` run ${run} ${JSON.stringify(mock.hits)}`;
+  if (!sawBusy) throw new Error("scene call never looked busy" + pace);
+  if (!cleared) throw new Error("watchdog did not clear scene-busy" + pace);
+  if (!(mock.hits.motif > motifAtClear)) throw new Error("no later obstacle call" + pace);
+  if (!sawTulip) throw new Error("later garden was not kept" + pace);
+  if (mock.hits.hung < 1) throw new Error("mock never hung a request" + pace);
   io.send({ op: "bye" });
   console.log(`watchdog ok hung ${mock.hits.hung} motif ${mock.hits.motif} wall ${Date.now() - t0}ms`);
 });

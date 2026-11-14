@@ -207,6 +207,22 @@ html, body {
 #motion { right: max(16px, env(safe-area-inset-right)); }
 #mute { right: max(78px, calc(env(safe-area-inset-right) + 62px)); }
 #motion[aria-pressed="true"], #mute[aria-pressed="true"] { background: #ffe08a; }
+#mark {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(68px, calc(env(safe-area-inset-bottom) + 58px));
+  margin: 0;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(255, 246, 232, 0.94);
+  color: var(--ink);
+  font: 800 15px/1 ui-rounded, "Segoe UI", system-ui, sans-serif;
+  letter-spacing: 0.12em;
+  text-transform: lowercase;
+  pointer-events: none;
+  box-shadow: 0 8px 22px rgba(92, 52, 20, 0.16);
+}
+#mark[hidden] { display: none; }
 #model {
   position: fixed;
   right: max(16px, env(safe-area-inset-right));

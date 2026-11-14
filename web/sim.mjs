@@ -3,6 +3,10 @@
 // server's spent-piece mark.
 
 export const DT = 1 / 60;
+// Twin of TAKEOFF-S / LANE-A / LANE-V in lib/phys.aura.
+const TAKEOFF_S = 1 / 20;
+const LANE_A = 160;
+const LANE_V = 16;
 
 const GRACE_S = 1.5;
 const DRAG_S = 1.15;
@@ -10,7 +14,7 @@ const DRAG_SCALE = 0.45;
 const BUMP_COST = 15;
 
 export function makePlayer(x) {
-  const p = new Float64Array(13);
+  const p = new Float64Array(15);
   p[0] = x;
   p[4] = 0.12;
   p[5] = 1;
@@ -51,10 +55,26 @@ function hitsLane(q, lane) {
 
 function easeLane(p, dt) {
   const target = (p[9] - 1) * LANE_W;
-  const delta = target - p[10];
-  const maxstep = 14 * dt;
-  const step = delta > maxstep ? maxstep : delta < -maxstep ? -maxstep : delta;
-  p[10] += step;
+  const lx = p[10];
+  const lv = p[13];
+  const delta = target - lx;
+  const ad = delta < 0 ? -delta : delta;
+  let want = delta * 9;
+  if (want > LANE_V) want = LANE_V;
+  else if (want < -LANE_V) want = -LANE_V;
+  const room = LANE_A * dt;
+  let dv = want - lv;
+  if (dv > room) dv = room;
+  else if (dv < -room) dv = -room;
+  const nv = lv + dv;
+  const nx = lx + nv * dt;
+  if (ad < 0.0008 || (delta >= 0 && nx >= target) || (delta < 0 && nx <= target)) {
+    p[10] = target;
+    p[13] = 0;
+  } else {
+    p[10] = nx;
+    p[13] = nv;
+  }
 }
 
 export function rulesOf(g, jump, speed, slide, coyote, forgive) {
@@ -97,6 +117,7 @@ function liftOut(p, pieces) {
     p[0] = edge + 0.08;
     p[1] = 0;
     p[2] = 0;
+    p[14] = 0;
   }
 }
 
@@ -128,10 +149,11 @@ export function step(p, pieces, rules, dt) {
   const canJump = grounded || p[4] > 0;
   const jumped = p[7] > 0 && canJump;
   if (jumped) {
-    p[2] = jump;
+    p[2] = 0;
     p[4] = 0;
     p[7] = 0;
     p[3] = 0;
+    p[14] = TAKEOFF_S;
     if (p[1] < 0) p[1] = 0;
   }
   if (p[8] > 0 && grounded && !jumped) {
@@ -139,7 +161,18 @@ export function step(p, pieces, rules, dt) {
     p[8] = 0;
   }
   if (p[3] > 0) p[3] = Math.max(0, p[3] - dt);
-  p[2] = p[2] - g * dt;
+  // Dust after three frames must not buy another full boost.
+  if (p[14] > 1e-7) {
+    const slice = Math.min(p[14], dt);
+    p[2] = p[2] + (jump / TAKEOFF_S) * slice;
+    const rest = dt - slice;
+    if (rest > 1e-7) p[2] = p[2] - g * rest;
+    const left = p[14] - slice;
+    p[14] = left >= 1e-7 ? left : 0;
+  } else {
+    p[14] = 0;
+    p[2] = p[2] - g * dt;
+  }
   p[1] = p[1] + p[2] * dt;
   p[0] = p[0] + speed * dt;
   let ev = "ok";
@@ -158,6 +191,7 @@ export function step(p, pieces, rules, dt) {
     if (p[1] <= 0) {
       p[1] = 0;
       p[2] = 0;
+      p[14] = 0;
     }
     ev = collide(p, pieces, rules);
   }
@@ -200,6 +234,7 @@ function collide(p, pieces, rules) {
     } else if (hit && k === 6 && p[1] <= 0.05 && p[2] <= 0) {
       p[2] = rules.jump * 1.28;
       p[3] = 0;
+      p[14] = 0;
       event = "spring";
     }
   }

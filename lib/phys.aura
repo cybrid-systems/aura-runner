@@ -9,22 +9,28 @@
 ; exact integers truncates (docs/stdlib/division.md).
 ;
 ; Player: (x y vy slide-left coyote alive score jump-buffer slide-buffer
-;          lane lx grace drag)
+;          lane lx grace drag lvx thrust)
 ;   grace is seconds of invulnerability after a bump or a gap.
 ;   drag is seconds of a slower pace after the same stumble.
 ;   A run does not end. strict rules (the fairness autopilot) still
 ;   treat a hit or a gap as dead, so an unfair phrase stays unfair.
-;   lane is 0 left, 1 centre, 2 right. lx eases toward that lane.
-;   Forward x is the track axis (rendered as world Z). lx is world X.
+;   lane is 0 left, 1 centre, 2 right. lx accelerates toward that lane
+;   (lvx), and a jump accelerates up for TAKEOFF-S before gravity.
+;   Forward x is arc length along the road (rendered as the road tangent).
 ; Piece:  (kind x w h y lane)
 ;   lane -1 means every lane. kinds: 1 ground, 2 gap, 3 hurdle, 4 gate,
 ;   5 coin, 6 spring, 7 block (a crate you change lanes to avoid).
 
 (define PHYS-DT (/ 1.0 60.0))
 (define LANE-W 1.8)
+; Three frames at 60 Hz. Exit speed is still rule-jump-v; the first
+; frames climb instead of appearing at full speed.
+(define TAKEOFF-S (/ 1.0 20.0))
+(define LANE-A 160.0)
+(define LANE-V 16.0)
 
 (define (make-player x)
-  (list x 0.0 0.0 0.0 0.12 1.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0))
+  (list x 0.0 0.0 0.0 0.12 1.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 0.0))
 
 (define GRACE-S 1.5)
 (define DRAG-S 1.15)
@@ -95,7 +101,7 @@
       (let ((edge (gap-far-edge (player-x pp) (body-lane pp) pieces)))
         (if (not edge)
           pp
-          (loop (pset (pset (pset pp 0 (+ edge 0.08)) 1 0.0) 2 0.0) (+ n 1)))))))
+          (loop (pset (pset (pset (pset pp 0 (+ edge 0.08)) 1 0.0) 2 0.0) 14 0.0) (+ n 1)))))))
 
 (define (piece k x w h y . rest)
   (list k x w h y (if (null? rest) -1.0 (exact->inexact (car rest)))))
@@ -121,14 +127,28 @@
   (let ((pl (piece-lane q)))
     (or (< pl -0.5) (= pl lane))))
 
+; Accelerate toward the chosen lane, then brake so the body stops on it.
+; A constant slide read as a conveyor. Crossing the target snaps and
+; clears lvx so the body cannot walk into the next lane.
 (define (ease-lane p dt)
   (let* ((target (* (- (pxs p 9) 1.0) LANE-W))
          (lx (pxs p 10))
+         (lv (pxs p 13))
          (delta (- target lx))
-         (maxstep (* 14.0 dt))
-         (step (if (> delta maxstep) maxstep
-                 (if (< delta (- 0.0 maxstep)) (- 0.0 maxstep) delta))))
-    (pset p 10 (+ lx step))))
+         (ad (if (< delta 0.0) (- 0.0 delta) delta))
+         (want-v (* delta 9.0))
+         (capped (if (> want-v LANE-V) LANE-V
+                   (if (< want-v (- 0.0 LANE-V)) (- 0.0 LANE-V) want-v)))
+         (room (* LANE-A dt))
+         (dv (- capped lv))
+         (dv2 (if (> dv room) room (if (< dv (- 0.0 room)) (- 0.0 room) dv)))
+         (nv (+ lv dv2))
+         (nx (+ lx (* nv dt))))
+    (if (or (< ad 0.0008)
+            (and (>= delta 0.0) (>= nx target))
+            (and (< delta 0.0) (<= nx target)))
+      (pset (pset p 10 target) 13 0.0)
+      (pset (pset p 10 nx) 13 nv))))
 
 (define (piece->list q) q)
 
@@ -175,7 +195,7 @@
            (can-jump (or grounded (> (pxs p3 4) 0.0)))
            (jumped (and (> (pxs p3 7) 0.0) can-jump))
            (p4 (if jumped
-                 (let ((launched (pset (pset (pset (pset p3 2 jump) 4 0.0) 7 0.0) 3 0.0)))
+                 (let ((launched (pset (pset (pset (pset (pset p3 2 0.0) 4 0.0) 7 0.0) 3 0.0) 14 TAKEOFF-S)))
                    (if (< (player-y launched) 0.0) (pset launched 1 0.0) launched))
                  p3))
            (p5 (if (and (> (pxs p4 8) 0.0) grounded (not jumped))
@@ -184,10 +204,23 @@
            (p6 (if (> (pxs p5 3) 0.0)
                  (pset p5 3 (max 0.0 (- (pxs p5 3) dt)))
                  p5))
-           (vy (- (player-vy p6) (* g dt)))
+           ; A leftover smaller than a frame must not buy another full boost.
+           ; Three steps of dt consume TAKEOFF-S; dust snaps to zero.
+           (thrust (pxs p6 14))
+           (boosting (> thrust 0.0000001))
+           (slice (if boosting (min thrust dt) 0.0))
+           (vy1 (if boosting
+                  (+ (player-vy p6) (* (/ jump TAKEOFF-S) slice))
+                  (- (player-vy p6) (* g dt))))
+           (rest (if boosting (- dt slice) 0.0))
+           (vy (if (and boosting (> rest 0.0000001))
+                 (- vy1 (* g rest))
+                 vy1))
+           (left (if boosting (- thrust slice) 0.0))
+           (thrust1 (if (and boosting (>= left 0.0000001)) left 0.0))
            (y (+ (player-y p6) (* vy dt)))
            (x (+ (player-x p6) (* speed dt)))
-           (p7 (pset (pset (pset p6 0 x) 1 y) 2 vy)))
+           (p7 (pset (pset (pset (pset p6 0 x) 1 y) 2 vy) 14 thrust1)))
       (let ((done (finish-step p7 pieces rules)))
         (list (ease-lane (car done) dt) (car (cdr done)) (car (cdr (cdr done))))))))
 
@@ -204,7 +237,7 @@
               (let ((ev (car (cdr (cdr hit)))))
                 (if (string=? ev "bump") "bump" (if fresh "oops" ev))))))
     (let ((landed (if (<= (player-y p7) 0.0)
-                    (pset (pset p7 1 0.0) 2 0.0)
+                    (pset (pset (pset p7 1 0.0) 2 0.0) 14 0.0)
                     p7)))
       (collide landed pieces rules))))
 
@@ -246,7 +279,7 @@
                    #f))
             ((and hit (= k 6.0) (<= (player-y player) 0.05) (<= (player-vy player) 0.0))
              (loop (cdr ps) (cons q acc)
-                   (pset (pset player 2 (* jump 1.28)) 3 0.0)
+                   (pset (pset (pset player 2 (* jump 1.28)) 3 0.0) 14 0.0)
                    "spring"
                    #f))
             (else (loop (cdr ps) (cons q acc) player event #f))))))))

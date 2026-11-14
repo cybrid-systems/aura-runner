@@ -157,9 +157,10 @@ async function drive() {
     let sawScene = false;
     let sawCue = false;
     let sawPal = false;
+    let sawShape = false;
     let maxChunks = 0;
     const deadline = Date.now() + 25000;
-    while (Date.now() < deadline && !(sawMotif && sawScene && sawCue && sawPal)) {
+    while (Date.now() < deadline && !(sawMotif && sawScene && sawCue && sawPal && sawShape)) {
       io.send({ op: "tick", jump: 0, slide: 0, lane: 0 });
       batch = await readUntil(io, (m) => m.op === "state", 40);
       for (const m of batch) {
@@ -176,8 +177,20 @@ async function drive() {
           if (m.motif === MOTIF) sawMotif = true;
           if (typeof m.scene === "string" && m.scene.includes("tulip")) sawScene = true;
         }
-        if (m.op === "decision" && m.kind === "KEEP" && m.arm === "scene" && m.cue) sawCue = true;
-        if (m.op === "decision" && m.kind === "KEEP" && m.arm === "pals") sawPal = true;
+        if (m.op === "decision" && m.kind === "KEEP" && m.arm === "scene" && m.cue) {
+          if (m.mark !== "sky") throw new Error("scene mark " + m.mark);
+          sawCue = true;
+        }
+        if (m.op === "decision" && m.kind === "KEEP" && m.arm === "pals") {
+          if (m.mark !== "friend") throw new Error("pal mark " + m.mark);
+          sawPal = true;
+        }
+        if (m.op === "decision" && m.kind === "KEEP" && m.arm === "motif") {
+          if (m.mark !== "shape" && m.mark !== "bend" && m.mark !== "star" && m.mark !== "gem" && m.mark !== "blossom" && m.mark !== "apple" && m.mark !== "coin") {
+            throw new Error("motif mark " + m.mark);
+          }
+          sawShape = true;
+        }
         if (JSON.stringify(m).includes("The light rested")) throw new Error("end card leaked into the protocol");
       }
       await new Promise((r) => setTimeout(r, 40));
@@ -186,6 +199,7 @@ async function drive() {
     if (!sawScene) throw new Error("garden was not rebound; mock " + JSON.stringify(mock.hits) + "\n" + core.log());
     if (!sawCue) throw new Error("scene KEEP had no cue");
     if (!sawPal) throw new Error("companion was not added; mock " + JSON.stringify(mock.hits));
+    if (!sawShape) throw new Error("motif keep had no corner mark");
     if (mock.hits.motif < 1 || mock.hits.scene < 1 || mock.hits.pals < 1) {
       throw new Error("mock did not see both prompts " + JSON.stringify(mock.hits));
     }
