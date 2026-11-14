@@ -1,4 +1,4 @@
-// Two runs. The first has no model fibers: on this Aura pin a live
+// Two runs. The first has no model fibers: a live
 // llm:chat fiber retains capture frames until a long tick loop exhausts
 // the arena, so the ten minutes of road are simulated without one.
 // The second run uses the mock, parks one garden call until the

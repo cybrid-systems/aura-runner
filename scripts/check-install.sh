@@ -28,7 +28,7 @@ if [[ ! -x "$out" ]]; then
 fi
 ver="$("$out" --version 2>/dev/null || true)"
 case "$ver" in
-  *"$AURA_COMMIT"*) ;;
+  *nightly*) ;;
   *) echo "unexpected version: $ver" >&2; exit 1 ;;
 esac
 
@@ -39,8 +39,8 @@ if [[ "$out" != "$out2" ]]; then
   exit 1
 fi
 
-# The other architecture's image is checked for layout and the pinned
-# commit. This host does not execute it.
+# The other architecture's nightly bundle is checked for layout.
+# This host does not execute it.
 host="$(uname -m)"
 case "$host" in
   x86_64) other="arm64" ;;
@@ -48,15 +48,15 @@ case "$host" in
   *) echo "skip cross-arch layout check on $host" >&2; other="" ;;
 esac
 if [[ -n "$other" ]]; then
-  echo "checking ${other} image layout (not executed)" >&2
+  echo "checking ${other} nightly bundle (not executed)" >&2
   listing="$(inspect_aura_arch "$other")"
   if ! printf '%s\n' "$listing" | grep -q 'bin/aura$'; then
-    echo "${other} image has no bin/aura" >&2
+    echo "${other} bundle has no bin/aura" >&2
     printf '%s\n' "$listing" >&2
     exit 1
   fi
-  if ! printf '%s\n' "$listing" | grep -q "$AURA_COMMIT"; then
-    echo "${other} image is not ${AURA_COMMIT}" >&2
+  if ! printf '%s\n' "$listing" | grep -q "nightly"; then
+    echo "${other} bundle is not the nightly release" >&2
     printf '%s\n' "$listing" >&2
     exit 1
   fi
