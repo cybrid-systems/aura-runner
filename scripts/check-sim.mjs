@@ -1,7 +1,7 @@
 // Replay the Aura physics golden with web/sim.js. The two runtimes must
 // agree on the jump trace to the millimetre and on the pass/fail cases.
 import { readFileSync } from "node:fs";
-import { DT, makePlayer, mm, pressJump, pressSlide, rulesOf, step } from "../web/sim.mjs";
+import { DT, bodyLane, makePlayer, mm, praiseClear, pressJump, pressLane, pressSlide, rulesOf, step } from "../web/sim.mjs";
 
 const rules = rulesOf(32, 11.2, 5, 0.48, 0.12, 0.12);
 const lines = [];
@@ -206,6 +206,64 @@ step(makePlayer(1), fly, rules, DT);
 const fx = fly[0][1];
 if (!(fx < 9.97 && fx > 9.94)) {
   console.error(`flyer did not close ${fx}`);
+  process.exit(1);
+}
+
+const feel = rulesOf(32, 11.2, 8, 0.48, 0.12, 0.12);
+function dodgeRun(side) {
+  const p = makePlayer(1.2);
+  const pieces = [
+    [4, 10.2, 0.85, 0.34, 0.84, -1, 1],
+    [9, 18, 0.64, 0.64, 1.85, 1, 0, 3.6, 2.8, 1.05],
+  ];
+  if (side) pressLane(p, 1);
+  let bumps = 0;
+  const seen = new Set();
+  let prizes = 0;
+  for (let i = 0; i < 500; i++) {
+    if (p[0] > 7.2 && p[0] < 7.6) pressSlide(p);
+    if (p[0] > 9.6 && p[0] < 10.0) pressSlide(p);
+    const ev = step(p, pieces, feel, DT);
+    if (ev === "bump" || ev === "oops") bumps++;
+    if (ev === "bump" || ev === "oops") continue;
+    for (const q of pieces) {
+      if (!praiseClear(p, q)) continue;
+      const key = q[0] + ":" + (q[5] ?? -1);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      prizes++;
+    }
+  }
+  return { bumps, prizes, lane: bodyLane(p) };
+}
+const sideRun = dodgeRun(true);
+const stayRun = dodgeRun(false);
+const blastQ = [9, 4.5, 1.7, 1.25, 0, 1, 1, 0, 0, 0.3];
+const beside = makePlayer(5.2);
+beside[9] = 0;
+beside[10] = -1.8;
+const under = makePlayer(5.2);
+under[1] = 1.4;
+const gatePiece = [4, 10.2, 0.85, 0.34, 0.84, -1, 1];
+const through = makePlayer(10.625);
+through[3] = 0.3;
+const past = makePlayer(11.3);
+past[3] = 0.3;
+const dropped = makePlayer(11.3);
+if (sideRun.prizes !== 2 || sideRun.bumps !== 0 || sideRun.lane !== 2) {
+  console.error(`side dodge ${JSON.stringify(sideRun)}`);
+  process.exit(1);
+}
+if (stayRun.prizes !== 1 || stayRun.bumps < 1) {
+  console.error(`centre still pays the bar then the burst hits ${JSON.stringify(stayRun)}`);
+  process.exit(1);
+}
+if (!praiseClear(beside, blastQ) || !praiseClear(under, blastQ) || praiseClear(makePlayer(5.2), blastQ)) {
+  console.error("blast prize missed a clear or paid a hit");
+  process.exit(1);
+}
+if (praiseClear(through, gatePiece) || !praiseClear(past, gatePiece) || praiseClear(dropped, gatePiece)) {
+  console.error("gate prize must wait until the bar is behind a slide");
   process.exit(1);
 }
 console.log(`sim matches aura golden (${got.length} lines)`);

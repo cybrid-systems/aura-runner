@@ -630,7 +630,8 @@ export function createRenderer(canvas) {
     n++;
   }
 
-  function burst(x, y, z, rgb, count, lift) {
+  // tint 0 keeps the garden mix. 1 blossom, 2 apple, 3 star, 4 gem.
+  function burst(x, y, z, rgb, count, lift, tint = 0) {
     let left = count;
     for (let i = 0; i < 36 && left > 0; i++) {
       const o = i * 8;
@@ -643,7 +644,7 @@ export function createRenderer(canvas) {
       sparks[o + 4] = Math.sin(a);
       sparks[o + 5] = lift;
       sparks[o + 6] = 0.55;
-      sparks[o + 7] = i;
+      sparks[o + 7] = i + tint * 100;
       left--;
     }
     void rgb;
@@ -1233,7 +1234,15 @@ export function createRenderer(canvas) {
       }
     }
 
-    if (st.event === "coin") burst(rx, py + 0.9, rz, pal.coin, 8, 0.05);
+    if (st.event === "coin") {
+      const kind = typeof st.loot === "string" ? st.loot : "coin";
+      const rich = kind === "gem" ? [18, 0.11, 4]
+        : kind === "star" ? [14, 0.09, 3]
+        : kind === "apple" ? [10, 0.07, 2]
+        : kind === "blossom" ? [10, 0.07, 1]
+        : [8, 0.05, 0];
+      burst(rx, py + 0.9, rz, pal.coin, rich[0], rich[1], rich[2]);
+    }
     if (st.event === "spring") burst(rx, py + 0.4, rz, pal.spring, 8, 0.08);
     if (st.near) burst(rx, py + 0.7, rz + 0.4, pal.sun, 6, 0.02);
     if (land > 0.85) burst(rx, 0.15, rz, pal.path, 4, 0.01);
@@ -1307,9 +1316,15 @@ export function createRenderer(canvas) {
       sparks[o + 2] += sparks[o + 4] * 0.045;
       sparks[o + 5] *= 0.96;
       sparks[o + 6] = life - 0.014;
-      const s = 0.08 + life * 0.08;
-      const tint = (sparks[o + 7] % 2) ? pal.coin : pal.flower;
-      push(sparks[o], sparks[o + 1], sparks[o + 2], s, s, s, 1, tint, 0.2, 0.7);
+      const code = sparks[o + 7];
+      const tintId = Math.floor(code / 100);
+      const s = 0.08 + life * (tintId >= 3 ? 0.12 : 0.08);
+      const tint = tintId === 4 ? [0.62, 0.88, 1]
+        : tintId === 3 ? [1, 0.92, 0.45]
+        : tintId === 2 ? [1, 0.45, 0.42]
+        : tintId === 1 ? [1, 0.62, 0.78]
+        : (code % 2) ? pal.coin : pal.flower;
+      push(sparks[o], sparks[o + 1], sparks[o + 2], s, s, s, 1, tint, 0.2, tintId >= 3 ? 0.9 : 0.7);
     }
     if (reject > 0.2 && !reduced && (n < MAX - 4)) {
       const petal = Math.sin(st.time * 3) * 0.4;

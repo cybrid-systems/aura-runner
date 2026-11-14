@@ -1,5 +1,5 @@
-import { DT, bodyLane, makePlayer, pressJump, pressLane, pressSlide, rulesOf, step } from "./sim.mjs";
-import { awardPickup, dropGrade, gradeLabel, lootWorth } from "./score.mjs";
+import { DT, bodyLane, makePlayer, praiseClear, pressJump, pressLane, pressSlide, rulesOf, step } from "./sim.mjs";
+import { awardPickup, dropGrade, gradeLabel, lootWorth, praise } from "./score.mjs";
 import { createRenderer } from "./render.mjs";
 import { createInput } from "./input.mjs";
 import { createAudio } from "./audio.mjs";
@@ -17,6 +17,9 @@ const saidEl = document.getElementById("said");
 const toastEl = document.getElementById("toast");
 const flashEl = document.getElementById("flash");
 const comboEl = document.getElementById("combo");
+const gainEl = document.getElementById("gain");
+const meterEl = document.getElementById("meter");
+const meterFill = document.getElementById("meter-fill");
 const badgeEl = document.getElementById("badge");
 const notesEl = document.getElementById("notes");
 const noteList = document.getElementById("note-list");
@@ -93,6 +96,8 @@ let grade = 1;
 let gradeBank = 0;
 let gainText = "";
 let gainUntil = 0;
+let comboText = "";
+let feltSpeed = 8;
 const nearSeen = new Set();
 const toastQ = [];
 let toastUntil = 0;
@@ -319,9 +324,14 @@ function resetLocal() {
   gradeBank = 0;
   gainText = "";
   gainUntil = 0;
+  comboText = "";
+  feltSpeed = rules.speed;
   comboEl.hidden = true;
+  comboEl.classList.remove("hot");
+  if (gainEl) gainEl.hidden = true;
   if (gradeEl) gradeEl.textContent = gradeLabel(1);
   if (paceEl) paceEl.textContent = "Speed 8";
+  paintMeter();
   nearSeen.clear();
   stumble = 0;
   flashEl.hidden = true;
@@ -447,6 +457,7 @@ function publishProbe() {
   root.dataset.loot = loot;
   root.dataset.points = String(Math.max(0, Math.floor(player[6])));
   root.dataset.grade = gradeLabel(grade).split(" ")[0];
+  root.dataset.bank = String(gradeBank);
   root.dataset.speed = String(rules.speed);
   root.dataset.bend = bend.toFixed(2);
   root.dataset.mark = markEl && !markEl.hidden ? markEl.textContent : "";
@@ -481,16 +492,29 @@ function frame(now) {
         inputAt = 0;
       }
       if (ev === "coin") {
-        audio.coin();
+        audio.pickup(loot);
         spark = "coin";
         const got = awardPickup(rules.worth, combo, comboUntil, now, grade, gradeBank);
         combo = got.combo;
         comboUntil = got.comboUntil;
         player[6] += got.extra;
-        gainText = got.text;
-        gainUntil = got.gainUntil;
+        const rose = got.grade > grade;
         grade = got.grade;
         gradeBank = got.bank;
+        comboText = got.text;
+        showGain(got.text, got.combo >= 3);
+        if (rose) celebrateGrade();
+      }
+      if (ev !== "bump" && ev !== "oops" && scanPraise()) {
+        const got = praise(grade, gradeBank);
+        player[6] += got.points;
+        const rose = got.grade > grade;
+        grade = got.grade;
+        gradeBank = got.bank;
+        showGain(got.text, false);
+        audio.nice();
+        nearSpark = true;
+        if (rose) celebrateGrade();
       }
       if (ev === "spring") { audio.spring(); spark = "spring"; }
       if (ev === "bump" || ev === "oops") {
@@ -551,11 +575,16 @@ function frame(now) {
     toastEl.hidden = true;
     toastUntil = 0;
   }
-  if (gainText && now < gainUntil) {
+  if (combo >= 2 && now < comboUntil) {
     comboEl.hidden = false;
-    comboEl.textContent = gainText;
+    comboEl.textContent = comboText || ("×" + combo);
+    comboEl.classList.toggle("hot", combo >= 3);
   } else if (!comboEl.hidden) {
     comboEl.hidden = true;
+    comboEl.classList.remove("hot");
+  }
+  if (!(gainText && now < gainUntil) && gainEl && !gainEl.hidden) {
+    gainEl.hidden = true;
     gainText = "";
   }
   const shown = Math.max(0, Math.floor(player[6]));
@@ -571,12 +600,50 @@ function frame(now) {
     if (gradeEl.textContent !== label) gradeEl.textContent = label;
   }
   if (paceEl) {
-    const paceLabel = "Speed " + Math.round(rules.speed);
+    const paceN = Math.round(rules.speed);
+    const paceLabel = "Speed " + paceN;
+    if (booted && paceN > Math.round(feltSpeed)) {
+      showCue("Faster!");
+      audio.rise();
+      paceEl.classList.remove("pop");
+      void paceEl.offsetWidth;
+      paceEl.classList.add("pop");
+    }
+    feltSpeed = rules.speed;
     if (paceEl.textContent !== paceLabel) paceEl.textContent = paceLabel;
   }
+  paintMeter();
   if (showStats && frameN % 20 === 0) paintStats();
   if (benchMode && frameN === 180) finishBench();
   requestAnimationFrame(frame);
+}
+
+function showGain(text, big) {
+  gainText = text;
+  gainUntil = performance.now() + 1100;
+  if (!gainEl) return;
+  gainEl.hidden = false;
+  gainEl.textContent = text;
+  gainEl.classList.toggle("big", !!big);
+  gainEl.classList.remove("float");
+  void gainEl.offsetWidth;
+  if (!reduced) gainEl.classList.add("float");
+}
+
+function celebrateGrade() {
+  showCue(gradeLabel(grade).split(" ")[0] + "!");
+  audio.cheer();
+  if (!gradeEl) return;
+  gradeEl.classList.remove("pop");
+  void gradeEl.offsetWidth;
+  gradeEl.classList.add("pop");
+}
+
+function paintMeter() {
+  if (!meterFill) return;
+  const fill = grade >= 5 ? 100 : Math.max(0, Math.min(99, Math.round(gradeBank)));
+  meterFill.style.width = fill + "%";
+  if (meterEl) meterEl.classList.toggle("full", grade >= 5);
 }
 
 function hearPoppers(list) {
@@ -589,6 +656,23 @@ function hearPoppers(list) {
     }
   }
   return heard;
+}
+
+// A slide that has passed a bar, or a burst left in the next lane, pays once.
+// A bump the same moment does not. Grace after a hit does not pay either.
+function scanPraise() {
+  for (let i = 0; i < pieces.length; i++) {
+    const q = pieces[i];
+    const k = q[0];
+    if (k !== 4 && k !== 9) continue;
+    const key = q[1].toFixed(2) + ":" + k + ":" + (q[5] ?? -1);
+    if (nearSeen.has(key)) continue;
+    if (!praiseClear(player, q)) continue;
+    nearSeen.add(key);
+    if (nearSeen.size > 80) nearSeen.clear();
+    return true;
+  }
+  return false;
 }
 
 function scanNear(nowMs) {

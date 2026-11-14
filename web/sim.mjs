@@ -51,6 +51,34 @@ export function bodyLane(p) {
   return 1;
 }
 
+// Half the body that still overlaps a bar, plus one short step, so the
+// prize lands after the bar rather than on the way in.
+const GATE_PAST = 0.24;
+
+// A slide that has cleared a bar, or a blast left in the next lane or
+// jumped, pays once. Grace after a hit does not.
+export function praiseClear(p, q) {
+  if (p[11] > 0) return false;
+  const k = q[0];
+  if (k !== 4 && k !== 9) return false;
+  const x = p[0];
+  const y = p[1];
+  const lane = bodyLane(p);
+  const x1 = q[1];
+  const x2 = x1 + q[2];
+  const pl = q.length > 5 ? q[5] : -1;
+  if (k === 4) {
+    const mid = (x1 + x2) * 0.5;
+    const past = mid + gateBarDepth(q[2]) * 0.5 + GATE_PAST;
+    return x > past && x < mid + 1.2 && (pl < 0 || pl === lane) && p[3] > 0;
+  }
+  if (!(q[6] > 0.5)) return false;
+  const mid = (x1 + x2) * 0.5;
+  const beside = pl >= 0 && Math.abs(pl - lane) === 1;
+  const cleared = (pl < 0 || pl === lane) && y > q[4] + q[3] - 0.05;
+  return Math.abs(x - mid) < 2.2 && (beside || cleared);
+}
+
 function hitsLane(q, lane) {
   const pl = pieceLane(q);
   return pl < -0.5 || pl === lane;
