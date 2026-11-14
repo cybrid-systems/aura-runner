@@ -35,18 +35,22 @@
          (list (list (piece 2.0 x w 1.2 -1.2)) (+ x w)))))
     ((string=? kind "hurdle")
      (let ((h (spec-num sp 1 0.5))
-           (w (spec-num sp 2 0.7)))
+           (w (spec-num sp 2 0.7))
+           (style (named-style (spec-sym sp 3) hurdle-looks)))
        (if (or (not (positive-range? h 0.15 3.0))
-               (not (positive-range? w 0.35 2.2)))
+               (not (positive-range? w 0.35 2.2))
+               (< style 0.0))
          #f
-         (list (list (piece 3.0 (+ x 0.25) w h 0.0)) (+ x w 1.05)))))
+         (list (list (piece 3.0 (+ x 0.25) w h 0.0 -1.0 style)) (+ x w 1.05)))))
     ((string=? kind "gate")
      (let ((bottom (spec-num sp 1 0.66))
-           (w (spec-num sp 2 0.7)))
+           (w (spec-num sp 2 0.7))
+           (style (named-style (spec-sym sp 3) gate-looks)))
        (if (or (not (positive-range? bottom 0.3 1.6))
-               (not (positive-range? w 0.35 2.0)))
+               (not (positive-range? w 0.35 2.0))
+               (< style 0.0))
          #f
-         (list (list (piece 4.0 (+ x 0.2) w 0.34 bottom)) (+ x w 0.95)))))
+         (list (list (piece 4.0 (+ x 0.2) w 0.34 bottom -1.0 style)) (+ x w 0.95)))))
     ((string=? kind "coin")
      (let ((y (spec-num sp 1 1.35)))
        (if (not (positive-range? y 0.4 2.4))
@@ -61,10 +65,13 @@
     ; the piece that follows and the fair centre line keeps its timing.
     ((string=? kind "block")
      (let ((lane (spec-num sp 1 0.0))
-           (w (spec-num sp 2 1.1)))
-       (if (or (not (lane-id? lane)) (not (positive-range? w 0.5 2.2)))
+           (w (spec-num sp 2 1.1))
+           (style (named-style (spec-sym sp 3) block-looks)))
+       (if (or (not (lane-id? lane))
+               (not (positive-range? w 0.5 2.2))
+               (< style 0.0))
          #f
-         (list (list (piece 7.0 (+ x 0.15) w 1.65 0.0 lane)) x))))
+         (list (list (piece 7.0 (+ x 0.15) w 1.65 0.0 lane style)) x))))
     ((string=? kind "coin-lane")
      (let ((lane (spec-num sp 1 2.0))
            (y (spec-num sp 2 1.3)))
@@ -132,6 +139,43 @@
     ((= code 4.0) 2.2)
     (else 0.0)))
 
+; Look is field 6. Missing word stays the first look. An unknown word is refused.
+(define hurdle-looks (list "bar" "log" "fence" "bloom" "drum"))
+(define gate-looks (list "bar" "ribbon" "vine" "lights" "scarf"))
+(define block-looks (list "pot" "stump" "mushroom" "crate" "bush"))
+
+(define (named-style name table)
+  (if (not (string? name))
+    0.0
+    (let loop ((xs table) (i 0.0))
+      (if (null? xs)
+        -1.0
+        (if (string=? name (car xs))
+          i
+          (loop (cdr xs) (+ i 1.0)))))))
+
+(define (look-name k code)
+  (cond
+    ((= k 3.0)
+     (cond ((= code 1.0) "log") ((= code 2.0) "fence")
+           ((= code 3.0) "bloom") ((= code 4.0) "drum") (else "")))
+    ((= k 4.0)
+     (cond ((= code 1.0) "ribbon") ((= code 2.0) "vine")
+           ((= code 3.0) "lights") ((= code 4.0) "scarf") (else "")))
+    ((= k 7.0)
+     (cond ((= code 1.0) "stump") ((= code 2.0) "mushroom")
+           ((= code 3.0) "crate") ((= code 4.0) "bush") (else "")))
+    (else "")))
+
+(define (look-mark pieces)
+  (let loop ((ps pieces))
+    (if (null? ps)
+      ""
+      (let ((name (look-name (piece-k (car ps)) (piece-nth (car ps) 6 0.0))))
+        (if (> (string-length name) 0)
+          name
+          (loop (cdr ps)))))))
+
 (define (flyer-kind-name code)
   (cond
     ((= code 0.0) "plane")
@@ -161,84 +205,84 @@
 
 ; Band 0 is the first 30 seconds. Every pattern opens with a high, easy
 ; gate a couple of seconds in, then one gentle toy flying back along a
-; lane, a centre pot, a low hurdle and a short gap. Actions land about
-; every 18–24 m so a slide, a lane change or a jump shows up inside
-; each 20–30 m.
+; lane, a centre block, a low hurdle and a short gap. A hurdle, a gate,
+; and a block each pick a garden look. Actions land about every 18–24 m
+; so a slide, a lane change or a jump shows up inside each 20–30 m.
 (define patterns-0
   (list
-    (list (list "ground" 10.0) (list "gate" 0.84 0.85) (list "ground" 8.0)
+    (list (list "ground" 10.0) (list "gate" 0.84 0.85 "ribbon") (list "ground" 8.0)
           (list "flyer" "plane" 1.0 0.7) (list "ground" 7.0)
-          (list "ground" 4.0) (list "block" 1.0 1.0) (list "coin-lane" 2.0 1.3)
-          (list "ground" 14.0) (list "hurdle" 0.36 0.6) (list "ground" 14.0)
+          (list "ground" 4.0) (list "block" 1.0 1.0 "stump") (list "coin-lane" 2.0 1.3)
+          (list "ground" 14.0) (list "hurdle" 0.36 0.6 "log") (list "ground" 14.0)
           (list "gap" 1.0) (list "ground" 6.0))
-    (list (list "ground" 9.0) (list "gate" 0.82 0.8) (list "ground" 8.0)
+    (list (list "ground" 9.0) (list "gate" 0.82 0.8 "vine") (list "ground" 8.0)
           (list "flyer" "bubble" 0.0 0.65) (list "ground" 7.0)
-          (list "ground" 4.0) (list "block" 1.0 1.1) (list "ground" 14.0)
-          (list "hurdle" 0.38 0.65) (list "ground" 14.0) (list "gap" 0.95)
+          (list "ground" 4.0) (list "block" 1.0 1.1 "mushroom") (list "ground" 14.0)
+          (list "hurdle" 0.38 0.65 "fence") (list "ground" 14.0) (list "gap" 0.95)
           (list "coin" 1.4) (list "ground" 6.0))
-    (list (list "ground" 11.0) (list "gate" 0.80 0.9) (list "ground" 8.0)
+    (list (list "ground" 11.0) (list "gate" 0.80 0.9 "lights") (list "ground" 8.0)
           (list "flyer" "lantern" 2.0 0.75) (list "ground" 7.0)
-          (list "ground" 3.0) (list "hurdle" 0.34 0.6) (list "ground" 14.0)
-          (list "block" 1.0 1.0) (list "coin-lane" 0.0 1.2) (list "ground" 14.0)
+          (list "ground" 3.0) (list "hurdle" 0.34 0.6 "bloom") (list "ground" 14.0)
+          (list "block" 1.0 1.0 "bush") (list "coin-lane" 0.0 1.2) (list "ground" 14.0)
           (list "gap" 1.05) (list "ground" 6.0))))
 
 (define patterns-1
   (list
-    (list (list "ground" 6.0) (list "block" 1.0 1.0) (list "ground" 6.0)
+    (list (list "ground" 6.0) (list "block" 1.0 1.0 "crate") (list "ground" 6.0)
           (list "flyer" "leaf" 1.0 0.7) (list "ground" 7.0)
-          (list "hurdle" 0.48 0.7) (list "ground" 16.0) (list "gate" 0.74 0.75)
+          (list "hurdle" 0.48 0.7 "drum") (list "ground" 16.0) (list "gate" 0.74 0.75 "scarf")
           (list "ground" 16.0) (list "gap" 1.25) (list "ground" 8.0))
     (list (list "ground" 7.0) (list "gap" 1.15) (list "ground" 6.0)
           (list "flyer" "ball" 2.0 0.68) (list "ground" 7.0)
-          (list "gate" 0.72 0.8) (list "ground" 16.0) (list "block" 1.0 1.0)
-          (list "ground" 16.0) (list "hurdle" 0.52 0.7) (list "coin" 1.3)
+          (list "gate" 0.72 0.8 "ribbon") (list "ground" 16.0) (list "block" 1.0 1.0 "stump")
+          (list "ground" 16.0) (list "hurdle" 0.52 0.7 "log") (list "coin" 1.3)
           (list "ground" 7.0))))
 
 ; Recovery ground is long enough that a jump lands before the next
 ; hazard. A gate never sits inside the arc of the previous jump.
 (define patterns-2
   (list
-    (list (list "ground" 5.0) (list "block" 1.0 1.0) (list "block" 0.0 1.0)
-          (list "ground" 4.2) (list "gate" 0.66 0.75) (list "ground" 4.0)
-          (list "coin" 1.4) (list "hurdle" 0.55 0.7) (list "ground" 4.0)
+    (list (list "ground" 5.0) (list "block" 1.0 1.0 "mushroom") (list "block" 0.0 1.0 "crate")
+          (list "ground" 4.2) (list "gate" 0.66 0.75 "vine") (list "ground" 4.0)
+          (list "coin" 1.4) (list "hurdle" 0.55 0.7 "fence") (list "ground" 4.0)
           (list "flyer" "plane" 0.0 0.72) (list "ground" 4.0)
           (list "gap" 1.5) (list "ground" 4.5) (list "spring" 0.7)
           (list "ground" 4.0))
-    (list (list "ground" 4.6) (list "block" 1.0 1.0) (list "block" 2.0 1.0)
-          (list "ground" 3.6) (list "hurdle" 0.6 0.7) (list "ground" 4.0)
+    (list (list "ground" 4.6) (list "block" 1.0 1.0 "bush") (list "block" 2.0 1.0 "stump")
+          (list "ground" 3.6) (list "hurdle" 0.6 0.7 "bloom") (list "ground" 4.0)
           (list "flyer" "bubble" 1.0 0.66) (list "ground" 4.0)
-          (list "gate" 0.64 0.7) (list "ground" 4.0) (list "gap" 1.55)
+          (list "gate" 0.64 0.7 "lights") (list "ground" 4.0) (list "gap" 1.55)
           (list "ground" 4.2) (list "coin" 1.5) (list "ground" 3.6))))
 
 (define patterns-3
   (list
-    (list (list "ground" 4.2) (list "block" 1.0 1.05) (list "ground" 3.4)
+    (list (list "ground" 4.2) (list "block" 1.0 1.05 "crate") (list "ground" 3.4)
           (list "gap" 1.6) (list "ground" 4.4)
-          (list "hurdle" 0.7 0.7) (list "ground" 4.0)
+          (list "hurdle" 0.7 0.7 "drum") (list "ground" 4.0)
           (list "flyer" "lantern" 2.0 0.7) (list "ground" 4.0)
-          (list "gate" 0.64 0.7)
+          (list "gate" 0.64 0.7 "scarf")
           (list "ground" 4.0) (list "coin" 1.6) (list "gap" 1.55)
           (list "ground" 4.0) (list "spring" 0.75) (list "ground" 3.6))
-    (list (list "ground" 4.0) (list "block" 1.0 1.0) (list "ground" 3.4)
-          (list "gate" 0.62 0.7) (list "ground" 4.0)
+    (list (list "ground" 4.0) (list "block" 1.0 1.0 "mushroom") (list "ground" 3.4)
+          (list "gate" 0.62 0.7 "vine") (list "ground" 4.0)
           (list "flyer" "leaf" 0.0 0.74) (list "ground" 4.0)
-          (list "gap" 1.7) (list "ground" 4.4) (list "hurdle" 0.75 0.7)
+          (list "gap" 1.7) (list "ground" 4.4) (list "hurdle" 0.75 0.7 "log")
           (list "ground" 4.2) (list "coin" 1.5) (list "spring" 0.7)
           (list "ground" 3.8))))
 
 (define patterns-4
   (list
-    (list (list "ground" 3.8) (list "block" 1.0 1.0) (list "ground" 3.2)
-          (list "hurdle" 0.82 0.68) (list "flyer" "ball" 1.0 0.68)
-          (list "ground" 4.0) (list "gap" 1.85) (list "ground" 4.2) (list "gate" 0.62 0.68)
+    (list (list "ground" 3.8) (list "block" 1.0 1.0 "stump") (list "ground" 3.2)
+          (list "hurdle" 0.82 0.68 "fence") (list "flyer" "ball" 1.0 0.68)
+          (list "ground" 4.0) (list "gap" 1.85) (list "ground" 4.2) (list "gate" 0.62 0.68 "ribbon")
           (list "ground" 3.8) (list "spring" 0.7) (list "ground" 3.4)
           (list "gap" 1.7) (list "ground" 4.2) (list "coin" 1.6)
           (list "ground" 3.2))
-    (list (list "ground" 3.6) (list "block" 1.0 1.0) (list "ground" 3.2)
+    (list (list "ground" 3.6) (list "block" 1.0 1.0 "bush") (list "ground" 3.2)
           (list "gap" 1.9) (list "ground" 4.2)
-          (list "gate" 0.6 0.66) (list "ground" 4.0)
+          (list "gate" 0.6 0.66 "lights") (list "ground" 4.0)
           (list "flyer" "plane" 2.0 0.7) (list "ground" 3.2)
-          (list "hurdle" 0.88 0.68)
+          (list "hurdle" 0.88 0.68 "drum")
           (list "ground" 4.2) (list "coin" 1.5) (list "spring" 0.7)
           (list "ground" 3.6))))
 
@@ -521,7 +565,12 @@
       (string=? s "star") (string=? s "gem") (string=? s "blossom")
       (string=? s "apple")
       (string=? s "flyer") (string=? s "plane") (string=? s "bubble")
-      (string=? s "lantern") (string=? s "leaf") (string=? s "ball")))
+      (string=? s "lantern") (string=? s "leaf") (string=? s "ball")
+      (string=? s "bar") (string=? s "log") (string=? s "fence")
+      (string=? s "bloom") (string=? s "drum")
+      (string=? s "ribbon") (string=? s "vine") (string=? s "lights")
+      (string=? s "scarf") (string=? s "pot") (string=? s "stump")
+      (string=? s "mushroom") (string=? s "crate") (string=? s "bush")))
 
 ; The sentence sits in front of the s-expression. The reader has no
 ; strings, so the sentence never enters the form.

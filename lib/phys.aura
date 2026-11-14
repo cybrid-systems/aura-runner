@@ -110,7 +110,8 @@
     (list)
     (cons (exact->inexact (car xs)) (inexact-rest (cdr xs)))))
 
-; Lane is field 5. A flyer keeps a visual code at 6 and a speed at 7.
+; Lane is field 5. Field 6 is a flyer's look, or a hurdle, gate, or block
+; look. A flyer also keeps a speed at 7. The look does not change the hit.
 (define (piece k x w h y . rest)
   (if (null? rest)
     (list k x w h y -1.0)

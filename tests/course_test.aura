@@ -133,3 +133,28 @@
                       (= (chunk-flyers 7 0 3) 1)
                       (= (chunk-flyers 9 0 4) 1))
                1 0))
+
+; Every built hurdle, gate and block carries a look other than the plain one.
+(define (pieces-styled? ps)
+  (let loop ((xs ps))
+    (if (null? xs)
+      #t
+      (let ((q (car xs))
+            (k (piece-k (car xs))))
+        (if (and (or (= k 3.0) (= k 4.0) (= k 7.0))
+                 (<= (piece-nth q 6 0.0) 0.0))
+          #f
+          (loop (cdr xs)))))))
+
+(define (table-styled? band)
+  (let loop ((rows (pattern-table band)))
+    (if (null? rows)
+      #t
+      (let ((laid (layout-specs (car rows) 0.0)))
+        (if (and laid (pieces-styled? (car laid)))
+          (loop (cdr rows))
+          #f)))))
+
+(show "looks" (if (and (table-styled? 0) (table-styled? 1) (table-styled? 2)
+                       (table-styled? 3) (table-styled? 4))
+                1 0))
