@@ -53,7 +53,8 @@
     ((or (string=? kind "keeper")
          (string=? kind "kitten") (string=? kind "car") (string=? kind "bunny")
          (string=? kind "bird") (string=? kind "butterfly") (string=? kind "frog")
-         (string=? kind "duck") (string=? kind "friend"))
+         (string=? kind "duck") (string=? kind "puppy") (string=? kind "fox")
+         (string=? kind "turtle") (string=? kind "bee") (string=? kind "friend"))
      kind)
     (else "friend")))
 
@@ -66,6 +67,10 @@
     ((string=? kind "butterfly") "A butterfly drifted by")
     ((string=? kind "frog") "A frog joined the path")
     ((string=? kind "duck") "A duck waddled in")
+    ((string=? kind "puppy") "A puppy bounded in")
+    ((string=? kind "fox") "A fox trotted in")
+    ((string=? kind "turtle") "A turtle joined the path")
+    ((string=? kind "bee") "A bee buzzed along")
     (else "A new friend came along")))
 
 (define (color-ok? r g b)
