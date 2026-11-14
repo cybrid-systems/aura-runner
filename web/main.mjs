@@ -10,7 +10,6 @@ const statsEl = document.getElementById("stats");
 const motionBtn = document.getElementById("motion");
 const muteBtn = document.getElementById("mute");
 const benchEl = document.getElementById("bench");
-const chatLog = document.getElementById("chat-log");
 const saidEl = document.getElementById("said");
 const toastEl = document.getElementById("toast");
 const flashEl = document.getElementById("flash");
@@ -58,6 +57,7 @@ let pals = [
   { kind: "kitten", name: "mochi", r: 0.95, g: 0.62, b: 0.35, motion: "hop", plan: "kitten" },
   { kind: "car", name: "beep", r: 0.3, g: 0.55, b: 0.95, motion: "pace", plan: "car" },
 ];
+let hero = { kind: "keeper", plan: "keeper", r: 0.95, g: 0.72, b: 0.45 };
 let bend = 0.38;
 let loot = "coin";
 const LOOTS = new Set(["coin", "star", "gem", "blossom", "apple"]);
@@ -91,7 +91,7 @@ const nearSeen = new Set();
 const toastQ = [];
 let toastUntil = 0;
 const gardenNotes = [];
-const chatRows = [];
+const saidRows = [];
 let ws;
 let connected = false;
 let booted = false;
@@ -135,6 +135,25 @@ function applyPals(msg) {
   pals = next;
 }
 
+const HERO_PLANS = new Set(["keeper", "kitten", "car", "bunny", "bird", "butterfly", "frog", "duck", "friend"]);
+
+function applyHero(msg) {
+  const row = msg.hero;
+  if (!row || typeof row !== "object") return;
+  const kind = typeof row.kind === "string" ? row.kind.toLowerCase() : "keeper";
+  const plan = typeof row.plan === "string" ? row.plan.toLowerCase() : kind;
+  const r = Number(row.r);
+  const g = Number(row.g);
+  const b = Number(row.b);
+  hero = {
+    kind,
+    plan: HERO_PLANS.has(plan) ? plan : "friend",
+    r: Number.isFinite(r) ? r : 0.95,
+    g: Number.isFinite(g) ? g : 0.72,
+    b: Number.isFinite(b) ? b : 0.45,
+  };
+}
+
 function paintModel() {
   const label = provider === "minimax" ? "MiniMax" : provider === "deepseek" ? "DeepSeek" : "";
   modelBtn.hidden = providers.length < 2 || !label;
@@ -171,6 +190,7 @@ function applyRules(msg) {
   applyScene(msg);
   applyLook(msg);
   applyPals(msg);
+  applyHero(msg);
   applyProvider(msg);
 }
 
@@ -202,37 +222,15 @@ function paintNotes() {
   }
 }
 
-function paintChat() {
-  if (!chatLog) return;
-  chatLog.replaceChildren();
-  for (const row of [...chatRows].reverse()) {
-    const li = document.createElement("li");
-    li.className = row.who === "you" ? "you" : "garden";
-    const who = document.createElement("span");
-    who.className = "who";
-    who.textContent = row.who === "you" ? "You" : "Lumen";
-    const say = document.createElement("p");
-    say.textContent = row.text;
-    li.append(who, say);
-    chatLog.append(li);
-  }
-}
-
-function pushChat(who, text) {
+function showSaid(text) {
   const clean = String(text || "").trim();
-  if (!clean) return;
-  const prev = chatRows[0];
-  if (prev && prev.who === who && prev.text === clean) return;
-  chatRows.unshift({ who, text: clean });
-  if (chatRows.length > 6) chatRows.pop();
-  paintChat();
-  if (who === "lumen" && saidEl) {
-    saidEl.hidden = false;
-    saidEl.textContent = clean;
-  }
+  if (!clean || !saidEl) return;
+  if (saidRows[0] === clean) return;
+  saidRows.unshift(clean);
+  if (saidRows.length > 6) saidRows.pop();
+  saidEl.hidden = false;
+  saidEl.textContent = clean;
 }
-
-pushChat("you", "What should come down the path?");
 
 function showCue(text) {
   if (!text) return;
@@ -260,12 +258,9 @@ function remember(msg) {
   gardenNotes.unshift({ cue, why: msg.why || "", ask: msg.ask || "" });
   if (gardenNotes.length > 6) gardenNotes.pop();
   if (!notesEl.hidden) paintNotes();
-  // Only a real question/answer pair goes in the center. A dream's
-  // canned line and the stumble toasts stay off this log.
-  if (msg.ask) {
-    pushChat("you", msg.ask);
-    pushChat("lumen", cue);
-  }
+  // The corner keeps the model's sentence. A dream's canned line and
+  // the stumble toasts stay off that line.
+  if (msg.ask) showSaid(cue);
   if (msg.mark) showMark(msg.mark);
   else showCue(cue);
 }
@@ -429,15 +424,17 @@ function publishProbe() {
     chunks: window.__lumen && window.__lumen.chunks,
     cues: gardenNotes.map((row) => row.cue),
     pals: pals.map((row) => row.name),
+    hero: hero.plan,
     provider,
     model: modelName,
   };
   root.dataset.pals = pals.map((row) => row.name).join(",");
+  root.dataset.hero = hero.plan || "keeper";
   root.dataset.provider = provider;
   root.dataset.loot = loot;
   root.dataset.bend = bend.toFixed(2);
   root.dataset.mark = markEl && !markEl.hidden ? markEl.textContent : "";
-  root.dataset.chat = chatRows.map((row) => row.text).join(" | ");
+  root.dataset.chat = saidRows.join(" | ");
   root.dataset.said = saidEl && !saidEl.hidden ? saidEl.textContent : "";
   root.dataset.flyers = String(pieces.reduce((n, q) => n + (q[0] === 8 ? 1 : 0), 0));
 }
@@ -510,7 +507,7 @@ function frame(now) {
       slide: player[3], hue, time: now / 1000, now, reduced, pieces,
       event: spark, alive: true, speed: rules.speed, g: rules.g,
       near: nearSpark, reject: rejectSpark,
-      scene: sceneView, stumble: stumble / 1500, pals, bend, loot,
+      scene: sceneView, stumble: stumble / 1500, pals, hero, bend, loot,
     });
     spark = "";
     nearSpark = false;
