@@ -182,10 +182,19 @@
 
 (define (piece->list q) q)
 
-(define (rules-of g jump speed slide coyote forgive)
-  (hash "g" g "jump" jump "speed" speed "slide" slide
-        "coyote" coyote "forgive" forgive
-        "ph" 1.05 "pw" 0.56 "sh" 0.46))
+; Worth is the points a pickup adds. Callers that omit it keep a coin at 25.
+(define (rules-of g jump speed slide coyote forgive . rest)
+  (let ((worth (if (and (pair? rest) (number? (car rest)) (> (car rest) 0.0))
+                 (exact->inexact (car rest))
+                 25.0)))
+    (hash "g" g "jump" jump "speed" speed "slide" slide
+          "coyote" coyote "forgive" forgive
+          "ph" 1.05 "pw" 0.56 "sh" 0.46
+          "worth" worth)))
+
+(define (pickup-worth rules)
+  (let ((n (hash-ref rules "worth" 25.0)))
+    (if (and (number? n) (> n 0.0)) n 25.0)))
 
 (define (over-gap? x lane pieces)
   (let loop ((ps pieces))
@@ -347,7 +356,7 @@
             ((and hit (= k 5.0))
              (loop (cdr ps)
                    (cons (piece 0.0 x1 (piece-w q) (piece-h q) y1 (piece-lane q)) acc)
-                   (pset player 6 (+ (player-score player) 25.0))
+                   (pset player 6 (+ (player-score player) (pickup-worth rules)))
                    "coin"
                    #f))
             ((and hit (= k 6.0) (<= (player-y player) 0.05) (<= (player-vy player) 0.0))
@@ -357,6 +366,7 @@
                    #f))
             (else (loop (cdr ps) (cons q acc) player event #f))))))))
 
-; Distance score starts at the spawn line so the counter opens on 0.
+; Pickup points live on the player. Distance is only the server's
+; running total; the picture scores the pickups themselves.
 (define (score-now p)
   (+ (player-score p) (max 0.0 (- (player-x p) 1.2))))

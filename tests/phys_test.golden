@@ -11,6 +11,7 @@ wide-alive 1
 slide-alive 1
 stand-alive 1
 coins 25.0
+star 80.0
 bump-alive 1
 bump-score 10.0
 bump-grace 1

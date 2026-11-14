@@ -33,9 +33,22 @@ html, body {
   color: var(--cream);
   background: #5c3414;
 }
+#kicker {
+  position: fixed;
+  top: max(10px, env(safe-area-inset-top));
+  left: max(18px, env(safe-area-inset-left));
+  margin: 0;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--cream);
+  text-shadow: 0 2px 0 rgba(92, 52, 20, 0.28);
+  pointer-events: none;
+}
 #score {
   position: fixed;
-  top: max(12px, env(safe-area-inset-top));
+  top: max(26px, calc(env(safe-area-inset-top) + 16px));
   left: max(16px, env(safe-area-inset-left));
   font-size: clamp(52px, 8vw, 88px);
   font-weight: 800;
@@ -45,6 +58,24 @@ html, body {
   pointer-events: none;
   line-height: 0.9;
 }
+#grade, #pace {
+  position: fixed;
+  left: max(18px, env(safe-area-inset-left));
+  margin: 0;
+  color: var(--cream);
+  font-weight: 800;
+  text-shadow: 0 2px 0 rgba(92, 52, 20, 0.28);
+  pointer-events: none;
+}
+#grade {
+  top: max(118px, calc(env(safe-area-inset-top) + 106px));
+  font-size: 22px;
+}
+#pace {
+  top: max(146px, calc(env(safe-area-inset-top) + 134px));
+  font-size: 16px;
+  letter-spacing: 0.04em;
+}
 #score.pop { animation: pop 0.22s ease-out; }
 @keyframes pop {
   from { transform: translateY(4px) scale(1.16); }
@@ -52,7 +83,7 @@ html, body {
 }
 #combo {
   position: fixed;
-  top: max(96px, calc(env(safe-area-inset-top) + 84px));
+  top: max(176px, calc(env(safe-area-inset-top) + 164px));
   left: max(18px, env(safe-area-inset-left));
   margin: 0;
   padding: 4px 12px;
