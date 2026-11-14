@@ -11,6 +11,13 @@ source "$ROOT/scripts/aura-path.sh"
 WEB_PORT="${AURA_RUNNER_WEB:-8080}"
 AURA_PORT="${AURA_RUNNER_PORT:-8765}"
 
+if [[ "${1:-}" == "deepseek" || "${1:-}" == "minimax" ]]; then
+  export LUMEN_LLM="$1"
+elif [[ -n "${1:-}" ]]; then
+  echo "usage: ./run.sh [deepseek|minimax]" >&2
+  exit 1
+fi
+
 AURA_BIN="$(install_aura "$ROOT")"
 if [[ "$(printf '%s\n' "$AURA_BIN" | wc -l)" -ne 1 || ! -x "$AURA_BIN" ]]; then
   echo "Aura binary path is not a single executable: [$AURA_BIN]" >&2
@@ -20,6 +27,10 @@ fi
 export AURA_EVO_LOG="$ROOT/out/evo.jsonl"
 export AURA_RUNNER_PORT="$AURA_PORT"
 export AURA_RUNNER_WEB="$WEB_PORT"
+
+# shellcheck source=scripts/probe-llm.sh
+source "$ROOT/scripts/probe-llm.sh"
+configure_llm
 : > "$AURA_EVO_LOG" || true
 rm -f out/aura.port
 

@@ -6,7 +6,7 @@
 // lane 0 (left) at negative X, and the renderer negates lateral positions.
 // Input still sends lane -1 for Left.
 
-const MAX = 520;
+const MAX = 720;
 const STRIDE = 12;
 
 function mix3(a, b, t) {
@@ -440,6 +440,126 @@ export function createRenderer(canvas) {
     void rgb;
   }
 
+  function shade(rgb, s) {
+    return [Math.min(1, rgb[0] * s), Math.min(1, rgb[1] * s), Math.min(1, rgb[2] * s)];
+  }
+
+  function palRgb(pal) {
+    const r = Number(pal.r);
+    const g = Number(pal.g);
+    const b = Number(pal.b);
+    if (![r, g, b].every((n) => n >= 0 && n <= 1)) return [0.95, 0.72, 0.45];
+    return [r, g, b];
+  }
+
+  function eyes(x, y, z) {
+    const ink = [0.22, 0.16, 0.12];
+    push(x - 0.07, y, z + 0.02, 0.07, 0.07, 0.05, 1, ink, 0.2, 0.15);
+    push(x + 0.07, y, z + 0.02, 0.07, 0.07, 0.05, 1, ink, 0.2, 0.15);
+  }
+
+  function drawKitten(x, y, z, rgb) {
+    push(x, y + 0.28, z, 0.46, 0.32, 0.58, 1, rgb, 0.35, 0.05);
+    push(x, y + 0.56, z + 0.1, 0.34, 0.3, 0.32, 1, shade(rgb, 1.08), 0.25, 0.08);
+    push(x - 0.11, y + 0.76, z + 0.1, 0.1, 0.16, 0.08, 0, shade(rgb, 0.85), 0.4, 0);
+    push(x + 0.11, y + 0.76, z + 0.1, 0.1, 0.16, 0.08, 0, shade(rgb, 0.85), 0.4, 0);
+    push(x, y + 0.32, z - 0.32, 0.1, 0.1, 0.22, 1, shade(rgb, 0.8), 0.4, 0);
+    eyes(x, y + 0.58, z + 0.22);
+  }
+
+  function drawCar(x, y, z, rgb) {
+    const wheel = [0.16, 0.14, 0.14];
+    push(x, y + 0.28, z, 0.72, 0.28, 1.05, 0, rgb, 0.32, 0.06);
+    push(x, y + 0.5, z - 0.02, 0.48, 0.26, 0.48, 0, shade(rgb, 1.12), 0.22, 0.1);
+    push(x - 0.28, y + 0.12, z + 0.32, 0.22, 0.22, 0.22, 1, wheel, 0.55, 0);
+    push(x + 0.28, y + 0.12, z + 0.32, 0.22, 0.22, 0.22, 1, wheel, 0.55, 0);
+    push(x - 0.28, y + 0.12, z - 0.32, 0.22, 0.22, 0.22, 1, wheel, 0.55, 0);
+    push(x + 0.28, y + 0.12, z - 0.32, 0.22, 0.22, 0.22, 1, wheel, 0.55, 0);
+    push(x - 0.16, y + 0.3, z + 0.54, 0.08, 0.08, 0.06, 1, [1, 0.95, 0.7], 0.2, 0.85);
+    push(x + 0.16, y + 0.3, z + 0.54, 0.08, 0.08, 0.06, 1, [1, 0.95, 0.7], 0.2, 0.85);
+  }
+
+  function drawBunny(x, y, z, rgb) {
+    push(x, y + 0.3, z, 0.42, 0.36, 0.48, 1, rgb, 0.3, 0.05);
+    push(x, y + 0.58, z + 0.08, 0.32, 0.28, 0.3, 1, shade(rgb, 1.05), 0.25, 0.06);
+    push(x - 0.08, y + 0.86, z + 0.06, 0.08, 0.28, 0.08, 0, shade(rgb, 0.9), 0.35, 0);
+    push(x + 0.08, y + 0.86, z + 0.06, 0.08, 0.28, 0.08, 0, shade(rgb, 0.9), 0.35, 0);
+    push(x, y + 0.34, z - 0.26, 0.12, 0.12, 0.12, 1, [0.98, 0.96, 0.92], 0.3, 0.1);
+    eyes(x, y + 0.6, z + 0.2);
+  }
+
+  function drawBird(x, y, z, rgb, t, reduced) {
+    const flap = reduced ? 0.12 : 0.12 + Math.abs(Math.sin(t * 9)) * 0.16;
+    push(x, y + 0.42, z, 0.32, 0.26, 0.4, 1, rgb, 0.3, 0.08);
+    push(x, y + 0.58, z + 0.16, 0.2, 0.18, 0.2, 1, shade(rgb, 1.05), 0.25, 0.1);
+    push(x, y + 0.56, z + 0.28, 0.1, 0.08, 0.14, 0, [0.95, 0.62, 0.28], 0.3, 0.05);
+    push(x - 0.22, y + 0.46 + flap, z, 0.28, 0.06, 0.18, 0, shade(rgb, 0.85), 0.35, 0.05);
+    push(x + 0.22, y + 0.46 + flap, z, 0.28, 0.06, 0.18, 0, shade(rgb, 0.85), 0.35, 0.05);
+    eyes(x, y + 0.62, z + 0.22);
+  }
+
+  function drawButterfly(x, y, z, rgb, t, reduced) {
+    const wing = reduced ? 0.22 : 0.18 + Math.abs(Math.sin(t * 8)) * 0.12;
+    push(x, y + 0.46, z, 0.08, 0.08, 0.28, 1, shade(rgb, 0.75), 0.3, 0.1);
+    push(x - 0.18, y + 0.5, z, wing, 0.28, 0.2, 0, rgb, 0.25, 0.2);
+    push(x + 0.18, y + 0.5, z, wing, 0.28, 0.2, 0, shade(rgb, 1.1), 0.25, 0.2);
+  }
+
+  function drawFrog(x, y, z, rgb) {
+    push(x, y + 0.22, z, 0.5, 0.26, 0.46, 1, rgb, 0.35, 0.05);
+    push(x - 0.12, y + 0.4, z + 0.1, 0.14, 0.14, 0.14, 1, shade(rgb, 1.1), 0.25, 0.1);
+    push(x + 0.12, y + 0.4, z + 0.1, 0.14, 0.14, 0.14, 1, shade(rgb, 1.1), 0.25, 0.1);
+    eyes(x, y + 0.44, z + 0.16);
+  }
+
+  function drawDuck(x, y, z, rgb) {
+    push(x, y + 0.28, z, 0.42, 0.3, 0.52, 1, rgb, 0.3, 0.06);
+    push(x, y + 0.5, z + 0.16, 0.26, 0.22, 0.24, 1, shade(rgb, 1.05), 0.25, 0.08);
+    push(x, y + 0.48, z + 0.3, 0.14, 0.08, 0.16, 0, [0.98, 0.62, 0.22], 0.3, 0.05);
+    push(x - 0.08, y + 0.08, z + 0.08, 0.12, 0.06, 0.16, 0, [0.98, 0.62, 0.22], 0.4, 0);
+    push(x + 0.08, y + 0.08, z + 0.08, 0.12, 0.06, 0.16, 0, [0.98, 0.62, 0.22], 0.4, 0);
+    eyes(x, y + 0.54, z + 0.24);
+  }
+
+  function drawFriend(x, y, z, rgb) {
+    push(x, y + 0.36, z, 0.4, 0.4, 0.4, 1, rgb, 0.28, 0.08);
+    push(x, y + 0.66, z + 0.04, 0.28, 0.26, 0.26, 1, shade(rgb, 1.12), 0.22, 0.12);
+    push(x, y + 0.84, z, 0.06, 0.14, 0.06, 0, shade(rgb, 1.2), 0.3, 0.2);
+    eyes(x, y + 0.68, z + 0.14);
+  }
+
+  function drawBody(plan, x, y, z, rgb, t, reduced) {
+    if (plan === "kitten") drawKitten(x, y, z, rgb);
+    else if (plan === "car") drawCar(x, y, z, rgb);
+    else if (plan === "bunny") drawBunny(x, y, z, rgb);
+    else if (plan === "bird") drawBird(x, y, z, rgb, t, reduced);
+    else if (plan === "butterfly") drawButterfly(x, y, z, rgb, t, reduced);
+    else if (plan === "frog") drawFrog(x, y, z, rgb);
+    else if (plan === "duck") drawDuck(x, y, z, rgb);
+    else drawFriend(x, y, z, rgb);
+  }
+
+  function drawPals(list, pz, t, reduced) {
+    if (!Array.isArray(list)) return;
+    const nPals = Math.min(6, list.length);
+    for (let i = 0; i < nPals; i++) {
+      const pal = list[i];
+      const side = i % 2 === 0 ? 1 : -1;
+      const rank = Math.floor(i / 2);
+      const motion = pal.motion || "pace";
+      let hop = 0;
+      if (motion === "float") hop = reduced ? 0.7 : 0.62 + Math.sin(t * 2 + i) * 0.16;
+      else if (!reduced && motion === "hop") hop = Math.abs(Math.sin(t * 6 + i)) * 0.38;
+      else if (!reduced && motion === "follow") hop = Math.abs(Math.sin(t * 5 + i)) * 0.1;
+      else if (!reduced) hop = Math.abs(Math.sin(t * 4 + i)) * 0.05;
+      const weave = !reduced && motion === "side" ? Math.sin(t * 1.4 + i) * 0.22 : 0;
+      const x = side * (2.95 + rank * 0.15) + weave;
+      const z = pz + 1.6 + rank * 1.8 + (reduced ? 0 : Math.sin(t * 0.8 + i) * 0.2);
+      push(x, 0.02, z, 0.55, 0.02, 0.4, 0, [0.18, 0.12, 0.08], 1, 0);
+      drawBody(pal.plan || pal.kind, x, hop, z, palRgb(pal), t, reduced);
+    }
+  }
+
   function sproutOf(q, pz) {
     if (!q.born) return 1;
     const dist = q[1] - pz;
@@ -594,6 +714,8 @@ export function createRenderer(canvas) {
     if (st.near) burst(rx, py + 0.7, pz + 0.4, pal.sun, 6, 0.02);
     if (land > 0.85) burst(rx, 0.15, pz, pal.path, 4, 0.01);
     if (st.reject) burst(rx, 1.6, pz + 2, pal.flower, 10, 0.06);
+
+    drawPals(st.pals, pz, st.time || 0, reduced);
 
     const air = py > 0.08;
     const sliding = st.slide > 0;

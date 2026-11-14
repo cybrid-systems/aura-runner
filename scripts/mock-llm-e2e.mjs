@@ -10,12 +10,20 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+function cleanEnv(env) {
+  delete env.LUMEN_DEEPSEEK_KEY;
+  delete env.LUMEN_MINIMAX_KEY;
+  delete env.LUMEN_LLM;
+  return env;
+}
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const aura = process.env.AURA_BIN || "aura";
 const port = 18766;
 const webPort = 18081;
 const MOTIF = "(seq (ground 6) (block 0 1) (hurdle 0.4 0.7) (ground 5) (gate 0.72 0.8) (ground 5) (gap 1.1) (ground 5))";
 const SCENE = "(garden (sky 0.95 0.45 0.55) (ground 0.35 0.72 0.32) (flower tulip 0.85) (light 0.9))";
+const PAL = "(pal bird lark 0.95 0.86 0.35 float)";
 
 function connect(p) {
   return new Promise((resolve, reject) => {
@@ -61,7 +69,7 @@ async function readUntil(io, pred, limit = 30) {
 }
 
 function startMock() {
-  const hits = { motif: 0, scene: 0, other: 0 };
+  const hits = { motif: 0, scene: 0, pals: 0, other: 0 };
   const server = http.createServer((req, res) => {
     if (req.method !== "POST") {
       res.writeHead(404);
@@ -73,8 +81,10 @@ function startMock() {
     req.on("end", () => {
       const body = Buffer.concat(chunks).toString("utf8");
       const scene = body.includes("(flower KIND") || body.includes("Suggest a different bright garden");
-      const content = scene ? SCENE : MOTIF;
+      const pals = body.includes("friendly companion") || body.includes("Add one new gentle friend");
+      const content = scene ? SCENE : pals ? PAL : MOTIF;
       if (scene) hits.scene += 1;
+      else if (pals) hits.pals += 1;
       else if (body.includes("obstacle") || body.includes("hurdle")) hits.motif += 1;
       else hits.other += 1;
       const payload = JSON.stringify({
@@ -96,7 +106,7 @@ function startMock() {
 function startAura(log, base) {
   const child = spawn(aura, ["--quiet", "--preset", "dev", "--grant", "network", "core/main.aura"], {
     cwd: root,
-    env: {
+    env: cleanEnv({
       ...process.env,
       AURA_RUNNER_PORT: String(port),
       AURA_EVO_LOG: path.join(root, "out", "evo.jsonl"),
@@ -104,7 +114,7 @@ function startAura(log, base) {
       LLM_BASE_URL: base,
       LLM_MODEL: "mock-garden",
       LLM_TIMEOUT: "30",
-    },
+    }),
     stdio: ["ignore", "pipe", "pipe"],
   });
   let text = "";
@@ -138,13 +148,18 @@ async function drive() {
     if (!welcome || welcome.flower !== "daisy") {
       throw new Error("welcome garden " + JSON.stringify(welcome));
     }
+    const welcomeNames = (welcome.pals || []).map((row) => row.name).join(",");
+    if (welcomeNames !== "mochi,beep") {
+      throw new Error("welcome pals " + welcomeNames);
+    }
     if (welcome.alive === false) throw new Error("welcome already ended");
     let sawMotif = false;
     let sawScene = false;
     let sawCue = false;
+    let sawPal = false;
     let maxChunks = 0;
     const deadline = Date.now() + 25000;
-    while (Date.now() < deadline && !(sawMotif && sawScene && sawCue)) {
+    while (Date.now() < deadline && !(sawMotif && sawScene && sawCue && sawPal)) {
       io.send({ op: "tick", jump: 0, slide: 0, lane: 0 });
       batch = await readUntil(io, (m) => m.op === "state", 40);
       for (const m of batch) {
@@ -154,6 +169,7 @@ async function drive() {
           if (m.motif === MOTIF) sawMotif = true;
           if (typeof m.scene === "string" && m.scene.includes("tulip")) sawScene = true;
           if (Array.isArray(m.sky) && m.sky[0] > 0.9 && m.sky[1] < 0.6) sawScene = true;
+          if (Array.isArray(m.pals) && m.pals.some((row) => row && row.name === "lark")) sawPal = true;
         }
         if (m.op === "rules") {
           if (m.via !== "rebind") throw new Error("rules via " + m.via);
@@ -161,6 +177,7 @@ async function drive() {
           if (typeof m.scene === "string" && m.scene.includes("tulip")) sawScene = true;
         }
         if (m.op === "decision" && m.kind === "KEEP" && m.arm === "scene" && m.cue) sawCue = true;
+        if (m.op === "decision" && m.kind === "KEEP" && m.arm === "pals") sawPal = true;
         if (JSON.stringify(m).includes("The light rested")) throw new Error("end card leaked into the protocol");
       }
       await new Promise((r) => setTimeout(r, 40));
@@ -168,7 +185,8 @@ async function drive() {
     if (!sawMotif) throw new Error("obstacle phrase was not rebound; mock " + JSON.stringify(mock.hits) + "\n" + core.log());
     if (!sawScene) throw new Error("garden was not rebound; mock " + JSON.stringify(mock.hits) + "\n" + core.log());
     if (!sawCue) throw new Error("scene KEEP had no cue");
-    if (mock.hits.motif < 1 || mock.hits.scene < 1) {
+    if (!sawPal) throw new Error("companion was not added; mock " + JSON.stringify(mock.hits));
+    if (mock.hits.motif < 1 || mock.hits.scene < 1 || mock.hits.pals < 1) {
       throw new Error("mock did not see both prompts " + JSON.stringify(mock.hits));
     }
     if (maxChunks > 16) throw new Error("chunks grew to " + maxChunks);
@@ -185,6 +203,7 @@ async function drive() {
 }
 
 function chromeBin() {
+  if (process.env.CHROME_BIN && fs.existsSync(process.env.CHROME_BIN)) return process.env.CHROME_BIN;
   for (const name of ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"]) {
     const p = "/usr/bin/" + name;
     if (fs.existsSync(p)) return p;
@@ -240,6 +259,8 @@ async function screenshots() {
     await new Promise((r) => setTimeout(r, 300));
     chrome = spawn(bin, [
       "--headless=new",
+      "--no-sandbox",
+      "--disable-dev-shm-usage",
       "--disable-gpu",
       "--use-gl=angle",
       "--use-angle=swiftshader",
@@ -261,6 +282,20 @@ async function screenshots() {
     const late = path.join(root, "out", "garden-after.png");
     await new Promise((r) => setTimeout(r, 400));
     await capture(cdp, early);
+    const palsNow = await cdp.call("Runtime.evaluate", {
+      expression: "document.documentElement.dataset.pals || ''",
+      returnByValue: true,
+    });
+    const modelHidden = await cdp.call("Runtime.evaluate", {
+      expression: "(() => { const b = document.getElementById('model'); return !b || b.hidden; })()",
+      returnByValue: true,
+    });
+    const pals = (palsNow.result && palsNow.result.value) || "";
+    const names = pals.split(",").filter(Boolean);
+    console.log(`companions ${pals} modelHidden ${modelHidden.result && modelHidden.result.value}`);
+    if (!names.includes("mochi") || !names.includes("beep")) {
+      throw new Error("companions missing " + pals);
+    }
     const deadline = Date.now() + 20000;
     let sky = "";
     while (Date.now() < deadline) {

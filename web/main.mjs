@@ -17,6 +17,7 @@ const comboEl = document.getElementById("combo");
 const badgeEl = document.getElementById("badge");
 const notesEl = document.getElementById("notes");
 const noteList = document.getElementById("note-list");
+const modelBtn = document.getElementById("model");
 
 const params = new URLSearchParams(location.search);
 const reducedPref = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -51,6 +52,13 @@ const sceneView = {
   light: 0.82,
   fog: 0.22,
 };
+let pals = [
+  { kind: "kitten", name: "mochi", r: 0.95, g: 0.62, b: 0.35, motion: "hop", plan: "kitten" },
+  { kind: "car", name: "beep", r: 0.3, g: 0.55, b: 0.95, motion: "pace", plan: "car" },
+];
+let provider = "";
+let modelName = "";
+let providers = [];
 let stumble = 0;
 let lastCue = "";
 let lastCueAt = 0;
@@ -101,6 +109,44 @@ function applyScene(msg) {
   if (typeof msg.fog === "number") sceneTarget.fog = Math.min(0.38, Math.max(0, msg.fog));
 }
 
+function applyPals(msg) {
+  if (!Array.isArray(msg.pals)) return;
+  const next = [];
+  for (const row of msg.pals) {
+    if (!row || typeof row.kind !== "string" || typeof row.name !== "string") continue;
+    const r = Number(row.r);
+    const g = Number(row.g);
+    const b = Number(row.b);
+    if (![r, g, b].every((n) => Number.isFinite(n))) continue;
+    next.push({
+      kind: row.kind,
+      name: row.name,
+      r, g, b,
+      motion: typeof row.motion === "string" ? row.motion : "pace",
+      plan: typeof row.plan === "string" ? row.plan : row.kind,
+    });
+    if (next.length >= 6) break;
+  }
+  pals = next;
+}
+
+function paintModel() {
+  const label = provider === "minimax" ? "MiniMax" : provider === "deepseek" ? "DeepSeek" : "";
+  modelBtn.hidden = providers.length < 2 || !label;
+  modelBtn.textContent = label || "Model";
+  const which = modelName || label;
+  modelBtn.setAttribute("aria-label", which ? `Switch model, now ${which}` : "Switch model");
+}
+
+function applyProvider(msg) {
+  if (typeof msg.provider === "string") provider = msg.provider;
+  if (typeof msg.model === "string") modelName = msg.model;
+  if (Array.isArray(msg.providers)) {
+    providers = msg.providers.filter((name) => name === "deepseek" || name === "minimax");
+  }
+  paintModel();
+}
+
 function applyRules(msg) {
   const slide = typeof msg["slide-dur"] === "number" ? msg["slide-dur"] : msg.slide;
   rules = rulesOf(
@@ -113,6 +159,8 @@ function applyRules(msg) {
   );
   if (typeof msg.hue === "number") hue = msg.hue;
   applyScene(msg);
+  applyPals(msg);
+  applyProvider(msg);
 }
 
 function lerpScene(dt) {
@@ -273,7 +321,7 @@ function connect() {
       });
     } else if (msg.op === "decision") {
       remember(msg);
-      if (msg.kind === "KEEP" && (msg.arm === "motif" || msg.arm === "scene")) audio.keep();
+      if (msg.kind === "KEEP" && (msg.arm === "motif" || msg.arm === "scene" || msg.arm === "pals")) audio.keep();
       if (msg.kind === "ROLLBACK") rejectSpark = true;
       if (msg.kind === "BUMP") stumble = Math.max(stumble, 1500);
     }
@@ -318,7 +366,12 @@ function publishProbe() {
     via: window.__lumen && window.__lumen.via,
     chunks: window.__lumen && window.__lumen.chunks,
     cues: gardenNotes.map((row) => row.cue),
+    pals: pals.map((row) => row.name),
+    provider,
+    model: modelName,
   };
+  root.dataset.pals = pals.map((row) => row.name).join(",");
+  root.dataset.provider = provider;
 }
 
 function frame(now) {
@@ -393,7 +446,7 @@ function frame(now) {
       slide: player[3], hue, time: now / 1000, now, reduced, pieces,
       event: spark, alive: true, speed: rules.speed, g: rules.g,
       near: nearSpark, reject: rejectSpark,
-      scene: sceneView, stumble: stumble / 1500,
+      scene: sceneView, stumble: stumble / 1500, pals,
     });
     spark = "";
     nearSpark = false;
@@ -482,6 +535,12 @@ muteBtn.addEventListener("click", () => {
   const next = !audio.muted;
   audio.setMuted(next);
   muteBtn.setAttribute("aria-pressed", next ? "true" : "false");
+});
+modelBtn.addEventListener("click", () => {
+  if (!connected || !ws || ws.readyState !== 1 || providers.length < 2) return;
+  const ix = providers.indexOf(provider);
+  const next = providers[(ix + 1) % providers.length];
+  ws.send(JSON.stringify({ op: "provider", name: next }));
 });
 badgeEl.addEventListener("click", () => {
   const open = notesEl.hidden;

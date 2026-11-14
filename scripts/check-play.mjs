@@ -9,6 +9,13 @@ import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+function cleanEnv(env) {
+  delete env.LUMEN_DEEPSEEK_KEY;
+  delete env.LUMEN_MINIMAX_KEY;
+  delete env.LUMEN_LLM;
+  return env;
+}
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const aura = process.env.AURA_BIN || "aura";
 const port = 18770;
@@ -64,7 +71,7 @@ async function readUntil(io, pred, limit = 80) {
 }
 
 function startMock() {
-  const hits = { motif: 0, scene: 0, hung: 0 };
+  const hits = { motif: 0, scene: 0, pals: 0, hung: 0 };
   const server = http.createServer((req, res) => {
     if (req.method !== "POST") {
       res.writeHead(404);
@@ -76,14 +83,16 @@ function startMock() {
     req.on("end", () => {
       const body = Buffer.concat(chunks).toString("utf8");
       const scene = body.includes("(flower KIND") || body.includes("Suggest a different bright garden");
+      const pals = body.includes("friendly companion") || body.includes("Add one new gentle friend");
       if (scene) {
         hits.scene += 1;
         if (hits.scene === 1) {
           hits.hung += 1;
           return;
         }
-      } else hits.motif += 1;
-      const content = scene ? SCENE : MOTIF;
+      } else if (pals) hits.pals += 1;
+      else hits.motif += 1;
+      const content = scene ? SCENE : pals ? "(pal bird lark 0.95 0.86 0.35 float)" : MOTIF;
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({
         id: "mock",
@@ -102,12 +111,12 @@ function startMock() {
 function startAura(extra) {
   const child = spawn(aura, ["--quiet", "--preset", "dev", "--grant", "network", "core/main.aura"], {
     cwd: root,
-    env: {
+    env: cleanEnv({
       ...process.env,
       AURA_RUNNER_PORT: String(port),
       LLM_API_KEY: "",
       ...extra,
-    },
+    }),
     stdio: ["ignore", "pipe", "pipe"],
   });
   let text = "";
@@ -236,7 +245,10 @@ await withAura({
       if (m.op === "state" && typeof m.scene === "string" && m.scene.includes("tulip")) sawTulip = true;
       if (m.op === "state" && Array.isArray(m.sky) && m.sky[0] > 0.9 && m.sky[1] < 0.6) sawTulip = true;
     }
-    if (run > 90000) break;
+    // Simulated time outruns the 2s HTTP timeout on a fast host. Keep
+    // going long enough for the parked garden call to end and the next
+    // one to be kept. The wall deadline above still stops a real hang.
+    if (run > 150000) break;
   }
   if (!sawBusy) throw new Error("scene call never looked busy");
   if (!cleared) throw new Error("watchdog did not clear scene-busy");
