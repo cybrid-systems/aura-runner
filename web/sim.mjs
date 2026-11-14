@@ -199,6 +199,8 @@ export function step(p, pieces, rules, dt) {
     if (fresh) payBump(p);
     ev = collide(p, pieces, rules);
     if (ev !== "bump" && fresh) ev = "oops";
+    // A gap recovery keeps the pace. An obstacle still slows the run.
+    if (ev === "oops") p[12] = 0;
   } else {
     if (p[1] <= 0) {
       p[1] = 0;

@@ -162,9 +162,10 @@ async function drive() {
     let sawPal = false;
     let sawShape = false;
     let sawSay = false;
+    let sawRunner = false;
     let maxChunks = 0;
     const deadline = Date.now() + 40000;
-    while (Date.now() < deadline && !(sawMotif && sawScene && sawCue && sawPal && sawShape && sawSay)) {
+    while (Date.now() < deadline && !(sawMotif && sawScene && sawCue && sawPal && sawShape && sawSay && sawRunner)) {
       io.send({ op: "tick", jump: 0, slide: 0, lane: 0 });
       batch = await readUntil(io, (m) => m.op === "state", 40);
       for (const m of batch) {
@@ -175,6 +176,7 @@ async function drive() {
           if (typeof m.scene === "string" && m.scene.includes("tulip")) sawScene = true;
           if (Array.isArray(m.sky) && m.sky[0] > 0.9 && m.sky[1] < 0.6) sawScene = true;
           if (Array.isArray(m.pals) && m.pals.some((row) => row && row.name === "lark")) sawPal = true;
+          if (m.hero && m.hero.plan && m.hero.plan !== "keeper") sawRunner = true;
         }
         if (m.op === "rules") {
           if (m.via !== "rebind") throw new Error("rules via " + m.via);
@@ -186,7 +188,9 @@ async function drive() {
           sawCue = true;
         }
         if (m.op === "decision" && m.kind === "KEEP" && m.arm === "pals") {
-          if (m.mark !== "friend") throw new Error("pal mark " + m.mark);
+          if (m.mark !== "kitten" && m.mark !== "car" && m.mark !== "bunny" && m.mark !== "bird" && m.mark !== "butterfly" && m.mark !== "frog" && m.mark !== "duck") {
+            throw new Error("pal mark " + m.mark);
+          }
           sawPal = true;
         }
         if (m.op === "decision" && m.kind === "KEEP" && m.arm === "motif") {
@@ -204,6 +208,7 @@ async function drive() {
     if (!sawScene) throw new Error("garden was not rebound; mock " + JSON.stringify(mock.hits) + "\n" + core.log());
     if (!sawCue) throw new Error("scene KEEP had no cue");
     if (!sawPal) throw new Error("companion was not added; mock " + JSON.stringify(mock.hits) + "\n" + core.log());
+    if (!sawRunner) throw new Error("runner was not restyled; mock " + JSON.stringify(mock.hits) + "\n" + core.log());
     if (!sawShape) throw new Error("motif keep had no corner mark");
     if (!sawSay) throw new Error("motif keep did not show the model sentence");
     if (mock.hits.motif < 1 || mock.hits.scene < 1 || mock.hits.pals < 1) {
@@ -350,11 +355,14 @@ async function screenshots() {
         throw new Error("end card is on screen");
       }
       if (body.includes(MOTIF_SAY)) sawBodySay = true;
-      if ((sky.startsWith("0.9") || sky.startsWith("0.8")) && chat.includes(MOTIF_SAY) && sawBodySay) break;
+      if ((sky.startsWith("0.9") || sky.startsWith("0.8")) && chat.includes(MOTIF_SAY) && sawBodySay && heroNow && heroNow !== "keeper") break;
       await new Promise((r) => setTimeout(r, 250));
     }
     if (!chat.includes(MOTIF_SAY) || !sawBodySay) {
       throw new Error("chat missing the model sentence " + chat + " sky " + sky + " mock " + JSON.stringify(mock.hits) + " page " + JSON.stringify(cdp.logs) + "\n" + core.log().slice(-1500));
+    }
+    if (!heroNow || heroNow === "keeper") {
+      throw new Error("runner stayed the light-keeper hero " + heroNow + " pals " + roster + " mock " + JSON.stringify(mock.hits));
     }
     await new Promise((r) => setTimeout(r, 1200));
     await capture(cdp, late);

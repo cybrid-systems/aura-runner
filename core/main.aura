@@ -18,7 +18,7 @@
   "You redesign the garden backdrop for a children's 3D endless runner called Lumen Run. No markdown. Form: (garden (sky R G B) (ground R G B) (flower KIND DENSITY) (light L)). KIND is one of daisy, tulip, blossom, buttercup. Sky channels are 0.25 to 1 and the sky stays bright. Ground is green: G is at least 0.30 and at least as large as R, and not much smaller than B. Density is 0.15 to 1. Light is 0.50 to 1, never night. Optional (fog F) is 0 to 0.38; do not ask for thicker fog. No violence, fear, weapons, or scary words. Make it look different from a plain blue sky and daisies. First write one short bright English sentence with no parentheses, then the s-expression. That sentence is what the child reads. Example: (garden (sky 0.95 0.45 0.55) (ground 0.35 0.72 0.32) (flower tulip 0.85) (light 0.9))")
 
 (define PALS-SYS
-  "You change one friendly companion in a children's 3D endless runner called Lumen Run. No markdown. Restyle a friend who is already here by keeping the same name, or add one new gentle friend. Form: (pal KIND NAME R G B MOTION). KIND is kitten, car, bunny, bird, butterfly, frog, duck, or a new gentle word of 3 to 12 letters. NAME is 2 to 12 letters. R G B are 0.25 to 1 and the colour stays bright. MOTION is hop, pace, float, follow, or side. No violence, fear, weapons, or scary words. You may also restyle the runner with (hero KIND R G B), alone or as one clause inside (pals ...). KIND is keeper, kitten, car, bunny, bird, butterfly, frog, or duck. keeper is the light-keeper. R G B stay bright, from 0.25 to 1. A hero clause changes the runner only and does not add a friend. First write one short bright English sentence with no parentheses, then the s-expression. That sentence is what the child reads. Example: (pal bird lark 0.95 0.86 0.35 float)")
+  "You change one friendly companion in a children's 3D endless runner called Lumen Run. No markdown. Restyle a friend who is already here by keeping the same name, or add one new gentle friend. Form: (pal KIND NAME R G B MOTION). KIND is kitten, car, bunny, bird, butterfly, frog, duck, or a new gentle word of 3 to 12 letters. NAME is 2 to 12 letters. R G B are 0.25 to 1 and the colour stays bright. MOTION is hop, pace, float, follow, or side. No violence, fear, weapons, or scary words. Always restyle the runner in that same answer with (hero KIND R G B), alone or as one clause inside (pals ...). Pick a KIND different from the runner's current look. KIND is keeper, kitten, car, bunny, bird, butterfly, frog, or duck. keeper is the light-keeper. R G B stay bright, from 0.25 to 1. A hero clause changes the runner only and does not add a friend. First write one short bright English sentence with no parentheses, then the s-expression. That sentence is what the child reads. Example: (pal bird lark 0.95 0.86 0.35 float)")
 
 (define g-now 32.0)
 (define jump-now 11.2)
@@ -505,6 +505,11 @@
   (if (hash? hero-now)
     hero-now
     (hash "kind" "keeper" "plan" "keeper" "r" 0.95 "g" 0.72 "b" 0.45)))
+
+(define (runner-kind)
+  (if (hash? hero-now)
+    (hash-ref hero-now "kind" "keeper")
+    "keeper"))
 
 (define (rules-msg)
   (hash "op" "rules" "rev" rule-rev
@@ -1190,7 +1195,8 @@
                     ". Suggest a different bright garden. Start with one short sentence."))
     ((string=? kind "pals")
      (string-append "Friends already here: " (pal-names pals-rows)
-                    ". Restyle one friend already here by keeping the same name, or add one new gentle friend who is not in that list. You may also restyle the runner with (hero KIND R G B). Start with one short sentence."))
+                    ". The runner is now " (runner-kind)
+                    ". Restyle one friend already here by keeping the same name, or add one new gentle friend who is not in that list. Always include (hero KIND R G B) with a different gentle kind. Start with one short sentence."))
     (else
      (string-append "Difficulty band " (number->string band)
                     ". Pickups are " loot-now
@@ -1270,12 +1276,17 @@
       (send c (rules-msg))
       (set! rules-dirty #f))))
 
+; A pal form and a hero form written next to each other are one phrase.
+; Searching (pal before (hero used to drop the runner.
 (define (extract-pals s)
-  (let ((full (extract-balanced s "(pals")))
-    (if full
-      full
-      (let ((one (extract-balanced s "(pal")))
-        (if one one (extract-balanced s "(hero"))))))
+  (let ((hero (extract-balanced s "(hero")))
+    (let ((body (let ((full (extract-balanced s "(pals")))
+                  (if full full (extract-balanced s "(pal")))))
+      (cond
+        ((and body hero (not (string-contains? body "(hero")))
+         (join-hero body hero))
+        (body body)
+        (else hero)))))
 
 (define (take-pals! c msg)
   (if (not (accept-reply! (hash-ref msg "token" -1) pals-accept))
@@ -1288,7 +1299,7 @@
           (let ((text (if (string? raw) raw "")))
             (if (banned? text)
               (note! "ROLLBACK" "banned" "pals" "The friends stayed")
-              (let ((form (extract-pals text)))
+              (let ((form (dress-form (extract-pals text) (runner-kind))))
                 (if form
                   (if (chat-open?)
                     (set! wait-pals (list form (say-line text)))

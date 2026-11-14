@@ -11,7 +11,8 @@
 ; Player: (x y vy slide-left coyote alive score jump-buffer slide-buffer
 ;          lane lx grace drag lvx thrust)
 ;   grace is seconds of invulnerability after a bump or a gap.
-;   drag is seconds of a slower pace after the same stumble.
+;   drag is seconds of a slower pace after an obstacle. A gap recovery
+;   clears it, so "Back on the path" does not stick the pace.
 ;   A run does not end. strict rules (the fairness autopilot) still
 ;   treat a hit or a gap as dead, so an unfair phrase stays unfair.
 ;   lane is 0 left, 1 centre, 2 right. lx accelerates toward that lane
@@ -261,10 +262,11 @@
       (let* ((fresh (<= (player-grace p7) 0.0))
              (lifted (lift-out p7 pieces))
              (next (if fresh (pay-bump lifted) lifted))
-             (hit (collide next pieces rules)))
-        (list (car hit) (car (cdr hit))
-              (let ((ev (car (cdr (cdr hit)))))
-                (if (string=? ev "bump") "bump" (if fresh "oops" ev))))))
+             (hit (collide next pieces rules))
+             (ev0 (car (cdr (cdr hit))))
+             (ev (if (string=? ev0 "bump") "bump" (if fresh "oops" ev0)))
+             (body (if (string=? ev "oops") (pset (car hit) 12 0.0) (car hit))))
+        (list body (car (cdr hit)) ev)))
     (let ((landed (if (<= (player-y p7) 0.0)
                     (pset (pset (pset p7 1 0.0) 2 0.0) 14 0.0)
                     p7)))

@@ -3,7 +3,7 @@
 // Left press the runner's screen x, under a camera that stays on the centre
 // lane, must decrease.
 import { DT, makePlayer, pressJump, pressLane, rulesOf, step } from "../web/sim.mjs";
-import { DEFAULT_BEND, integrateRoad, poseOnRoad, rebaseAnchor, roadPoint, screenX } from "../web/render.mjs";
+import { DEFAULT_BEND, drawsKeeper, glideS, integrateRoad, poseOnRoad, rebaseAnchor, roadPoint, screenX } from "../web/render.mjs";
 
 const rules = rulesOf(32, 11.2, 5, 0.48, 0.12, 0.12);
 const centre = makePlayer(10);
@@ -97,5 +97,20 @@ if (Math.hypot(same.x - held.x, same.z - held.z) > 1e-4 || Math.abs(same.psi - h
 const onward2 = poseOnRoad(rescued.anchor, rescued.keys, 24);
 if (!(onward2.psi > same.psi + 0.1)) {
   throw new Error(`the view stopped turning after a rescue ${onward2.psi.toFixed(3)}`);
+}
+const rescuedGap = glideS(40, 42, 5, 1 / 60);
+if (rescuedGap.rebase || rescuedGap.s < 40.05 || rescuedGap.s > 40.2) {
+  throw new Error(`a gap rescue popped the view to ${rescuedGap.s}`);
+}
+const walked = glideS(40, 40.08, 5, 1 / 60);
+if (walked.rebase || Math.abs(walked.s - 40.08) > 1e-9) {
+  throw new Error(`a normal step lagged at ${walked.s}`);
+}
+const rewound = glideS(80, 4, 5, 1 / 60);
+if (!rewound.rebase || rewound.s !== 4) {
+  throw new Error("a long correction did not keep the rebase");
+}
+if (drawsKeeper(null) !== true || drawsKeeper({ plan: "keeper" }) !== true || drawsKeeper({ plan: "kitten" }) !== false) {
+  throw new Error("the runner look did not follow the hero plan");
 }
 console.log(`lanes ok  left ${side.toFixed(1)}  centre ${mid.toFixed(1)}  right ${east.toFixed(1)}  bend ${DEFAULT_BEND}`);
