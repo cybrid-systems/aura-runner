@@ -966,30 +966,38 @@ export function createRenderer(canvas) {
     const leanLat = reduced ? 0 : -lean * 0.35;
     const spot = (ds, dlat) => sample(pz + ds, px + dlat);
     const blink = st.stumble > 0.05 && !reduced && Math.sin((st.time || 0) * 28) > 0.15;
+    const hero = st.hero || {};
+    const heroPlan = hero.plan || "keeper";
+    const dressed = heroPlan !== "keeper";
     spin = feet.psi;
     if (alive && !blink) {
       const shadow = spot(0, 0);
       push(shadow.x, 0.02, shadow.z, sliding ? 0.95 : 0.62, 0.025, sliding ? 0.9 : 0.5, 0, [0.18, 0.12, 0.08], 1, 0);
-      if (!sliding) {
-        const leg = air ? -0.12 : swing * 0.32;
-        const legL = spot(leg, -0.16 + leanLat);
-        const legR = spot(-leg, 0.16 + leanLat);
-        push(legL.x, py + 0.22, legL.z, 0.14, 0.4, 0.15, 0, pal.bodyDeep, 0.45, 0.02);
-        push(legR.x, py + 0.22, legR.z, 0.14, 0.4, 0.15, 0, pal.bodyDeep, 0.45, 0.02);
-      }
-      const torsoY = py + (sliding ? 0.3 : 0.5 * squash);
-      const torso = sliding ? 0.52 : 0.46 * widen;
-      const hip = spot(0, leanLat);
-      push(hip.x, torsoY, hip.z, torso, sliding ? 0.3 : 0.42 * squash, sliding ? 0.62 : 0.4, 0, pal.body, 0.35, 0.14);
-      const cape = spot(-0.28, leanLat + (reduced ? 0 : -stride * 0.04));
-      push(cape.x, torsoY - 0.02, cape.z, 0.1, 0.08, 0.22, 0, pal.cape, 0.2, 0.9);
-      const hy = torsoY + (sliding ? 0.16 : 0.34 * squash);
-      const head = spot(sliding ? 0.16 : 0, leanLat * 0.2);
-      push(head.x, hy, head.z, sliding ? 0.32 : 0.44, sliding ? 0.26 : 0.4, sliding ? 0.3 : 0.4, 1, pal.head, 0.2, 0.28);
-      if (!sliding) {
-        const flame = reduced ? 0 : Math.sin(st.time * 11) * 0.035;
-        const tuft = spot(-0.02, leanLat * 0.15);
-        push(tuft.x, hy + 0.32 + flame + pulse * 0.05, tuft.z, 0.13, 0.3, 0.13, 1, pal.cape, 0.12, 1);
+      if (dressed) {
+        const at = spot(sliding ? 0.12 : 0, leanLat);
+        drawBody(heroPlan, at.x, py + (sliding ? -0.22 : 0), at.z, palRgb(hero), st.time || 0, reduced);
+      } else {
+        if (!sliding) {
+          const leg = air ? -0.12 : swing * 0.32;
+          const legL = spot(leg, -0.16 + leanLat);
+          const legR = spot(-leg, 0.16 + leanLat);
+          push(legL.x, py + 0.22, legL.z, 0.14, 0.4, 0.15, 0, pal.bodyDeep, 0.45, 0.02);
+          push(legR.x, py + 0.22, legR.z, 0.14, 0.4, 0.15, 0, pal.bodyDeep, 0.45, 0.02);
+        }
+        const torsoY = py + (sliding ? 0.3 : 0.5 * squash);
+        const torso = sliding ? 0.52 : 0.46 * widen;
+        const hip = spot(0, leanLat);
+        push(hip.x, torsoY, hip.z, torso, sliding ? 0.3 : 0.42 * squash, sliding ? 0.62 : 0.4, 0, pal.body, 0.35, 0.14);
+        const cape = spot(-0.28, leanLat + (reduced ? 0 : -stride * 0.04));
+        push(cape.x, torsoY - 0.02, cape.z, 0.1, 0.08, 0.22, 0, pal.cape, 0.2, 0.9);
+        const hy = torsoY + (sliding ? 0.16 : 0.34 * squash);
+        const head = spot(sliding ? 0.16 : 0, leanLat * 0.2);
+        push(head.x, hy, head.z, sliding ? 0.32 : 0.44, sliding ? 0.26 : 0.4, sliding ? 0.3 : 0.4, 1, pal.head, 0.2, 0.28);
+        if (!sliding) {
+          const flame = reduced ? 0 : Math.sin(st.time * 11) * 0.035;
+          const tuft = spot(-0.02, leanLat * 0.15);
+          push(tuft.x, hy + 0.32 + flame + pulse * 0.05, tuft.z, 0.13, 0.3, 0.13, 1, pal.cape, 0.12, 1);
+        }
       }
       const trailN = reduced ? 0 : Math.min(6, 3 + Math.floor(Math.max(0, speed - 5)));
       for (let t = 1; t <= trailN; t++) {

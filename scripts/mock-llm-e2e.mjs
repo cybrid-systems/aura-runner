@@ -321,30 +321,40 @@ async function screenshots() {
     const deadline = Date.now() + 40000;
     let sky = "";
     let chat = "";
+    let heroNow = "";
+    let roster = "";
+    let sawBodySay = false;
     while (Date.now() < deadline) {
       const value = await cdp.call("Runtime.evaluate", {
-        expression: "document.documentElement.dataset.sky || ''",
+        expression: `(() => {
+          const root = document.documentElement;
+          return {
+            sky: root.dataset.sky || "",
+            chat: root.dataset.chat || "",
+            hero: root.dataset.hero || "",
+            pals: root.dataset.pals || "",
+            body: document.body.innerText || "",
+            chatGone: document.getElementById("chat") === null,
+          };
+        })()`,
         returnByValue: true,
       });
-      sky = value.result && value.result.value || "";
-      const said = await cdp.call("Runtime.evaluate", {
-        expression: "document.documentElement.dataset.chat || ''",
-        returnByValue: true,
-      });
-      chat = (said.result && said.result.value) || "";
-      const text = await cdp.call("Runtime.evaluate", {
-        expression: "document.body.innerText",
-        returnByValue: true,
-      });
-      const body = (text.result && text.result.value) || "";
+      const probe = (value.result && value.result.value) || {};
+      sky = probe.sky || "";
+      chat = probe.chat || "";
+      heroNow = probe.hero || "";
+      roster = probe.pals || "";
+      const body = probe.body || "";
+      if (!probe.chatGone) throw new Error("center chat is still on screen");
       if (body.includes("The light rested") || body.includes("Run again")) {
         throw new Error("end card is on screen");
       }
-      if ((sky.startsWith("0.9") || sky.startsWith("0.8")) && chat.includes(MOTIF_SAY) && body.includes(MOTIF_SAY)) break;
+      if (body.includes(MOTIF_SAY)) sawBodySay = true;
+      if ((sky.startsWith("0.9") || sky.startsWith("0.8")) && chat.includes(MOTIF_SAY) && sawBodySay) break;
       await new Promise((r) => setTimeout(r, 250));
     }
-    if (!chat.includes(MOTIF_SAY)) {
-      throw new Error("chat missing the model sentence " + chat + " sky " + sky + "\n" + core.log().slice(-1500));
+    if (!chat.includes(MOTIF_SAY) || !sawBodySay) {
+      throw new Error("chat missing the model sentence " + chat + " sky " + sky + " mock " + JSON.stringify(mock.hits) + " page " + JSON.stringify(cdp.logs) + "\n" + core.log().slice(-1500));
     }
     await new Promise((r) => setTimeout(r, 1200));
     await capture(cdp, late);
@@ -354,7 +364,7 @@ async function screenshots() {
     const [ar, ag, ab] = after.split(" ").map(Number);
     console.log(`screenshot sky before ${before} after ${after} dataset ${sky}`);
     if (!(ar > ab + 15 && ar > br + 10)) {
-      throw new Error(`sky did not shift toward rose (before ${before}, after ${after}, dataset ${sky})`);
+      throw new Error(`sky did not shift toward rose (before ${before}, after ${after}, dataset ${sky}) hero ${heroNow} pals ${roster} chat ${JSON.stringify(chat)} mock ${JSON.stringify(mock.hits)} page ${JSON.stringify(cdp.logs)}\n` + core.log().slice(-500));
     }
     cdp.close();
   } finally {
@@ -383,12 +393,20 @@ function cdpClient(wsUrl) {
   const ws = new WebSocket(wsUrl);
   let id = 0;
   const pending = new Map();
+  const logs = [];
   const ready = new Promise((resolve, reject) => {
     ws.addEventListener("open", () => resolve());
     ws.addEventListener("error", () => reject(new Error("cdp socket")));
   });
   ws.addEventListener("message", (ev) => {
     const msg = JSON.parse(ev.data);
+    if (msg.method === "Runtime.consoleAPICalled" && logs.length < 8) {
+      const args = (msg.params && msg.params.args) || [];
+      logs.push(args.map((a) => a.value || a.description || "").join(" "));
+    } else if (msg.method === "Runtime.exceptionThrown" && logs.length < 8) {
+      const details = msg.params && msg.params.exceptionDetails;
+      logs.push("exception " + (details && details.text ? details.text : "thrown"));
+    }
     if (msg.id && pending.has(msg.id)) {
       const { resolve, reject } = pending.get(msg.id);
       pending.delete(msg.id);
@@ -397,6 +415,7 @@ function cdpClient(wsUrl) {
     }
   });
   return {
+    logs,
     async call(method, params) {
       await ready;
       const n = ++id;

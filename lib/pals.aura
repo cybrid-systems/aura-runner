@@ -1,7 +1,9 @@
-; Garden companions. A model may add a kitten, a little car, or a new
-; gentle kind. The form is data, checked here, then rebound. Nothing
-; in this file calls eval. Unknown kinds stay in the roster and the
-; view draws them as a round friend.
+; Garden companions, and the runner's look. A model may add a kitten,
+; a little car, or a new gentle kind, and may restyle the runner with
+; one hero clause. The form is data, checked here, then rebound.
+; Nothing in this file calls eval. Unknown kinds stay in the roster
+; and the view draws them as a round friend. The runner stays the
+; light-keeper until a hero clause says otherwise.
 (require "lib/sexp")
 (require "lib/gen")
 
@@ -39,7 +41,8 @@
   (or (string=? s "pal") (string=? s "pals") (string=? s "seq")
       (string=? s "garden") (string=? s "sky") (string=? s "ground")
       (string=? s "block") (string=? s "hurdle") (string=? s "gate")
-      (string=? s "gap") (string=? s "coin") (string=? s "spring")))
+      (string=? s "gap") (string=? s "coin") (string=? s "spring")
+      (string=? s "hero") (string=? s "keeper")))
 
 (define (motion? s)
   (or (string=? s "hop") (string=? s "pace") (string=? s "float")
@@ -47,7 +50,8 @@
 
 (define (plan-of kind)
   (cond
-    ((or (string=? kind "kitten") (string=? kind "car") (string=? kind "bunny")
+    ((or (string=? kind "keeper")
+         (string=? kind "kitten") (string=? kind "car") (string=? kind "bunny")
          (string=? kind "bird") (string=? kind "butterfly") (string=? kind "frog")
          (string=? kind "duck") (string=? kind "friend"))
      kind)
@@ -70,6 +74,29 @@
        (>= g 0.15) (<= g 1.0)
        (>= b 0.15) (<= b 1.0)
        (>= (+ (* 0.25 r) (* 0.50 g) (* 0.25 b)) 0.45)))
+
+; keeper is reserved as a companion name, and allowed as the runner's look.
+(define (hero-kind-ok? kind)
+  (and (letters? kind 3 12)
+       (or (string=? kind "keeper") (not (reserved? kind)))))
+
+; (hero KIND R G B). The runner only. No motion: the player already moves.
+(define (hero-one sp)
+  (if (or (not (pair? sp)) (not (string? (car sp))) (not (string=? (car sp) "hero"))
+          (not (= (length sp) 5)))
+    "shape"
+    (let ((kind (lower-sym (nth sp 1)))
+          (r (nth sp 2))
+          (g (nth sp 3))
+          (b (nth sp 4)))
+      (cond
+        ((not (hero-kind-ok? kind)) "kind")
+        ((not (and (number? r) (number? g) (number? b))) "shape")
+        ((not (color-ok? r g b)) "color")
+        (else (hash "kind" kind "plan" (plan-of kind)
+                    "r" (exact->inexact r)
+                    "g" (exact->inexact g)
+                    "b" (exact->inexact b)))))))
 
 (define (nth xs i)
   (if (or (null? xs) (< i 0))
@@ -97,15 +124,40 @@
                     "r" (exact->inexact r) "g" (exact->inexact g) "b" (exact->inexact b)
                     "motion" motion "plan" (plan-of kind) "cue" (pal-cue kind)))))))
 
-(define (pal-items form)
+(define (head-is? sp name)
+  (and (pair? sp) (string? (car sp)) (string=? (car sp) name)))
+
+; Pal clauses, plus at most one hero. A string result is the reason.
+(define (take-children xs max-pals)
+  (let loop ((xs xs) (pals (list)) (hero #f) (n 0))
+    (if (null? xs)
+      (if (and (= n 0) (not hero))
+        "count"
+        (hash "items" (reverse pals) "hero" hero))
+      (let ((one (car xs)))
+        (cond
+          ((head-is? one "pal")
+           (if (>= n max-pals)
+             "count"
+             (loop (cdr xs) (cons one pals) hero (+ n 1))))
+          ((head-is? one "hero")
+           (if hero
+             "shape"
+             (let ((got (hero-one one)))
+               (if (string? got)
+                 got
+                 (loop (cdr xs) pals got n)))))
+          (else "shape"))))))
+
+(define (pal-items form max-pals)
   (cond
-    ((and (pair? form) (string? (car form)) (string=? (car form) "pals"))
-     (let ((xs (cdr form)))
-       (if (or (null? xs) (> (length xs) 4))
-         "count"
-         xs)))
-    ((and (pair? form) (string? (car form)) (string=? (car form) "pal"))
-     (list form))
+    ((head-is? form "pals") (take-children (cdr form) max-pals))
+    ((head-is? form "pal") (hash "items" (list form) "hero" #f))
+    ((head-is? form "hero")
+     (let ((got (hero-one form)))
+       (if (string? got)
+         got
+         (hash "items" (list) "hero" got))))
     (else "shape")))
 
 (define (build-rows items)
@@ -148,18 +200,61 @@
       (string-append acc ")")
       (loop (cdr xs) (string-append acc " " (pal-clause (car xs)))))))
 
-(define (pals-ok rows)
+(define (hero-cue hero)
+  (let ((kind (if (hash? hero) (hash-ref hero "kind" "") "")))
+    (cond
+      ((string=? kind "kitten") "The runner became a kitten")
+      ((string=? kind "car") "The runner became a little car")
+      ((string=? kind "bunny") "The runner became a bunny")
+      ((string=? kind "bird") "The runner became a bird")
+      ((string=? kind "butterfly") "The runner became a butterfly")
+      ((string=? kind "frog") "The runner became a frog")
+      ((string=? kind "duck") "The runner became a duck")
+      ((string=? kind "keeper") "The runner is the light-keeper again")
+      (else "The runner looks different"))))
+
+; Missing, or plan keeper, is the light-keeper and stays out of the text.
+(define (keeper-plan? hero)
+  (or (not (hash? hero)) (string=? (hash-ref hero "plan" "") "keeper")))
+
+(define (hero-clause hero)
+  (string-append " (hero "
+                 (hash-ref hero "kind") " "
+                 (num-tok (hash-ref hero "r")) " "
+                 (num-tok (hash-ref hero "g")) " "
+                 (num-tok (hash-ref hero "b")) ")"))
+
+(define (roster-text rows hero)
+  (let ((base (pals-text rows)))
+    (if (keeper-plan? hero)
+      base
+      (let ((n (string-length base)))
+        (string-append (substring base 0 (- n 1)) (hero-clause hero) ")")))))
+
+(define (hero-key hero)
+  (if (keeper-plan? hero)
+    ""
+    (string-append (hash-ref hero "kind" "") " "
+                   (num-tok (hash-ref hero "r" 0)) " "
+                   (num-tok (hash-ref hero "g" 0)) " "
+                   (num-tok (hash-ref hero "b" 0)))))
+
+(define (pals-ok rows hero)
   (hash "ok" #t "why" "fair"
-        "cue" (hash-ref (car rows) "cue" "")
-        "form" (pals-text rows)
+        "cue" (if (pair? rows) (hash-ref (car rows) "cue" "") (hero-cue hero))
+        "form" (roster-text rows hero)
         "pals" rows
+        "hero" (if (hash? hero) hero #f)
         "violations" (pal-viol #t)))
 
 ; (pals (pal KIND NAME R G B MOTION) ...)
-; or one (pal ...). At most four friends in a single phrase. Channels
+; or one (pal ...), or one (hero KIND R G B), or pals with one hero
+; clause. At most four new friends in a single phrase. The stored
+; roster may hold six, so check-roster is the wider gate. Channels
 ; stay bright. Kind and name are short words. A kind outside the
-; drawn set is still kept; the view uses the friend body.
-(define (check-pals text)
+; drawn set is still kept; the view uses the friend body. keeper
+; draws the light-keeper and is left out of the stored text.
+(define (check-pals-max text max-pals)
   (if (or (not (string? text)) (= (string-length text) 0))
     (pals-refuse "empty")
     (if (banned? text)
@@ -167,15 +262,22 @@
       (let ((form (sexp-parse text)))
         (if (not form)
           (pals-refuse "shape")
-          (let ((items (pal-items form)))
-            (if (string? items)
-              (pals-refuse items)
-              (let ((built (build-rows items)))
-                (if (string? built)
-                  (pals-refuse built)
-                  (if (or (null? built) (dup-name? built))
-                    (pals-refuse (if (null? built) "count" "dup"))
-                    (pals-ok built)))))))))))
+          (let ((split (pal-items form max-pals)))
+            (if (string? split)
+              (pals-refuse split)
+              (let ((built (build-rows (hash-ref split "items")))
+                    (hero (hash-ref split "hero")))
+                (cond
+                  ((string? built) (pals-refuse built))
+                  ((and (null? built) (not (hash? hero))) (pals-refuse "count"))
+                  ((dup-name? built) (pals-refuse "dup"))
+                  (else (pals-ok built hero)))))))))))
+
+(define (check-pals text)
+  (check-pals-max text 4))
+
+(define (check-roster text)
+  (check-pals-max text 6))
 
 (define (replace-row rows name row)
   (let loop ((xs rows) (acc (list)))
@@ -205,6 +307,18 @@
               (string-append acc ", "
                              (hash-ref (car xs) "name" "") " "
                              (hash-ref (car xs) "kind" "")))))))
+
+; How many incoming names are not already on the roster.
+(define (fresh-count rows incoming)
+  (if (not (pair? incoming))
+    0
+    (let loop ((xs incoming) (n 0))
+      (if (null? xs)
+        n
+        (loop (cdr xs)
+              (if (find-row rows (hash-ref (car xs) "name" ""))
+                n
+                (+ n 1)))))))
 
 ; Add incoming rows onto the roster. An existing name is replaced.
 ; The cue names the first newcomer, or a quiet change when nobody new arrived.

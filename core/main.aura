@@ -18,7 +18,7 @@
   "You redesign the garden backdrop for a children's 3D endless runner called Lumen Run. No markdown. Form: (garden (sky R G B) (ground R G B) (flower KIND DENSITY) (light L)). KIND is one of daisy, tulip, blossom, buttercup. Sky channels are 0.25 to 1 and the sky stays bright. Ground is green: G is at least 0.30 and at least as large as R, and not much smaller than B. Density is 0.15 to 1. Light is 0.50 to 1, never night. Optional (fog F) is 0 to 0.38; do not ask for thicker fog. No violence, fear, weapons, or scary words. Make it look different from a plain blue sky and daisies. First write one short bright English sentence with no parentheses, then the s-expression. That sentence is what the child reads. Example: (garden (sky 0.95 0.45 0.55) (ground 0.35 0.72 0.32) (flower tulip 0.85) (light 0.9))")
 
 (define PALS-SYS
-  "You change one friendly companion in a children's 3D endless runner called Lumen Run. No markdown. Restyle a friend who is already here by keeping the same name, or add one new gentle friend. Form: (pal KIND NAME R G B MOTION). KIND is kitten, car, bunny, bird, butterfly, frog, duck, or a new gentle word of 3 to 12 letters. NAME is 2 to 12 letters. R G B are 0.25 to 1 and the colour stays bright. MOTION is hop, pace, float, follow, or side. No violence, fear, weapons, or scary words. First write one short bright English sentence with no parentheses, then the s-expression. That sentence is what the child reads. Example: (pal bird lark 0.95 0.86 0.35 float)")
+  "You change one friendly companion in a children's 3D endless runner called Lumen Run. No markdown. Restyle a friend who is already here by keeping the same name, or add one new gentle friend. Form: (pal KIND NAME R G B MOTION). KIND is kitten, car, bunny, bird, butterfly, frog, duck, or a new gentle word of 3 to 12 letters. NAME is 2 to 12 letters. R G B are 0.25 to 1 and the colour stays bright. MOTION is hop, pace, float, follow, or side. No violence, fear, weapons, or scary words. You may also restyle the runner with (hero KIND R G B), alone or as one clause inside (pals ...). KIND is keeper, kitten, car, bunny, bird, butterfly, frog, or duck. keeper is the light-keeper. R G B stay bright, from 0.25 to 1. A hero clause changes the runner only and does not add a friend. First write one short bright English sentence with no parentheses, then the s-expression. That sentence is what the child reads. Example: (pal bird lark 0.95 0.86 0.35 float)")
 
 (define g-now 32.0)
 (define jump-now 11.2)
@@ -33,6 +33,8 @@
 (define scene-now default-scene)
 (define pals-now default-pals)
 (define pals-rows (list))
+; #f is the light-keeper. A hash is a hero clause the view draws instead.
+(define hero-now #f)
 (define sky-r 0.55)
 (define sky-g 0.72)
 (define sky-b 0.95)
@@ -167,7 +169,9 @@
       #f)
     (set! pending (cons row pending))
     ; evo:record! mutates while a POST is in flight and wedges that call.
-    (if (chat-open?)
+    ; The busy flags cover the whole ask, including the moment before the
+    ; worker takes the token. The decision is still sent to the client.
+    (if (or (llm-posting?) (chat-open?))
       #f
       (try (evo:record! arm kind why (hash "arm" arm) "" 0) (catch (e) #f)))
     row)))
@@ -247,6 +251,11 @@
 (define (release-slot!)
   (set! slot-mine #f)
   (if llm-slot (channel:send llm-slot #t) #f))
+
+; Tick-local. True from the ask until that reply is taken. A worker's
+; set! does not cross fibers, so this flag is the one the tick can trust.
+(define (llm-posting?)
+  (or motif-busy scene-busy pals-busy))
 (define llm-kind "motif")
 (define motif-next 2500.0)
 (define scene-next 5000.0)
@@ -306,7 +315,7 @@
       ; itself is still fatal on this pin while a fiber is inside
       ; llm:chat (#5274), so the write waits only for that call to leave
       ; the interpreter. A trial skips it too.
-      (if (or (has-arm? rows nxt) trial-open motif-working scene-working pals-working
+      (if (or (has-arm? rows nxt) trial-open (llm-posting?)
               (env-on? "LUMEN_SKIP_ARM"))
         #f
         (let ((row (find-arm rows (arm-name band))))
@@ -319,7 +328,9 @@
 (define (choose-band)
   (if (or (< run-ms 30000.0) (env-on? "LUMEN_SKIP_ARM"))
     (begin (set! band 0) "tutorial")
-    (begin
+    (if (llm-posting?)
+      "busy"
+      (begin
       (open-next-arm!)
       (let ((sel (evo:policy-select policy)))
         (let ((arm (if (and (pair? sel) (string? (car sel))) (car sel) "band-0"))
@@ -328,10 +339,13 @@
                       #f)))
           (if next (set! policy next) #f)
           (set! band (band-of arm))
-          "ucb")))))
+          "ucb"))))))
 
 (define (apply-feel! why)
-  (let ((f (feel-for band)))
+  ; Rebinding gravity while a POST is in flight wedges that call.
+  (if (or (string=? why "busy") (llm-posting?))
+    why
+    (let ((f (feel-for band)))
     (let ((ng (car f))
           (nj (car (cdr f)))
           (nsl (car (cdr (cdr f))))
@@ -367,7 +381,7 @@
       (if (> (string-length cue) 0)
         (begin (set! tuned #t) (note! "KEEP" why "rule" cue))
         #f)
-      why)))
+      why))))
 
 (define (shift-onto pieces x0)
   (shift-pieces pieces x0))
@@ -487,6 +501,11 @@
 (define (send c v)
   (tcp-send c (string-append (json-encode v) "\n")))
 
+(define (hero-public)
+  (if (hash? hero-now)
+    hero-now
+    (hash "kind" "keeper" "plan" "keeper" "r" 0.95 "g" 0.72 "b" 0.45)))
+
 (define (rules-msg)
   (hash "op" "rules" "rev" rule-rev
         "g" g-now "jump" jump-now "speed" speed-now
@@ -499,7 +518,7 @@
         "fog" fog-now
         "bend" bend-now "loot" loot-now
         "motif" motif-now "scene" scene-now
-        "pals" pals-rows "provider" llm-provider
+        "pals" pals-rows "hero" (hero-public) "provider" llm-provider
         "model" (active-model) "providers" (ready-providers)))
 
 (define (welcome-msg)
@@ -515,7 +534,7 @@
         "fog" fog-now
         "bend" bend-now "loot" loot-now
         "motif" motif-now "scene" scene-now
-        "pals" pals-rows "provider" llm-provider
+        "pals" pals-rows "hero" (hero-public) "provider" llm-provider
         "model" (active-model) "providers" (ready-providers)))
 
 ; The event is part of the hash when it is built. A later hash-set! on
@@ -554,6 +573,7 @@
         "scene" scene-now
         "ahead" (obstacles-ahead)
         "pals" pals-rows
+        "hero" (hero-public)
         "provider" llm-provider
         "model" (active-model)
         "providers" (ready-providers)
@@ -618,6 +638,7 @@
         (if (and (player-alive? player)
                  (>= (player-x player) (hash-ref ch "x1"))
                  (not (member-id? (hash-ref ch "id") cleared))
+                 (not (llm-posting?))
                  (not (chat-open?)))
           (begin
             (set! cleared (cons (hash-ref ch "id") cleared))
@@ -895,7 +916,7 @@
     (set! dream-i (lref r 1))
     (set! dream-body (lref r 2))
     (set! dream-sim (lref r 3))
-    (if (and (lref r 0) (not (chat-open?)) (seal-sliced! (if (lref r 4) #t #f)))
+    (if (and (lref r 0) (not (llm-posting?)) (not (chat-open?)) (seal-sliced! (if (lref r 4) #t #f)))
       (begin
         (set! dream-phase 0)
         (set! next-dream (+ run-ms 22000.0)))
@@ -982,7 +1003,7 @@
     (set! hold-sim (lref r 3))
     ; Sealing opens a trial. Doing that while a chat call is in flight
     ; wedges http-post, so the slice result waits one tick.
-    (if (and (lref r 0) (not (chat-open?)) (seal-hold! (if (lref r 4) #t #f)))
+    (if (and (lref r 0) (not (llm-posting?)) (not (chat-open?)) (seal-hold! (if (lref r 4) #t #f)))
       (set! hold-phase 0)
       #f)))
 
@@ -994,7 +1015,7 @@
 ; A phrase the model just sent goes first, so the two autopilots do not
 ; share a tick.
 (define (maybe-dream!)
-  (if (or (env-on? "LUMEN_SKIP_DREAM") (> hold-phase 0) (chat-open?))
+  (if (or (env-on? "LUMEN_SKIP_DREAM") (> hold-phase 0) (llm-posting?) (chat-open?))
     #f
     (cond
       ((= dream-phase 1) (step-dream!))
@@ -1066,7 +1087,7 @@
                   (note! "ROLLBACK" "commit" "scene" "The garden stayed"))))))
             (release-slot!)))))))
 
-(define (keep-pals! canon merged say)
+(define (keep-pals! canon merged say hero changed?)
   (let ((found #f))
     (let* ((cand (evo:candidate canon (hash "id" (string-append "p" (int-str next-id))
                                             "target" "pals-form")))
@@ -1075,7 +1096,7 @@
                                     "apply" (lambda (c) #t)
                                     "evaluate"
                                     (lambda (c)
-                                      (set! found (check-pals canon))
+                                      (set! found (check-roster canon))
                                       (hash "status" "ok"
                                             "objectives"
                                             (hash "fair" (if (and found (hash-ref found "ok")) 1.0 0.0))
@@ -1094,9 +1115,11 @@
                             "trial")
                "pals" "The friends stayed")
         (let ((prev-form pals-now)
-              (prev-rows pals-rows))
+              (prev-rows pals-rows)
+              (prev-hero hero-now))
           (set! pals-now canon)
           (set! pals-rows (hash-ref merged "rows"))
+          (set! hero-now hero)
           (let ((ev (hash "status" "ok"
                           "objectives" (hash "fair" 1.0)
                           "constraints" (hash-ref found "violations")
@@ -1111,27 +1134,53 @@
                       (if (and (string? say) (> (string-length say) 0))
                         say
                         (hash-ref merged "cue" "A new friend came along"))
-                      "friend" "Who wants to run with us?"))
+                      (if changed?
+                        (if (hash? hero) (hash-ref hero "kind" "keeper") "keeper")
+                        "friend")
+                      "Who wants to run with us?"))
               (begin
                 (set! pals-now prev-form)
                 (set! pals-rows prev-rows)
+                (set! hero-now prev-hero)
                 (note! "ROLLBACK" "commit" "pals" "The friends stayed")))))
           (release-slot!)))))))
 
 (define (consider-pals! text say)
   (let ((incoming (one-line (if (string? text) text ""))))
-    (let ((found (check-pals incoming)))
+    (let ((found (check-roster incoming)))
       (if (not (and (hash? found) (hash-ref found "ok")))
         (note! "ROLLBACK" (if (hash? found) (hash-ref found "why" "shape") "shape")
                "pals" "The friends stayed")
-        (let ((merged (merge-pals pals-rows (hash-ref found "pals"))))
-          (if (not (and (hash? merged) (hash-ref merged "ok")))
-            (note! "ROLLBACK" (if (hash? merged) (hash-ref merged "why" "empty") "empty")
-                   "pals" "The friends stayed")
-            (let ((canon (hash-ref merged "form" "")))
-              (if (string=? canon pals-now)
-                (note! "ROLLBACK" "same" "pals" "The friends stayed")
-                (keep-pals! canon merged say)))))))))
+        (let ((incoming-rows (hash-ref found "pals"))
+              (incoming-hero (hash-ref found "hero" #f)))
+          (if (> (fresh-count pals-rows incoming-rows) 4)
+            (note! "ROLLBACK" "count" "pals" "The friends stayed")
+            (let ((has-rows (pair? incoming-rows))
+                  (has-hero (hash? incoming-hero)))
+              (if (not (or has-rows has-hero))
+                (note! "ROLLBACK" "empty" "pals" "The friends stayed")
+                (let ((merged (if has-rows
+                                (merge-pals pals-rows incoming-rows)
+                                (hash "ok" #t "why" "fair" "rows" pals-rows "cue" ""))))
+                  (if (not (and (hash? merged) (hash-ref merged "ok")))
+                    (note! "ROLLBACK" (if (hash? merged) (hash-ref merged "why" "empty") "empty")
+                           "pals" "The friends stayed")
+                    (let ((next-hero (if has-hero
+                                       (if (keeper-plan? incoming-hero) #f incoming-hero)
+                                       hero-now))
+                          (rows (hash-ref merged "rows")))
+                      (let ((canon (roster-text rows next-hero))
+                            (changed? (not (string=? (hero-key next-hero) (hero-key hero-now)))))
+                        (if (string=? canon pals-now)
+                          (note! "ROLLBACK" "same" "pals" "The friends stayed")
+                          (keep-pals! canon
+                                      (hash "rows" rows
+                                            "cue" (if changed?
+                                                    (hero-cue (if (hash? next-hero)
+                                                                next-hero
+                                                                incoming-hero))
+                                                    (hash-ref merged "cue" "A new friend came along")))
+                                      say next-hero changed?))))))))))))))
 
 (define (llm-prompt kind)
   (cond
@@ -1141,7 +1190,7 @@
                     ". Suggest a different bright garden. Start with one short sentence."))
     ((string=? kind "pals")
      (string-append "Friends already here: " (pal-names pals-rows)
-                    ". Restyle one friend already here by keeping the same name, or add one new gentle friend who is not in that list. Start with one short sentence."))
+                    ". Restyle one friend already here by keeping the same name, or add one new gentle friend who is not in that list. You may also restyle the runner with (hero KIND R G B). Start with one short sentence."))
     (else
      (string-append "Difficulty band " (number->string band)
                     ". Pickups are " loot-now
@@ -1223,7 +1272,10 @@
 
 (define (extract-pals s)
   (let ((full (extract-balanced s "(pals")))
-    (if full full (extract-balanced s "(pal"))))
+    (if full
+      full
+      (let ((one (extract-balanced s "(pal")))
+        (if one one (extract-balanced s "(hero"))))))
 
 (define (take-pals! c msg)
   (if (not (accept-reply! (hash-ref msg "token" -1) pals-accept))
@@ -1320,7 +1372,7 @@
 ; A reply that arrived during another chat call waits here. The trial
 ; runs only after that call has left http-post.
 (define (flush-deferred!)
-  (if (chat-open?)
+  (if (or (llm-posting?) (chat-open?))
     #f
     (cond
       ((pair? wait-motif)
@@ -1428,6 +1480,11 @@
            (not (= (hash-ref msg "lane" 0) 0)))
     (set! player (press-lane player (hash-ref msg "lane" 0)))
     #f)
+  ; Let a worker take the token before this tick records a bump or a
+  ; cleared band. One yield; the tick does not wait out the POST.
+  (if (or scene-busy motif-busy pals-busy)
+    (try (fiber:yield) (catch (e) #f))
+    #f)
   (let ((ev (pump! (elapsed-ms))))
     (if (or (string=? ev "bump") (string=? ev "oops"))
       (note! "BUMP" ev "run"
@@ -1487,9 +1544,12 @@
 (define (on-propose c msg)
   (let ((text (hash-ref msg "form" "")))
     (cond
-      ((and (string? text) (string-contains? text "(pal")) (consider-pals! text))
-      ((and (string? text) (string-contains? text "(garden")) (consider-scene! text))
-      (else (consider-form! text ""))))
+      ((and (string? text)
+            (or (string-contains? text "(pal") (string-contains? text "(hero")))
+       (consider-pals! text (say-line text)))
+      ((and (string? text) (string-contains? text "(garden"))
+       (consider-scene! text (say-line text)))
+      (else (consider-form! text (say-line text)))))
   (flush-notes! c)
   (send c (rules-msg))
   (set! rules-dirty #f)

@@ -10,11 +10,6 @@
 <body>
   <canvas id="view" tabindex="0"></canvas>
   <p id="nogpu" hidden>This browser needs WebGL2 to draw the garden.</p>
-  <div id="chat" role="log" aria-live="polite" aria-label="Chat with the garden">
-    <p class="eyebrow">Garden chat</p>
-    <ol id="chat-log"></ol>
-    <p class="hint-foot">↑ jump · ↓ slide · ← left · → right</p>
-  </div>
   <p id="toast" hidden aria-live="polite"></p>
   <div id="flash" hidden></div>
   <div id="score" aria-hidden="true">0</div>
@@ -29,7 +24,7 @@
   </div>
   <button id="motion" type="button" aria-label="Reduce motion" aria-pressed="false">◎</button>
   <button id="mute" type="button" aria-label="Mute" aria-pressed="false">♪</button>
-  <p id="said" hidden></p>
+  <p id="said" hidden aria-live="polite"></p>
   <p id="mark" hidden></p>
   <button id="model" type="button" hidden>DeepSeek</button>
   <p id="stats" hidden></p>
