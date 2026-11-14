@@ -160,30 +160,36 @@
     (else patterns-4)))
 
 ; Band 0 is the first 30 seconds. Every pattern opens with a high, easy
-; gate a couple of seconds in, then a centre pot, a low hurdle and a
-; short gap. Actions land about every 18–24 m so a slide, a lane change
-; or a jump shows up inside each 20–30 m.
+; gate a couple of seconds in, then one gentle toy flying back along a
+; lane, a centre pot, a low hurdle and a short gap. Actions land about
+; every 18–24 m so a slide, a lane change or a jump shows up inside
+; each 20–30 m.
 (define patterns-0
   (list
-    (list (list "ground" 10.0) (list "gate" 0.84 0.85) (list "ground" 18.0)
+    (list (list "ground" 10.0) (list "gate" 0.84 0.85) (list "ground" 8.0)
+          (list "flyer" "plane" 1.0 0.7) (list "ground" 7.0)
           (list "ground" 4.0) (list "block" 1.0 1.0) (list "coin-lane" 2.0 1.3)
           (list "ground" 14.0) (list "hurdle" 0.36 0.6) (list "ground" 14.0)
           (list "gap" 1.0) (list "ground" 6.0))
-    (list (list "ground" 9.0) (list "gate" 0.82 0.8) (list "ground" 18.0)
+    (list (list "ground" 9.0) (list "gate" 0.82 0.8) (list "ground" 8.0)
+          (list "flyer" "bubble" 0.0 0.65) (list "ground" 7.0)
           (list "ground" 4.0) (list "block" 1.0 1.1) (list "ground" 14.0)
           (list "hurdle" 0.38 0.65) (list "ground" 14.0) (list "gap" 0.95)
           (list "coin" 1.4) (list "ground" 6.0))
-    (list (list "ground" 11.0) (list "gate" 0.80 0.9) (list "ground" 18.0)
+    (list (list "ground" 11.0) (list "gate" 0.80 0.9) (list "ground" 8.0)
+          (list "flyer" "lantern" 2.0 0.75) (list "ground" 7.0)
           (list "ground" 3.0) (list "hurdle" 0.34 0.6) (list "ground" 14.0)
           (list "block" 1.0 1.0) (list "coin-lane" 0.0 1.2) (list "ground" 14.0)
           (list "gap" 1.05) (list "ground" 6.0))))
 
 (define patterns-1
   (list
-    (list (list "ground" 6.0) (list "block" 1.0 1.0) (list "ground" 16.0)
+    (list (list "ground" 6.0) (list "block" 1.0 1.0) (list "ground" 6.0)
+          (list "flyer" "leaf" 1.0 0.7) (list "ground" 7.0)
           (list "hurdle" 0.48 0.7) (list "ground" 16.0) (list "gate" 0.74 0.75)
           (list "ground" 16.0) (list "gap" 1.25) (list "ground" 8.0))
-    (list (list "ground" 7.0) (list "gap" 1.15) (list "ground" 16.0)
+    (list (list "ground" 7.0) (list "gap" 1.15) (list "ground" 6.0)
+          (list "flyer" "ball" 2.0 0.68) (list "ground" 7.0)
           (list "gate" 0.72 0.8) (list "ground" 16.0) (list "block" 1.0 1.0)
           (list "ground" 16.0) (list "hurdle" 0.52 0.7) (list "coin" 1.3)
           (list "ground" 7.0))))
@@ -194,11 +200,13 @@
   (list
     (list (list "ground" 5.0) (list "block" 1.0 1.0) (list "block" 0.0 1.0)
           (list "ground" 4.2) (list "gate" 0.66 0.75) (list "ground" 4.0)
-          (list "coin" 1.4) (list "hurdle" 0.55 0.7) (list "ground" 4.6)
+          (list "coin" 1.4) (list "hurdle" 0.55 0.7) (list "ground" 4.0)
+          (list "flyer" "plane" 0.0 0.72) (list "ground" 4.0)
           (list "gap" 1.5) (list "ground" 4.5) (list "spring" 0.7)
           (list "ground" 4.0))
     (list (list "ground" 4.6) (list "block" 1.0 1.0) (list "block" 2.0 1.0)
-          (list "ground" 3.6) (list "hurdle" 0.6 0.7) (list "ground" 4.4)
+          (list "ground" 3.6) (list "hurdle" 0.6 0.7) (list "ground" 4.0)
+          (list "flyer" "bubble" 1.0 0.66) (list "ground" 4.0)
           (list "gate" 0.64 0.7) (list "ground" 4.0) (list "gap" 1.55)
           (list "ground" 4.2) (list "coin" 1.5) (list "ground" 3.6))))
 
@@ -206,11 +214,14 @@
   (list
     (list (list "ground" 4.2) (list "block" 1.0 1.05) (list "ground" 3.4)
           (list "gap" 1.6) (list "ground" 4.4)
-          (list "hurdle" 0.7 0.7) (list "ground" 4.6) (list "gate" 0.64 0.7)
+          (list "hurdle" 0.7 0.7) (list "ground" 4.0)
+          (list "flyer" "lantern" 2.0 0.7) (list "ground" 4.0)
+          (list "gate" 0.64 0.7)
           (list "ground" 4.0) (list "coin" 1.6) (list "gap" 1.55)
           (list "ground" 4.0) (list "spring" 0.75) (list "ground" 3.6))
     (list (list "ground" 4.0) (list "block" 1.0 1.0) (list "ground" 3.4)
-          (list "gate" 0.62 0.7) (list "ground" 4.2)
+          (list "gate" 0.62 0.7) (list "ground" 4.0)
+          (list "flyer" "leaf" 0.0 0.74) (list "ground" 4.0)
           (list "gap" 1.7) (list "ground" 4.4) (list "hurdle" 0.75 0.7)
           (list "ground" 4.2) (list "coin" 1.5) (list "spring" 0.7)
           (list "ground" 3.8))))
@@ -218,14 +229,16 @@
 (define patterns-4
   (list
     (list (list "ground" 3.8) (list "block" 1.0 1.0) (list "ground" 3.2)
-          (list "hurdle" 0.82 0.68) (list "ground" 4.4)
-          (list "gap" 1.85) (list "ground" 4.2) (list "gate" 0.62 0.68)
+          (list "hurdle" 0.82 0.68) (list "flyer" "ball" 1.0 0.68)
+          (list "ground" 4.0) (list "gap" 1.85) (list "ground" 4.2) (list "gate" 0.62 0.68)
           (list "ground" 3.8) (list "spring" 0.7) (list "ground" 3.4)
           (list "gap" 1.7) (list "ground" 4.2) (list "coin" 1.6)
           (list "ground" 3.2))
     (list (list "ground" 3.6) (list "block" 1.0 1.0) (list "ground" 3.2)
           (list "gap" 1.9) (list "ground" 4.2)
-          (list "gate" 0.6 0.66) (list "ground" 4.0) (list "hurdle" 0.88 0.68)
+          (list "gate" 0.6 0.66) (list "ground" 4.0)
+          (list "flyer" "plane" 2.0 0.7) (list "ground" 3.2)
+          (list "hurdle" 0.88 0.68)
           (list "ground" 4.2) (list "coin" 1.5) (list "spring" 0.7)
           (list "ground" 3.6))))
 
@@ -706,11 +719,14 @@
   (let ((s (number->string (exact->inexact n))))
     (if (string-contains? s ".") s (string-append s ".0"))))
 
+(define (atom-src v)
+  (if (string? v) v (token-num v)))
+
 (define (spec-src sp)
   (let loop ((xs (cdr sp)) (b (string-append "(" (car sp))))
     (if (null? xs)
       (string-append b ")")
-      (loop (cdr xs) (string-append b " " (token-num (car xs)))))))
+      (loop (cdr xs) (string-append b " " (atom-src (car xs)))))))
 
 (define (specs-src specs)
   (let loop ((ss specs) (b ""))
