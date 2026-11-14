@@ -10,7 +10,8 @@ const statsEl = document.getElementById("stats");
 const motionBtn = document.getElementById("motion");
 const muteBtn = document.getElementById("mute");
 const benchEl = document.getElementById("bench");
-const hintEl = document.getElementById("hint");
+const chatLog = document.getElementById("chat-log");
+const saidEl = document.getElementById("said");
 const toastEl = document.getElementById("toast");
 const flashEl = document.getElementById("flash");
 const comboEl = document.getElementById("combo");
@@ -90,7 +91,7 @@ const nearSeen = new Set();
 const toastQ = [];
 let toastUntil = 0;
 const gardenNotes = [];
-if (localStorage.getItem("lumen-hint") === "off") hintEl.hidden = true;
+const chatRows = [];
 let ws;
 let connected = false;
 let booted = false;
@@ -201,6 +202,38 @@ function paintNotes() {
   }
 }
 
+function paintChat() {
+  if (!chatLog) return;
+  chatLog.replaceChildren();
+  for (const row of [...chatRows].reverse()) {
+    const li = document.createElement("li");
+    li.className = row.who === "you" ? "you" : "garden";
+    const who = document.createElement("span");
+    who.className = "who";
+    who.textContent = row.who === "you" ? "You" : "Lumen";
+    const say = document.createElement("p");
+    say.textContent = row.text;
+    li.append(who, say);
+    chatLog.append(li);
+  }
+}
+
+function pushChat(who, text) {
+  const clean = String(text || "").trim();
+  if (!clean) return;
+  const prev = chatRows[0];
+  if (prev && prev.who === who && prev.text === clean) return;
+  chatRows.unshift({ who, text: clean });
+  if (chatRows.length > 6) chatRows.pop();
+  paintChat();
+  if (who === "lumen" && saidEl) {
+    saidEl.hidden = false;
+    saidEl.textContent = clean;
+  }
+}
+
+pushChat("you", "What should come down the path?");
+
 function showCue(text) {
   if (!text) return;
   const now = performance.now();
@@ -224,9 +257,15 @@ function showMark(word) {
 function remember(msg) {
   const cue = msg.cue || "";
   if (!cue) return;
-  gardenNotes.unshift({ cue, why: msg.why || "" });
+  gardenNotes.unshift({ cue, why: msg.why || "", ask: msg.ask || "" });
   if (gardenNotes.length > 6) gardenNotes.pop();
   if (!notesEl.hidden) paintNotes();
+  // Only a real question/answer pair goes in the center. A dream's
+  // canned line and the stumble toasts stay off this log.
+  if (msg.ask) {
+    pushChat("you", msg.ask);
+    pushChat("lumen", cue);
+  }
   if (msg.mark) showMark(msg.mark);
   else showCue(cue);
 }
@@ -398,6 +437,9 @@ function publishProbe() {
   root.dataset.loot = loot;
   root.dataset.bend = bend.toFixed(2);
   root.dataset.mark = markEl && !markEl.hidden ? markEl.textContent : "";
+  root.dataset.chat = chatRows.map((row) => row.text).join(" | ");
+  root.dataset.said = saidEl && !saidEl.hidden ? saidEl.textContent : "";
+  root.dataset.flyers = String(pieces.reduce((n, q) => n + (q[0] === 8 ? 1 : 0), 0));
 }
 
 function frame(now) {
@@ -409,10 +451,6 @@ function frame(now) {
   if (inp.jump || inp.slide || inp.lane) {
     audio.unlock();
     inputAt = now;
-    if (!hintEl.hidden) {
-      hintEl.hidden = true;
-      localStorage.setItem("lumen-hint", "off");
-    }
   }
   if (alive) {
     if (inp.jump) { pressJump(player); jumpQ = 1; audio.jump(); }

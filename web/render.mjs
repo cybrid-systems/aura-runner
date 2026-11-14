@@ -926,6 +926,25 @@ export function createRenderer(canvas) {
         push(here.x, 0.28 * sc, here.z, pot, 0.5 * sc, pot, 0, pal.pot, 0.38, 0.48 + glow, here.psi);
         push(here.x, 0.62 * sc, here.z, pot * 1.05, 0.16 * sc, pot * 1.05, 0, pal.potRim, 0.35, 0.05, here.psi);
         push(here.x, 0.95 * sc, here.z, 0.55 * sc, 0.42 * sc, 0.55 * sc, 1, pal.leaf, 0.55, 0.08, here.psi);
+      } else if (k === 8) {
+        const vis = q.length > 6 ? q[6] : 0;
+        const bob = reduced ? 0 : Math.sin((st.time || 0) * 5 + q[1]) * 0.08;
+        const fy = (q[4] + q[3] * 0.5 + bob) * sc;
+        const yaw = here.psi;
+        if (vis === 1) {
+          push(here.x, fy, here.z, 0.42 * sc, 0.42 * sc, 0.42 * sc, 1, [0.72, 0.9, 1], 0.08, 0.35, yaw);
+          push(here.x, fy + 0.1, here.z, 0.14 * sc, 0.14 * sc, 0.14 * sc, 1, [1, 1, 1], 0.05, 0.7, yaw);
+        } else if (vis === 2) {
+          push(here.x, fy, here.z, 0.28 * sc, 0.38 * sc, 0.28 * sc, 0, [1, 0.72, 0.28], 0.3, 0.55, yaw);
+          push(here.x, fy + 0.26 * sc, here.z, 0.16 * sc, 0.1 * sc, 0.16 * sc, 0, [0.55, 0.32, 0.16], 0.4, 0.1, yaw);
+        } else if (vis === 3) {
+          push(here.x, fy, here.z, 0.58 * sc, 0.08 * sc, 0.28 * sc, 0, [0.42, 0.75, 0.32], 0.45, 0.12, yaw);
+        } else if (vis === 4) {
+          push(here.x, fy, here.z, 0.36 * sc, 0.36 * sc, 0.36 * sc, 1, [1, 0.45, 0.55], 0.25, 0.2, yaw);
+        } else {
+          push(here.x, fy, here.z, 0.64 * sc, 0.06 * sc, 0.22 * sc, 0, [0.94, 0.97, 1], 0.3, 0.18, yaw);
+          push(here.x, fy, here.z, 0.16 * sc, 0.08 * sc, 0.48 * sc, 0, [0.45, 0.72, 0.95], 0.28, 0.12, yaw);
+        }
       }
     }
 

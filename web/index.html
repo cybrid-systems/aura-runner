@@ -10,14 +10,10 @@
 <body>
   <canvas id="view" tabindex="0"></canvas>
   <p id="nogpu" hidden>This browser needs WebGL2 to draw the garden.</p>
-  <div id="hint" role="group" aria-label="How to play">
-    <p class="eyebrow">Lumen</p>
-    <p class="hint-title">Run the garden</p>
-    <div class="hint-row"><span class="key" aria-hidden="true">↑</span><span>jump</span></div>
-    <div class="hint-row"><span class="key" aria-hidden="true">↓</span><span>slide under the bar</span></div>
-    <div class="hint-row"><span class="key" aria-hidden="true">←</span><span>left</span></div>
-    <div class="hint-row"><span class="key" aria-hidden="true">→</span><span>right</span></div>
-    <p class="hint-foot">Left is the left of the screen.</p>
+  <div id="chat" role="log" aria-live="polite" aria-label="Chat with the garden">
+    <p class="eyebrow">Garden chat</p>
+    <ol id="chat-log"></ol>
+    <p class="hint-foot">↑ jump · ↓ slide · ← left · → right</p>
   </div>
   <p id="toast" hidden aria-live="polite"></p>
   <div id="flash" hidden></div>
@@ -33,6 +29,7 @@
   </div>
   <button id="motion" type="button" aria-label="Reduce motion" aria-pressed="false">◎</button>
   <button id="mute" type="button" aria-label="Mute" aria-pressed="false">♪</button>
+  <p id="said" hidden></p>
   <p id="mark" hidden></p>
   <button id="model" type="button" hidden>DeepSeek</button>
   <p id="stats" hidden></p>

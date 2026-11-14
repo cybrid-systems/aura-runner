@@ -47,3 +47,24 @@
 (report "styled" styled)
 (report "badloot" "(seq (ground 6) (loot sword) (ground 4))")
 (report "badbend" "(seq (ground 6) (bend 2) (ground 4))")
+
+; A flyer is one lane, tall enough to meet a standing runner, and high
+; enough to slide under. Three of them fail the budget of two. A weapon
+; word is not a kind. The sentence in front of the form is not part of it.
+(report "flyer" "(seq (ground 8) (flyer plane 1 0.7) (ground 8))")
+(report "flyer-two" "(seq (ground 8) (flyer plane 0 0.7) (flyer bubble 2 0.65) (ground 8))")
+(report "flyer-wall" "(seq (ground 8) (flyer plane 0 0.7) (flyer bubble 1 0.65) (flyer leaf 2 0.7) (ground 8))")
+(report "flyer-missile" "(seq (ground 8) (flyer missile 1 0.7) (ground 8))")
+(report "said" "A paper plane drifts down the lane. (seq (ground 8) (flyer plane 0 0.7) (ground 8))")
+(report "said-bomb" "A bomb is coming now. (seq (ground 8) (flyer plane 0 0.7) (ground 8))")
+(display "say ")
+(display (if (string=? (say-line "A paper plane drifts down the lane. (seq (ground 6) (ground 4))")
+                       "A paper plane drifts down the lane.")
+           1 0))
+(newline)
+(define fly (list (piece 8.0 10.0 0.72 0.5 0.7 1.0 0.0 2.6)))
+(define fr (step (make-player 1.0) fly rules PHYS-DT))
+(define fx (piece-x (car (car (cdr fr)))))
+(display "fly-step ")
+(display (if (and (< fx 9.97) (> fx 9.94)) 1 0))
+(newline)

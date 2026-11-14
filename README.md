@@ -48,7 +48,7 @@ The files are one token each and are not printed:
 
 MiniMax uses `https://api.minimaxi.com/v1` and `MiniMax-M3.1-Flash`. `https://api.minimax.io` returns 401 for a China key, so the probe does not call it. An `LLM_API_KEY` already in the environment is left as it is, which is how the mock tests point at a local server.
 
-The model is asked for an obstacle phrase, a garden phrase, and one friend. Each reply is an allowlisted s-expression. Aura checks it before it can appear. A rejected phrase is rolled back and the run continues. The calls run on fibers, so the run does not wait on them.
+The model is asked for an obstacle phrase, a garden phrase, and one friend. Each reply starts with one short sentence, then an allowlisted s-expression. The center chat and the line by the model name show that sentence. Aura checks the form before it can appear. A rejected phrase is rolled back and the run continues. The calls run on fibers, so the run does not wait on them.
 
 ## What you feel
 
@@ -59,7 +59,7 @@ Hitting a hurdle, a gate, a pot or a gap does not end the run. The keeper flashe
 | What you see | Where |
 | --- | --- |
 | Speed, gravity, jump and slide ease as you clear chunks. A short line names it ("A little faster", "A gentler pace") | `apply-feel!` in `core/main.aura`, live defines in `core/hot.aura` |
-| A fair obstacle phrase blooms in ahead. Pickups can become a star, gem, blossom or apple. The road can bend harder. The corner word names what changed | `consider-form!`, `lib/gen.aura`, `web/render.mjs` |
+| A fair obstacle phrase blooms in ahead. Pickups can become a star, gem, blossom or apple. The road can bend harder. A phrase can also send a paper plane, bubble, lantern, leaf, or ball down one lane, and that toy flies toward the runner. The corner word names what changed | `consider-form!`, `lib/gen.aura`, `web/render.mjs` |
 | Sky, grass, flowers and light ease into a new garden | `consider-scene!`, `lib/scene.aura` |
 | The kitten and the car stay. A friend can join or an existing one can change look and motion. At most six | `consider-pals!`, `lib/pals.aura` |
 | The model button swaps DeepSeek and MiniMax | `scripts/probe-llm.sh`, `on-provider` |

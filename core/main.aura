@@ -12,13 +12,13 @@
 (require "lib/pals")
 
 (define SYS
-  "You design one obstacle phrase for a children's 3D endless runner called Lumen Run. The runner has three lanes (0 left, 1 centre, 2 right), jumps, and slides. Reply with ONLY one s-expression and no markdown. Allowed pieces: (seq (ground W) (gap W) (hurdle H W) (gate BOTTOM W) (coin Y) (spring W) (block LANE DEPTH) (coin-lane LANE Y)). Every parameter is a number; never write the words BOTTOM, W, H, LANE, DEPTH or other placeholders. Ranges in meters: spring W 0.45-1.6, hurdle W 0.35-2.2 and H 0.15-0.9, gate W 0.35-2.0 and BOTTOM 0.58-0.85, coin Y 0.4-2.4, coin-lane LANE 0, 1 or 2 and Y 0.4-2.4, ground W 0.8-18, gap W 0.4-2.0, block LANE 0, 1 or 2 and DEPTH 0.5-2.2. Optional (loot KIND) restyles every pickup. KIND is coin, star, gem, blossom, or apple. Optional (bend AMP) turns the road. AMP is 0.12 to 0.65. Start and end with ground. Leave at least one lane open beside every block. No violence, fear, weapons, or scary words. Bright garden, friendly shapes. Example: (seq (ground 6) (block 0 1) (hurdle 0.4 0.7) (ground 5) (gate 0.72 0.8) (ground 5) (gap 1.1) (ground 5))")
+  "You design one obstacle phrase for a children's 3D endless runner called Lumen Run. The runner has three lanes (0 left, 1 centre, 2 right), jumps, and slides. No markdown. Allowed pieces: (seq (ground W) (gap W) (hurdle H W) (gate BOTTOM W) (coin Y) (spring W) (block LANE DEPTH) (coin-lane LANE Y)). Every parameter is a number; never write the words BOTTOM, W, H, LANE, DEPTH or other placeholders. Ranges in meters: spring W 0.45-1.6, hurdle W 0.35-2.2 and H 0.15-0.9, gate W 0.35-2.0 and BOTTOM 0.58-0.85, coin Y 0.4-2.4, coin-lane LANE 0, 1 or 2 and Y 0.4-2.4, ground W 0.8-18, gap W 0.4-2.0, block LANE 0, 1 or 2 and DEPTH 0.5-2.2. Optional (loot KIND) restyles every pickup. KIND is coin, star, gem, blossom, or apple. Optional (bend AMP) turns the road. AMP is 0.12 to 0.65. Start and end with ground. Leave at least one lane open beside every block. No violence, fear, weapons, or scary words. Bright garden, friendly shapes. First write one short bright English sentence with no parentheses, then the s-expression. That sentence is what the child reads. Optional (flyer KIND LANE Y) sends one gentle toy flying toward the runner along one lane. KIND is plane, bubble, lantern, leaf, or ball. LANE is 0, 1 or 2. Y is 0.55 to 0.85. At most two flyers, and never on every lane at once. Example: (seq (ground 6) (block 0 1) (hurdle 0.4 0.7) (ground 5) (gate 0.72 0.8) (ground 5) (gap 1.1) (ground 5))")
 
 (define SCENE-SYS
-  "You redesign the garden backdrop for a children's 3D endless runner called Lumen Run. Reply with ONLY one s-expression and no markdown. Form: (garden (sky R G B) (ground R G B) (flower KIND DENSITY) (light L)). KIND is one of daisy, tulip, blossom, buttercup. Sky channels are 0.25 to 1 and the sky stays bright. Ground is green: G is at least 0.30 and at least as large as R, and not much smaller than B. Density is 0.15 to 1. Light is 0.50 to 1, never night. Optional (fog F) is 0 to 0.38; do not ask for thicker fog. No violence, fear, weapons, or scary words. Make it look different from a plain blue sky and daisies. Example: (garden (sky 0.95 0.45 0.55) (ground 0.35 0.72 0.32) (flower tulip 0.85) (light 0.9))")
+  "You redesign the garden backdrop for a children's 3D endless runner called Lumen Run. No markdown. Form: (garden (sky R G B) (ground R G B) (flower KIND DENSITY) (light L)). KIND is one of daisy, tulip, blossom, buttercup. Sky channels are 0.25 to 1 and the sky stays bright. Ground is green: G is at least 0.30 and at least as large as R, and not much smaller than B. Density is 0.15 to 1. Light is 0.50 to 1, never night. Optional (fog F) is 0 to 0.38; do not ask for thicker fog. No violence, fear, weapons, or scary words. Make it look different from a plain blue sky and daisies. First write one short bright English sentence with no parentheses, then the s-expression. That sentence is what the child reads. Example: (garden (sky 0.95 0.45 0.55) (ground 0.35 0.72 0.32) (flower tulip 0.85) (light 0.9))")
 
 (define PALS-SYS
-  "You change one friendly companion in a children's 3D endless runner called Lumen Run. Reply with ONLY one s-expression and no markdown. Restyle a friend who is already here by keeping the same name, or add one new gentle friend. Form: (pal KIND NAME R G B MOTION). KIND is kitten, car, bunny, bird, butterfly, frog, duck, or a new gentle word of 3 to 12 letters. NAME is 2 to 12 letters. R G B are 0.25 to 1 and the colour stays bright. MOTION is hop, pace, float, follow, or side. No violence, fear, weapons, or scary words. Example: (pal bird lark 0.95 0.86 0.35 float)")
+  "You change one friendly companion in a children's 3D endless runner called Lumen Run. No markdown. Restyle a friend who is already here by keeping the same name, or add one new gentle friend. Form: (pal KIND NAME R G B MOTION). KIND is kitten, car, bunny, bird, butterfly, frog, duck, or a new gentle word of 3 to 12 letters. NAME is 2 to 12 letters. R G B are 0.25 to 1 and the colour stays bright. MOTION is hop, pace, float, follow, or side. No violence, fear, weapons, or scary words. First write one short bright English sentence with no parentheses, then the s-expression. That sentence is what the child reads. Example: (pal bird lark 0.95 0.86 0.35 float)")
 
 (define g-now 32.0)
 (define jump-now 11.2)
@@ -142,6 +142,7 @@
 (define hold-span 0.0)
 (define hold-loot "")
 (define hold-bend -1.0)
+(define hold-say "")
 (define tuned #f)
 
 (define (publish-named! name value)
@@ -154,15 +155,21 @@
 (define (note! kind why arm . rest)
   (let ((cue (if (and (pair? rest) (string? (car rest))) (car rest) ""))
         (mark (if (and (pair? rest) (pair? (cdr rest)) (string? (car (cdr rest))))
-                (car (cdr rest)) "")))
+                (car (cdr rest)) ""))
+        (ask (if (and (pair? rest) (pair? (cdr rest)) (pair? (cdr (cdr rest)))
+                      (string? (car (cdr (cdr rest)))))
+               (car (cdr (cdr rest))) "")))
     (let ((row (hash "op" "decision" "kind" kind "why" why "arm" arm
-                     "via" publish-via "cue" cue "mark" mark)))
+                     "via" publish-via "cue" cue "mark" mark "ask" ask)))
     (set! audit (cons (hash "kind" kind "why" why "arm" arm "cue" cue) audit))
     (if (> (length audit) 12)
       (set! audit (take-n audit 12))
       #f)
     (set! pending (cons row pending))
-    (try (evo:record! arm kind why (hash "arm" arm) "" 0) (catch (e) #f))
+    ; evo:record! mutates while a POST is in flight and wedges that call.
+    (if (chat-open?)
+      #f
+      (try (evo:record! arm kind why (hash "arm" arm) "" 0) (catch (e) #f)))
     row)))
 
 (define (flush-notes! c)
@@ -214,6 +221,32 @@
 ; them. Policy updates are skipped when a trial is open or the write
 ; is refused, so the core keeps serving.
 (define trial-open #f)
+(define llm-talking #f)
+(define wait-motif #f)
+(define wait-scene #f)
+(define wait-pals #f)
+; One token. The worker holds it across http-post. The tick holds it
+; across evo:trial and the commit that follows. A set! in a fiber stays
+; in that fiber's overlay, so a shared binding cannot carry this flag.
+(define llm-slot #f)
+(define slot-mine #f)
+
+; True when a chat POST holds the token. False when this fiber holds it
+; for a trial, and false when nobody does.
+(define (chat-open?)
+  (if (or slot-mine (not llm-slot))
+    #f
+    (let ((tok (channel:try-recv llm-slot)))
+      (if tok
+        (begin (channel:send llm-slot #t) #f)
+        #t))))
+
+(define (trial-busy? t)
+  (and (pair? t) (string? (car t)) (string=? (car t) "busy")))
+
+(define (release-slot!)
+  (set! slot-mine #f)
+  (if llm-slot (channel:send llm-slot #t) #f))
 (define llm-kind "motif")
 (define motif-next 2500.0)
 (define scene-next 5000.0)
@@ -222,11 +255,18 @@
 (define (hash-put! h k v)
   (try (begin (hash-set! h k v) #t) (catch (e) #f)))
 
+; The token stays taken on success. The caller releases it after the
+; commit, so a worker cannot enter http-post between the trial and that
+; hash update. A busy answer means a POST already holds the token.
 (define (open-trial cand spec)
-  (set! trial-open #t)
-  (let ((trial (try (evo:trial cand spec) (catch (e) #f))))
-    (set! trial-open #f)
-    trial))
+  (if (and llm-slot (not (channel:try-recv llm-slot)))
+    (list "busy")
+    (begin
+      (set! slot-mine #t)
+      (set! trial-open #t)
+      (let ((trial (try (evo:trial cand spec) (catch (e) #f))))
+        (set! trial-open #f)
+        trial))))
 
 (define (make-policy)
   (let ((p (evo:policy "ucb" (quote ()))))
@@ -554,7 +594,7 @@
   (emit-chunks c #t))
 
 (define (obstacle-kind? k)
-  (or (= k 2.0) (= k 3.0) (= k 4.0) (= k 7.0)))
+  (or (= k 2.0) (= k 3.0) (= k 4.0) (= k 7.0) (= k 8.0)))
 
 (define (obstacles-ahead)
   (let ((x0 (player-x player))
@@ -577,7 +617,8 @@
       (let ((ch (car cs)))
         (if (and (player-alive? player)
                  (>= (player-x player) (hash-ref ch "x1"))
-                 (not (member-id? (hash-ref ch "id") cleared)))
+                 (not (member-id? (hash-ref ch "id") cleared))
+                 (not (chat-open?)))
           (begin
             (set! cleared (cons (hash-ref ch "id") cleared))
             (if (env-on? "LUMEN_SKIP_ARM")
@@ -712,7 +753,7 @@
 (define (reject-form! form)
   ; open-trial while another fiber is inside http-post wedges that call
   ; on this pin, so a hung garden never reaches its timeout.
-  (if (and scene-working (not stall-waiting))
+  (if (chat-open?)
     (let ((found (layout-form form (rules-hash))))
       (note! "ROLLBACK"
              (cond
@@ -740,15 +781,19 @@
                                                  "reachable" 1.0
                                                  "safe" 0.0)
                                            "behavior" (hash "band" (exact->inexact band))))))))
-      (note! "ROLLBACK"
-             (cond
-               ((and (hash? found) (> (hash-ref found "geometry" 0.0) 0.0)) "geometry")
-               ((and (hash? found) (> (hash-ref found "budget" 0.0) 0.0)) "budget")
-               ((not trial) "trial")
-               (else "shape"))
-             "motif" "That shape drifted away"))))
+      (if (trial-busy? trial)
+        #f
+        (begin
+          (note! "ROLLBACK"
+                 (cond
+                   ((and (hash? found) (> (hash-ref found "geometry" 0.0) 0.0)) "geometry")
+                   ((and (hash? found) (> (hash-ref found "budget" 0.0) 0.0)) "budget")
+                   ((not trial) "trial")
+                   (else "shape"))
+                 "motif" "That shape drifted away")
+          (release-slot!))))))
 
-(define (queue-hold! form laid)
+(define (queue-hold! form laid say)
   (set! hold-phase 1)
   (set! hold-form form)
   (set! hold-pieces (hash-ref laid "pieces"))
@@ -757,13 +802,14 @@
   (set! hold-body (make-player 0.4))
   (set! hold-i 0)
   (set! hold-loot (if (string? (hash-ref laid "loot" "")) (hash-ref laid "loot" "") ""))
-  (set! hold-bend (hash-ref laid "bend" -1.0)))
+  (set! hold-bend (hash-ref laid "bend" -1.0))
+  (set! hold-say (if (string? say) say "")))
 
-(define (consider-form! text)
+(define (consider-form! text say)
   (let ((form (one-line (if (string? text) text ""))))
     (let ((laid (layout-form form (rules-hash))))
       (if (layout-fair? laid)
-        (queue-hold! form laid)
+        (queue-hold! form laid say)
         (reject-form! form)))))
 
 (define (lref xs i)
@@ -796,6 +842,9 @@
                                                    "reachable" (if cleared? 0.0 1.0)
                                                    "safe" 0.0)
                                              "behavior" (hash "band" (exact->inexact band))))))))
+        (if (trial-busy? trial)
+          #f
+          (begin
         (if (or (not found) (not cleared?)
                 (> (hash-ref found "geometry" 1.0) 0.0)
                 (> (hash-ref found "budget" 1.0) 0.0)
@@ -821,11 +870,12 @@
                 (begin
                   (set! motif-now prev-form)
                   (set! hue-now prev-hue)
-                  (note! "ROLLBACK" "commit" "motif" "That shape drifted away"))))))))))
+                  (note! "ROLLBACK" "commit" "motif" "That shape drifted away"))))))
+            (release-slot!)))))))
 
 (define (begin-dream!)
   (set! dream-phase 1)
-  (consider-form! "(seq (ground 4.0) (gap 5.5) (ground 4.0))")
+  (consider-form! "(seq (ground 4.0) (gap 5.5) (ground 4.0))" "")
   (set! dream-form (pattern-form seed (+ next-id 1) band))
   (let ((laid (layout-form dream-form (rules-hash))))
     (if (or (not laid) (> (hash-ref laid "geometry" 1.0) 0.0))
@@ -845,11 +895,10 @@
     (set! dream-i (lref r 1))
     (set! dream-body (lref r 2))
     (set! dream-sim (lref r 3))
-    (if (lref r 0)
+    (if (and (lref r 0) (not (chat-open?)) (seal-sliced! (if (lref r 4) #t #f)))
       (begin
         (set! dream-phase 0)
-        (set! next-dream (+ run-ms 22000.0))
-        (seal-sliced! (if (lref r 4) #t #f)))
+        (set! next-dream (+ run-ms 22000.0)))
       #f)))
 
 ; The held phrase already passed layout. This records the sliced
@@ -859,7 +908,8 @@
         (pieces hold-pieces)
         (span hold-span)
         (loot hold-loot)
-        (bend hold-bend))
+        (bend hold-bend)
+        (say hold-say))
     (let ((found #f))
       (let* ((cand (evo:candidate form (hash "id" (string-append "h" (int-str next-id))
                                             "target" "motif-form")))
@@ -881,6 +931,9 @@
                                                    "reachable" (if cleared? 0.0 1.0)
                                                    "safe" 0.0)
                                              "behavior" (hash "band" (exact->inexact band))))))))
+        (if (trial-busy? trial)
+          #f
+          (begin
         (if (or (not found) (not cleared?)
                 (> (hash-ref found "geometry" 1.0) 0.0)
                 (> (hash-ref found "budget" 1.0) 0.0)
@@ -899,10 +952,13 @@
                             "constraints" (hash "budget" 0.0 "geometry" 0.0 "reachable" 0.0 "safe" 0.0)
                             "behavior" (hash "band" (exact->inexact band))))
                   (search (phrase-search "motif-form"))
-                  (mark (cond
-                          ((not (string=? loot-now prev-loot)) loot-now)
-                          ((> (abs (- bend-now prev-bend)) 0.02) "bend")
-                          (else "shape"))))
+                  (mark (let ((fly (flyer-mark pieces)))
+                          (cond
+                            ((not (string=? loot-now prev-loot)) loot-now)
+                            ((> (abs (- bend-now prev-bend)) 0.02) "bend")
+                            ((> (string-length fly) 0) fly)
+                            (else "shape"))))
+                  (line (if (> (string-length say) 0) say "A new shape bloomed")))
               (try-tell-commit! search cand ev)
               (if (binding-landed? "motif-form" (motif-body form) form)
                 (begin
@@ -910,23 +966,24 @@
                   (set! motif-span span)
                   (set! rules-dirty #t)
                   (set! rule-rev (+ rule-rev 1))
-                  (note! "KEEP" "fair" "motif" "A new shape bloomed" mark))
+                  (note! "KEEP" "fair" "motif" line mark "What should come down the path?"))
                 (begin
                   (set! motif-now prev-form)
                   (set! hue-now prev-hue)
                   (set! loot-now prev-loot)
                   (set! bend-now prev-bend)
-                  (note! "ROLLBACK" "commit" "motif" "That shape drifted away"))))))))))
+                  (note! "ROLLBACK" "commit" "motif" "That shape drifted away"))))))
+            (release-slot!)))))))
 
 (define (step-hold!)
   (let ((r (autopilot-slice hold-pieces (rules-hash) hold-body hold-sim hold-i 12)))
     (set! hold-i (lref r 1))
     (set! hold-body (lref r 2))
     (set! hold-sim (lref r 3))
-    (if (lref r 0)
-      (begin
-        (set! hold-phase 0)
-        (seal-hold! (if (lref r 4) #t #f)))
+    ; Sealing opens a trial. Doing that while a chat call is in flight
+    ; wedges http-post, so the slice result waits one tick.
+    (if (and (lref r 0) (not (chat-open?)) (seal-hold! (if (lref r 4) #t #f)))
+      (set! hold-phase 0)
       #f)))
 
 (define (maybe-hold!)
@@ -937,7 +994,7 @@
 ; A phrase the model just sent goes first, so the two autopilots do not
 ; share a tick.
 (define (maybe-dream!)
-  (if (or (env-on? "LUMEN_SKIP_DREAM") (> hold-phase 0))
+  (if (or (env-on? "LUMEN_SKIP_DREAM") (> hold-phase 0) (chat-open?))
     #f
     (cond
       ((= dream-phase 1) (step-dream!))
@@ -958,7 +1015,7 @@
   (set! light-now (hash-ref found "light"))
   (set! fog-now (hash-ref found "fog" 0.22)))
 
-(define (consider-scene! text)
+(define (consider-scene! text say)
   (let ((form (one-line (if (string? text) text ""))))
     (let ((found #f))
       (let* ((cand (evo:candidate form (hash "id" (string-append "s" (int-str next-id))
@@ -977,6 +1034,9 @@
                                                 (hash-ref found "violations")
                                                 (hash "reachable" 1.0))
                                               "behavior" (hash "band" (exact->inexact band))))))))
+        (if (trial-busy? trial)
+          (begin (set! wait-scene (list form say)) #f)
+          (begin
         (if (or (not found) (not (hash-ref found "ok"))
                 (not trial) (not (evo:trial-ok? trial)) (not (evo:feasible? trial)))
           (note! "ROLLBACK" (if (and found (string? (hash-ref found "why")))
@@ -996,12 +1056,17 @@
                   (apply-scene! found form)
                   (set! rule-rev (+ rule-rev 1))
                   (set! rules-dirty #t)
-                  (note! "KEEP" "fair" "scene" (hash-ref found "cue" "The garden changed color") "sky"))
+                  (note! "KEEP" "fair" "scene"
+                        (if (and (string? say) (> (string-length say) 0))
+                          say
+                          (hash-ref found "cue" "The garden changed color"))
+                        "sky" "How should the garden look?"))
                 (begin
                   (set! scene-now prev-form)
-                  (note! "ROLLBACK" "commit" "scene" "The garden stayed"))))))))))
+                  (note! "ROLLBACK" "commit" "scene" "The garden stayed"))))))
+            (release-slot!)))))))
 
-(define (keep-pals! canon merged)
+(define (keep-pals! canon merged say)
   (let ((found #f))
     (let* ((cand (evo:candidate canon (hash "id" (string-append "p" (int-str next-id))
                                             "target" "pals-form")))
@@ -1019,6 +1084,9 @@
                                               (hash-ref found "violations")
                                               (hash "reachable" 1.0))
                                             "behavior" (hash "band" (exact->inexact band))))))))
+      (if (trial-busy? trial)
+        (begin (set! wait-pals (list canon say)) #f)
+        (begin
       (if (or (not found) (not (hash-ref found "ok"))
               (not trial) (not (evo:trial-ok? trial)) (not (evo:feasible? trial)))
         (note! "ROLLBACK" (if (and found (string? (hash-ref found "why")))
@@ -1039,13 +1107,18 @@
               (begin
                 (set! rule-rev (+ rule-rev 1))
                 (set! rules-dirty #t)
-                (note! "KEEP" "fair" "pals" (hash-ref merged "cue" "A new friend came along") "friend"))
+                (note! "KEEP" "fair" "pals"
+                      (if (and (string? say) (> (string-length say) 0))
+                        say
+                        (hash-ref merged "cue" "A new friend came along"))
+                      "friend" "Who wants to run with us?"))
               (begin
                 (set! pals-now prev-form)
                 (set! pals-rows prev-rows)
-                (note! "ROLLBACK" "commit" "pals" "The friends stayed")))))))))
+                (note! "ROLLBACK" "commit" "pals" "The friends stayed")))))
+          (release-slot!)))))))
 
-(define (consider-pals! text)
+(define (consider-pals! text say)
   (let ((incoming (one-line (if (string? text) text ""))))
     (let ((found (check-pals incoming)))
       (if (not (and (hash? found) (hash-ref found "ok")))
@@ -1058,23 +1131,23 @@
             (let ((canon (hash-ref merged "form" "")))
               (if (string=? canon pals-now)
                 (note! "ROLLBACK" "same" "pals" "The friends stayed")
-                (keep-pals! canon merged)))))))))
+                (keep-pals! canon merged say)))))))))
 
 (define (llm-prompt kind)
   (cond
     ((string=? kind "scene")
      (string-append "Flowers now: " flower-now
                     ". Sky is " (num-src sky-r) " " (num-src sky-g) " " (num-src sky-b)
-                    ". Suggest a different bright garden."))
+                    ". Suggest a different bright garden. Start with one short sentence."))
     ((string=? kind "pals")
      (string-append "Friends already here: " (pal-names pals-rows)
-                    ". Restyle one friend already here by keeping the same name, or add one new gentle friend who is not in that list."))
+                    ". Restyle one friend already here by keeping the same name, or add one new gentle friend who is not in that list. Start with one short sentence."))
     (else
      (string-append "Difficulty band " (number->string band)
                     ". Pickups are " loot-now
                     ". The road bends by " (num-src bend-now)
                     ". Jump speed is " (num-src speed-now)
-                    " m/s. Invent a different rhythm from a straight row of hurdles. You may add (loot KIND) and (bend AMP)."))))
+                    " m/s. Invent a different rhythm from a straight row of hurdles. You may add (loot KIND), (bend AMP), and (flyer KIND LANE Y). Start with one short sentence."))))
 
 ; Game-side budget. The runtime's own HTTP cap is LLM_TIMEOUT; if that
 ; call never comes back, give up LLM_TIMEOUT+10 seconds later and drop
@@ -1133,10 +1206,16 @@
       (set! scene-busy #f)
       (set! scene-accept -1)
       (if (and (hash? ans) (hash-ref ans "ok"))
-        (let ((form (extract-garden (hash-ref ans "content" ""))))
-          (if form
-            (consider-scene! form)
-            (note! "ROLLBACK" "no-garden" "scene" "The garden stayed")))
+        (let ((raw (hash-ref ans "content" "")))
+          (let ((text (if (string? raw) raw "")))
+            (if (banned? text)
+              (note! "ROLLBACK" "banned" "scene" "The garden stayed")
+              (let ((form (extract-garden text)))
+                (if form
+                  (if (chat-open?)
+                    (set! wait-scene (list form (say-line text)))
+                    (consider-scene! form (say-line text)))
+                  (note! "ROLLBACK" "no-garden" "scene" "The garden stayed"))))))
         (note! "ROLLBACK" (if (hash? ans) (hash-ref ans "error" "llm") "llm")
                "scene" "The garden stayed"))
       (send c (rules-msg))
@@ -1154,10 +1233,15 @@
       (set! pals-accept -1)
       (if (and (hash? ans) (hash-ref ans "ok"))
         (let ((raw (hash-ref ans "content" "")))
-          (let ((form (extract-pals (if (string? raw) raw ""))))
-            (if form
-              (consider-pals! form)
-              (note! "ROLLBACK" "no-pal" "pals" "The friends stayed"))))
+          (let ((text (if (string? raw) raw "")))
+            (if (banned? text)
+              (note! "ROLLBACK" "banned" "pals" "The friends stayed")
+              (let ((form (extract-pals text)))
+                (if form
+                  (if (chat-open?)
+                    (set! wait-pals (list form (say-line text)))
+                    (consider-pals! form (say-line text)))
+                  (note! "ROLLBACK" "no-pal" "pals" "The friends stayed"))))))
         (note! "ROLLBACK" (if (hash? ans) (hash-ref ans "error" "llm") "llm")
                "pals" "The friends stayed"))
       (send c (rules-msg))
@@ -1170,10 +1254,16 @@
       (set! motif-busy #f)
       (set! motif-accept -1)
       (if (and (hash? ans) (hash-ref ans "ok"))
-        (let ((form (extract-seq (hash-ref ans "content" ""))))
-          (if form
-            (consider-form! form)
-            (note! "ROLLBACK" "no-seq" "llm" "That shape drifted away")))
+        (let ((raw (hash-ref ans "content" "")))
+          (let ((text (if (string? raw) raw "")))
+            (if (banned? text)
+              (note! "ROLLBACK" "banned" "llm" "That shape drifted away")
+              (let ((form (extract-seq text)))
+                (if form
+                  (if (chat-open?)
+                    (set! wait-motif (list form (say-line text)))
+                    (consider-form! form (say-line text)))
+                  (note! "ROLLBACK" "no-seq" "llm" "That shape drifted away"))))))
         (note! "ROLLBACK" (if (hash? ans) (hash-ref ans "error" "llm") "llm")
                "llm" "That shape drifted away"))
       (send c (rules-msg))
@@ -1227,10 +1317,34 @@
 ; own channel, so a garden call that never returns cannot eat the next
 ; obstacle phrase. A late hash whose token was retired by the watchdog
 ; is ignored.
+; A reply that arrived during another chat call waits here. The trial
+; runs only after that call has left http-post.
+(define (flush-deferred!)
+  (if (chat-open?)
+    #f
+    (cond
+      ((pair? wait-motif)
+       (let ((form (car wait-motif))
+             (say (car (cdr wait-motif))))
+         (set! wait-motif #f)
+         (consider-form! form say)))
+      ((pair? wait-scene)
+       (let ((form (car wait-scene))
+             (say (car (cdr wait-scene))))
+         (set! wait-scene #f)
+         (consider-scene! form say)))
+      ((pair? wait-pals)
+       (let ((form (car wait-pals))
+             (say (car (cdr wait-pals))))
+         (set! wait-pals #f)
+         (consider-pals! form say)))
+      (else #f))))
+
 (define (poll-llm! c)
   (if (not llm-on)
     #f
     (begin
+      (flush-deferred!)
       ; try-recv only while a call is outstanding. An idle poll retains a
       ; capture frame per tick on this pin and a long run exhausts the
       ; arena. http-post only notices its timeout if this fiber yields.
@@ -1375,7 +1489,7 @@
     (cond
       ((and (string? text) (string-contains? text "(pal")) (consider-pals! text))
       ((and (string? text) (string-contains? text "(garden")) (consider-scene! text))
-      (else (consider-form! text))))
+      (else (consider-form! text ""))))
   (flush-notes! c)
   (send c (rules-msg))
   (set! rules-dirty #f)
@@ -1587,6 +1701,8 @@
         (load-llm-timeout!)
         (set! stall-scene? (env-on? "LUMEN_STALL_SCENE"))
         (set! stall-ch (channel:create 1))
+        (set! llm-slot (channel:create 1))
+        (channel:send llm-slot #t)
         (set! motif-req (channel:create 2))
         (set! motif-res (channel:create 2))
         (set! scene-req (channel:create 2))
@@ -1610,6 +1726,19 @@
                               ans
                               (hash "ok" #f "error" "bad" "content" "")))))
 
+; One chat POST at a time. A second call used to run beside the first,
+; and a trial opened on the tick then wedged the first POST so its
+; phrase never came back. Wait through an open trial too: evo:trial
+; yields, and entering http-post from that yield is the same wedge.
+(define (call-llm! sys user)
+  (let wait ()
+    (if (and llm-slot (not (channel:try-recv llm-slot)))
+      (begin (try (fiber:yield) (catch (e) #f)) (wait))
+      #t))
+  (let ((ans (try (llm-reply sys user) (catch (e) #f))))
+    (if llm-slot (channel:send llm-slot #t) #f)
+    (if (hash? ans) ans (hash "ok" #f "error" "llm" "content" ""))))
+
 (define (llm-worker req res sys kind)
   (let loop ()
     (let ((job (channel:recv req)))
@@ -1626,7 +1755,7 @@
           (channel:recv stall-ch)
           (set! stall-waiting #f))
         #f)
-      (deliver! res job (llm-reply sys (if (hash? job) (hash-ref job "user" "") "")))
+      (deliver! res job (call-llm! sys (if (hash? job) (hash-ref job "user" "") "")))
       (cond
         ((string=? kind "scene") (set! scene-working #f))
         ((string=? kind "pals") (set! pals-working #f))
