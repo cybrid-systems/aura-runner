@@ -24,6 +24,9 @@ const webPort = 18081;
 const MOTIF = "(seq (ground 6) (block 0 1) (hurdle 0.4 0.7) (ground 5) (gate 0.72 0.8) (ground 5) (gap 1.1) (ground 5))";
 const SCENE = "(garden (sky 0.95 0.45 0.55) (ground 0.35 0.72 0.32) (flower tulip 0.85) (light 0.9))";
 const PAL = "(pal bird lark 0.95 0.86 0.35 float)";
+const MOTIF_SAY = "A paper plane drifts down the left lane.";
+const SCENE_SAY = "Tulips are opening across the grass.";
+const PAL_SAY = "A little bird wants to float along.";
 
 function connect(p) {
   return new Promise((resolve, reject) => {
@@ -82,7 +85,7 @@ function startMock() {
       const body = Buffer.concat(chunks).toString("utf8");
       const scene = body.includes("(flower KIND") || body.includes("Suggest a different bright garden");
       const pals = body.includes("friendly companion") || body.includes("Add one new gentle friend");
-      const content = scene ? SCENE : pals ? PAL : MOTIF;
+      const content = scene ? `${SCENE_SAY} ${SCENE}` : pals ? `${PAL_SAY} ${PAL}` : `${MOTIF_SAY} ${MOTIF}`;
       if (scene) hits.scene += 1;
       else if (pals) hits.pals += 1;
       else if (body.includes("obstacle") || body.includes("hurdle")) hits.motif += 1;
@@ -109,7 +112,7 @@ function startAura(log, base) {
     env: cleanEnv({
       ...process.env,
       AURA_RUNNER_PORT: String(port),
-      AURA_EVO_LOG: path.join(root, "out", "evo.jsonl"),
+      AURA_EVO_LOG: path.join(root, "out", "mock-evo.jsonl"),
       LLM_API_KEY: "mock-key",
       LLM_BASE_URL: base,
       LLM_MODEL: "mock-garden",
@@ -158,9 +161,10 @@ async function drive() {
     let sawCue = false;
     let sawPal = false;
     let sawShape = false;
+    let sawSay = false;
     let maxChunks = 0;
-    const deadline = Date.now() + 25000;
-    while (Date.now() < deadline && !(sawMotif && sawScene && sawCue && sawPal && sawShape)) {
+    const deadline = Date.now() + 40000;
+    while (Date.now() < deadline && !(sawMotif && sawScene && sawCue && sawPal && sawShape && sawSay)) {
       io.send({ op: "tick", jump: 0, slide: 0, lane: 0 });
       batch = await readUntil(io, (m) => m.op === "state", 40);
       for (const m of batch) {
@@ -186,9 +190,10 @@ async function drive() {
           sawPal = true;
         }
         if (m.op === "decision" && m.kind === "KEEP" && m.arm === "motif") {
-          if (m.mark !== "shape" && m.mark !== "bend" && m.mark !== "star" && m.mark !== "gem" && m.mark !== "blossom" && m.mark !== "apple" && m.mark !== "coin") {
+          if (m.mark !== "shape" && m.mark !== "bend" && m.mark !== "star" && m.mark !== "gem" && m.mark !== "blossom" && m.mark !== "apple" && m.mark !== "coin" && m.mark !== "plane" && m.mark !== "bubble" && m.mark !== "lantern" && m.mark !== "leaf" && m.mark !== "ball") {
             throw new Error("motif mark " + m.mark);
           }
+          if (m.cue === MOTIF_SAY) sawSay = true;
           sawShape = true;
         }
         if (JSON.stringify(m).includes("The light rested")) throw new Error("end card leaked into the protocol");
@@ -198,8 +203,9 @@ async function drive() {
     if (!sawMotif) throw new Error("obstacle phrase was not rebound; mock " + JSON.stringify(mock.hits) + "\n" + core.log());
     if (!sawScene) throw new Error("garden was not rebound; mock " + JSON.stringify(mock.hits) + "\n" + core.log());
     if (!sawCue) throw new Error("scene KEEP had no cue");
-    if (!sawPal) throw new Error("companion was not added; mock " + JSON.stringify(mock.hits));
+    if (!sawPal) throw new Error("companion was not added; mock " + JSON.stringify(mock.hits) + "\n" + core.log());
     if (!sawShape) throw new Error("motif keep had no corner mark");
+    if (!sawSay) throw new Error("motif keep did not show the model sentence");
     if (mock.hits.motif < 1 || mock.hits.scene < 1 || mock.hits.pals < 1) {
       throw new Error("mock did not see both prompts " + JSON.stringify(mock.hits));
     }
@@ -275,6 +281,8 @@ async function screenshots() {
       "--headless=new",
       "--no-sandbox",
       "--disable-dev-shm-usage",
+      "--disable-background-timer-throttling",
+      "--disable-renderer-backgrounding",
       "--disable-gpu",
       "--use-gl=angle",
       "--use-angle=swiftshader",
@@ -310,14 +318,20 @@ async function screenshots() {
     if (!names.includes("mochi") || !names.includes("beep")) {
       throw new Error("companions missing " + pals);
     }
-    const deadline = Date.now() + 20000;
+    const deadline = Date.now() + 40000;
     let sky = "";
+    let chat = "";
     while (Date.now() < deadline) {
       const value = await cdp.call("Runtime.evaluate", {
         expression: "document.documentElement.dataset.sky || ''",
         returnByValue: true,
       });
       sky = value.result && value.result.value || "";
+      const said = await cdp.call("Runtime.evaluate", {
+        expression: "document.documentElement.dataset.chat || ''",
+        returnByValue: true,
+      });
+      chat = (said.result && said.result.value) || "";
       const text = await cdp.call("Runtime.evaluate", {
         expression: "document.body.innerText",
         returnByValue: true,
@@ -326,8 +340,11 @@ async function screenshots() {
       if (body.includes("The light rested") || body.includes("Run again")) {
         throw new Error("end card is on screen");
       }
-      if (sky.startsWith("0.9") || sky.startsWith("0.8")) break;
+      if ((sky.startsWith("0.9") || sky.startsWith("0.8")) && chat.includes(MOTIF_SAY) && body.includes(MOTIF_SAY)) break;
       await new Promise((r) => setTimeout(r, 250));
+    }
+    if (!chat.includes(MOTIF_SAY)) {
+      throw new Error("chat missing the model sentence " + chat + " sky " + sky + "\n" + core.log().slice(-1500));
     }
     await new Promise((r) => setTimeout(r, 1200));
     await capture(cdp, late);

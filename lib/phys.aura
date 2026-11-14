@@ -17,7 +17,8 @@
 ;   lane is 0 left, 1 centre, 2 right. lx accelerates toward that lane
 ;   (lvx), and a jump accelerates up for TAKEOFF-S before gravity.
 ;   Forward x is arc length along the road (rendered as the road tangent).
-; Piece:  (kind x w h y lane)
+; Piece:  (kind x w h y lane) and, for a flyer, (vis speed).
+;   Kind 8 flies toward the runner: each step subtracts speed from x.
 ;   lane -1 means every lane. kinds: 1 ground, 2 gap, 3 hurdle, 4 gate,
 ;   5 coin, 6 spring, 7 block (a crate you change lanes to avoid).
 
@@ -103,8 +104,35 @@
           pp
           (loop (pset (pset (pset (pset pp 0 (+ edge 0.08)) 1 0.0) 2 0.0) 14 0.0) (+ n 1)))))))
 
+(define (inexact-rest xs)
+  (if (null? xs)
+    (list)
+    (cons (exact->inexact (car xs)) (inexact-rest (cdr xs)))))
+
+; Lane is field 5. A flyer keeps a visual code at 6 and a speed at 7.
 (define (piece k x w h y . rest)
-  (list k x w h y (if (null? rest) -1.0 (exact->inexact (car rest)))))
+  (if (null? rest)
+    (list k x w h y -1.0)
+    (cons k (cons x (cons w (cons h (cons y (inexact-rest rest))))))))
+
+(define (piece-nth q i fallback)
+  (let loop ((xs q) (n 0))
+    (if (or (null? xs) (< i 0))
+      fallback
+      (if (= n i) (car xs) (loop (cdr xs) (+ n 1))))))
+
+; Keep every field after x, so a flyer's look and speed survive a shift.
+(define (shift-one q dx)
+  (cons (car q) (cons (+ (car (cdr q)) dx) (cdr (cdr q)))))
+
+(define (nudge-flyers pieces dt)
+  (let loop ((ps pieces) (acc (list)))
+    (if (null? ps)
+      (reverse acc)
+      (let ((q (car ps)))
+        (if (= (piece-k q) 8.0)
+          (loop (cdr ps) (cons (shift-one q (* (- 0.0 (piece-nth q 7 0.0)) dt)) acc))
+          (loop (cdr ps) (cons q acc)))))))
 
 (define (piece-k q) (car q))
 (define (piece-x q) (car (cdr q)))
@@ -179,6 +207,7 @@
 (define (step p pieces rules dt)
   (if (<= (pxs p 5) 0.0)
     (list p pieces "dead")
+    (let ((pieces (nudge-flyers pieces dt)))
     (let* ((g (hash-ref rules "g"))
            (jump (hash-ref rules "jump"))
            (speed (run-speed (hash-ref rules "speed") p))
@@ -222,7 +251,7 @@
            (x (+ (player-x p6) (* speed dt)))
            (p7 (pset (pset (pset (pset p6 0 x) 1 y) 2 vy) 14 thrust1)))
       (let ((done (finish-step p7 pieces rules)))
-        (list (ease-lane (car done) dt) (car (cdr done)) (car (cdr (cdr done))))))))
+        (list (ease-lane (car done) dt) (car (cdr done)) (car (cdr (cdr done)))))))))
 
 (define (finish-step p7 pieces rules)
   (if (and (<= (player-y p7) 0.0)
@@ -265,7 +294,7 @@
                (hit (and (hits-lane? q lane)
                          (rects-overlap? left bottom right top x1 y1 x2 y2))))
           (cond
-            ((and hit (or (= k 3.0) (= k 4.0) (= k 7.0)))
+            ((and hit (or (= k 3.0) (= k 4.0) (= k 7.0) (= k 8.0)))
              (if (strict? rules)
                (loop (cdr ps) (cons q acc) (pset player 5 0.0) "dead" #t)
                (if (> (player-grace player) 0.0)

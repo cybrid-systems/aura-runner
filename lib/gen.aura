@@ -71,6 +71,17 @@
        (if (or (not (lane-id? lane)) (not (positive-range? y 0.4 2.4)))
          #f
          (list (list (piece 5.0 (+ x 0.4) 0.42 0.42 y lane)) x))))
+    ; One gentle toy, flying back toward the runner. It takes its own
+    ; stretch of track so two of them cannot sit on the same spot.
+    ((string=? kind "flyer")
+     (let ((name (spec-sym sp 1))
+           (lane (spec-num sp 2 -1.0))
+           (y (spec-num sp 3 -1.0)))
+       (let ((code (flyer-code name)))
+         (if (or (< code 0.0) (not (lane-id? lane)) (not (positive-range? y 0.55 0.85)))
+           #f
+           (list (list (piece 8.0 (+ x 0.35) 0.72 0.5 y lane code (flyer-speed code)))
+                 (+ x 3.4))))))
     ; Restyle every pickup, or bias how hard the road turns. Neither
     ; occupies the track, so a coin's timing stays where the phrase put it.
     ((string=? kind "loot")
@@ -100,6 +111,35 @@
   (and (string? s)
        (or (string=? s "coin") (string=? s "star") (string=? s "gem")
            (string=? s "blossom") (string=? s "apple"))))
+
+; Speeds stay here, not in the phrase, so a reply cannot ask for a blur.
+(define (flyer-code name)
+  (cond
+    ((not (string? name)) -1.0)
+    ((string=? name "plane") 0.0)
+    ((string=? name "bubble") 1.0)
+    ((string=? name "lantern") 2.0)
+    ((string=? name "leaf") 3.0)
+    ((string=? name "ball") 4.0)
+    (else -1.0)))
+
+(define (flyer-speed code)
+  (cond
+    ((= code 0.0) 2.6)
+    ((= code 1.0) 1.1)
+    ((= code 2.0) 1.4)
+    ((= code 3.0) 1.8)
+    ((= code 4.0) 2.2)
+    (else 0.0)))
+
+(define (flyer-kind-name code)
+  (cond
+    ((= code 0.0) "plane")
+    ((= code 1.0) "bubble")
+    ((= code 2.0) "lantern")
+    ((= code 3.0) "leaf")
+    ((= code 4.0) "ball")
+    (else "")))
 
 (define (list-ref-or xs i fallback)
   (if (or (not (pair? xs)) (< i 0))
@@ -271,23 +311,59 @@
 (define (geom-violation pieces rules)
   (let ((apex (jump-apex rules))
         (dist (jump-distance rules)))
-    (let loop ((ps pieces) (worst 0.0))
-      (if (null? ps)
-        worst
-        (let* ((q (car ps))
-               (k (piece-k q))
-               (v (cond
-                    ((= k 2.0)
-                     (let ((over (- (piece-w q) (* dist 0.78))))
-                       (if (> over 0.0) over 0.0)))
-                    ((= k 3.0)
-                     (let ((over (- (piece-h q) (* apex 0.72))))
-                       (if (> over 0.0) over 0.0)))
-                    ((= k 4.0)
-                     (let ((bottom (piece-y q)))
-                       (if (or (< bottom 0.55) (> bottom 0.92)) 1.0 0.0)))
-                    (else 0.0))))
-          (loop (cdr ps) (if (> v worst) v worst)))))))
+    (let ((shaped
+           (let loop ((ps pieces) (worst 0.0))
+             (if (null? ps)
+               worst
+               (let* ((q (car ps))
+                      (k (piece-k q))
+                      (v (cond
+                           ((= k 2.0)
+                            (let ((over (- (piece-w q) (* dist 0.78))))
+                              (if (> over 0.0) over 0.0)))
+                           ((= k 3.0)
+                            (let ((over (- (piece-h q) (* apex 0.72))))
+                              (if (> over 0.0) over 0.0)))
+                           ((= k 4.0)
+                            (let ((bottom (piece-y q)))
+                              (if (or (< bottom 0.55) (> bottom 0.92)) 1.0 0.0)))
+                           (else 0.0))))
+                 (loop (cdr ps) (if (> v worst) v worst)))))))
+      (let ((extra (flyer-geom pieces)))
+        (if (> extra shaped) extra shaped)))))
+
+(define (count-kind pieces k)
+  (let loop ((ps pieces) (n 0))
+    (if (null? ps)
+      n
+      (loop (cdr ps) (if (= (piece-k (car ps)) k) (+ n 1) n)))))
+
+(define (covers-three? pieces x)
+  (let loop ((ps pieces) (a #f) (b #f) (c #f))
+    (if (null? ps)
+      (and a b c)
+      (let ((q (car ps)))
+        (if (and (= (piece-k q) 8.0)
+                 (< (if (< (- (piece-x q) x) 0.0) (- 0.0 (- (piece-x q) x)) (- (piece-x q) x)) 2.2))
+          (let ((lane (piece-lane q)))
+            (cond
+              ((= lane 0.0) (loop (cdr ps) #t b c))
+              ((= lane 1.0) (loop (cdr ps) a #t c))
+              ((= lane 2.0) (loop (cdr ps) a b #t))
+              (else (loop (cdr ps) a b c))))
+          (loop (cdr ps) a b c))))))
+
+(define (flyers-sealed? pieces)
+  (let loop ((ps pieces))
+    (if (null? ps)
+      #f
+      (if (and (= (piece-k (car ps)) 8.0) (covers-three? pieces (piece-x (car ps))))
+        #t
+        (loop (cdr ps))))))
+
+; More than two flyers, or one on every lane at once, is not a phrase.
+(define (flyer-geom pieces)
+  (if (or (> (count-kind pieces 8.0) 2) (flyers-sealed? pieces)) 1.0 0.0))
 
 (define (violations-clear? h)
   (and (<= (hash-ref h "budget" 1.0) 0.0)
@@ -324,7 +400,7 @@
       (let* ((q (car ps))
              (k (piece-k q))
              (dx (- (piece-x q) x)))
-        (if (and (or (= k 2.0) (= k 3.0) (= k 4.0))
+        (if (and (or (= k 2.0) (= k 3.0) (= k 4.0) (= k 8.0))
                  (hits-lane? q lane)
                  (>= dx -0.05)
                  (< dx best-dx))
@@ -361,21 +437,55 @@
         (else p))
       p)))
 
+(define (flyer-blocking? pieces x lane)
+  (let loop ((ps pieces))
+    (if (null? ps)
+      #f
+      (let ((q (car ps)))
+        (if (and (= (piece-k q) 8.0) (hits-lane? q lane))
+          (let ((dx (- (piece-x q) x)))
+            (if (and (>= dx 0.0) (<= dx 9.0))
+              #t
+              (loop (cdr ps))))
+          (loop (cdr ps)))))))
+
+(define (flyer-lane-open? pieces x lane)
+  (and (lane-clear? pieces x lane)
+       (not (flyer-blocking? pieces x lane))))
+
+; A flyer is already closing, so step aside as soon as it is in view.
+; The slide below still clears one that both neighbours are holding.
+(define (dodge-flyer p pieces)
+  (let ((lane (body-lane p))
+        (x (player-x p)))
+    (if (and (flyer-blocking? pieces x lane)
+             (= (player-lane p) lane))
+      (cond
+        ((and (< lane 1.5) (flyer-lane-open? pieces x (+ lane 1.0)))
+         (press-lane p 1.0))
+        ((and (> lane 0.5) (flyer-lane-open? pieces x (- lane 1.0)))
+         (press-lane p -1.0))
+        (else p))
+      p)))
+
 (define (autopilot-press p pieces rules)
   (if (not (player-alive? p))
     p
-    (let ((p1 (dodge-block p pieces)))
-      (let ((q (next-hazard pieces (player-x p1) (body-lane p1))))
-        (if (not q)
-          p1
-          (let ((dx (- (piece-x q) (player-x p1)))
-                (k (piece-k q)))
-            (cond
-              ((and (= k 4.0) (< dx 1.4) (> dx -0.15))
-               (press-slide p1))
-              ((and (or (= k 2.0) (= k 3.0)) (< dx 0.95) (> dx 0.0))
-               (press-jump p1))
-              (else p1))))))))
+    (let ((p1 (dodge-flyer p pieces)))
+      (let ((p2 (dodge-block p1 pieces)))
+        (let ((q (next-hazard pieces (player-x p2) (body-lane p2))))
+          (if (not q)
+            p2
+            (let ((dx (- (piece-x q) (player-x p2)))
+                  (k (piece-k q)))
+              (cond
+                ((and (= k 4.0) (< dx 1.4) (> dx -0.15))
+                 (press-slide p2))
+                ((and (= k 8.0) (< dx 1.8) (> dx 0.15))
+                 (press-slide p2))
+                ((and (or (= k 2.0) (= k 3.0)) (< dx 0.95) (> dx 0.0))
+                 (press-jump p2))
+                (else p2)))))))))
 
 (define banned-words
   (list "kill" "blood" "gun" "knife" "scary" "monster" "weapon"
@@ -396,7 +506,69 @@
       (string=? s "spring") (string=? s "block") (string=? s "coin-lane")
       (string=? s "loot") (string=? s "bend")
       (string=? s "star") (string=? s "gem") (string=? s "blossom")
-      (string=? s "apple")))
+      (string=? s "apple")
+      (string=? s "flyer") (string=? s "plane") (string=? s "bubble")
+      (string=? s "lantern") (string=? s "leaf") (string=? s "ball")))
+
+; The sentence sits in front of the s-expression. The reader has no
+; strings, so the sentence never enters the form.
+(define (form-text text)
+  (let ((i (string-find text "(")))
+    (if (< i 0)
+      text
+      (substring text i (string-length text)))))
+
+(define (trim-edges s)
+  (let ((n (string-length s)))
+    (let loop ((i 0))
+      (if (or (>= i n) (not (= (string-ref s i) 32)))
+        (let loop2 ((j n))
+          (if (or (<= j i) (not (= (string-ref s (- j 1)) 32)))
+            (if (< i j) (substring s i j) "")
+            (loop2 (- j 1))))
+        (loop (+ i 1))))))
+
+(define (say-char? c)
+  (or (and (>= c 65) (<= c 90))
+      (and (>= c 97) (<= c 122))
+      (and (>= c 48) (<= c 57))
+      (= c 32) (= c 46) (= c 44) (= c 33) (= c 63) (= c 39) (= c 45)))
+
+(define (say-chars? s)
+  (let ((n (string-length s)))
+    (let loop ((i 0) (letter #f))
+      (if (>= i n)
+        letter
+        (let ((c (string-ref s i)))
+          (if (not (say-char? c))
+            #f
+            (loop (+ i 1)
+                  (or letter
+                      (and (>= c 65) (<= c 90))
+                      (and (>= c 97) (<= c 122))))))))))
+
+(define (say-line text)
+  (if (not (string? text))
+    ""
+    (let ((flat (string-replace (string-replace text "\n" " ") "\r" " ")))
+      (let ((i (string-find flat "(")))
+        (if (<= i 0)
+          ""
+          (let ((raw (trim-edges (substring flat 0 i))))
+            (if (or (< (string-length raw) 8)
+                    (> (string-length raw) 90)
+                    (not (say-chars? raw))
+                    (banned? raw))
+              ""
+              raw)))))))
+
+(define (flyer-mark pieces)
+  (let loop ((ps pieces))
+    (if (null? ps)
+      ""
+      (if (= (piece-k (car ps)) 8.0)
+        (flyer-kind-name (piece-nth (car ps) 6 -1.0))
+        (loop (cdr ps))))))
 
 (define (symbols-allowed? form)
   (let loop ((ss (form-symbols form)))
@@ -416,7 +588,7 @@
     ((banned? text)
      (refuse "banned" rules))
     (else
-     (let ((form (sexp-parse text)))
+     (let ((form (sexp-parse (form-text text))))
        (cond
          ((not form) (refuse "syntax" rules))
          ((not (symbols-allowed? form)) (refuse "symbol" rules))
@@ -513,14 +685,7 @@
     (if (null? ps)
       (reverse acc)
       (let ((q (car ps)))
-        (loop (cdr ps)
-              (cons (piece (piece-k q)
-                           (+ (piece-x q) x0)
-                           (piece-w q)
-                           (piece-h q)
-                           (piece-y q)
-                           (piece-lane q))
-                    acc))))))
+        (loop (cdr ps) (cons (shift-one q x0) acc))))))
 
 (define (make-chunk id x0 band origin hue pieces x1)
   (hash "id" id "x0" x0 "x1" x1 "band" band "origin" origin

@@ -103,4 +103,11 @@ if (bad) {
   console.error(`${bad} mismatches`);
   process.exit(1);
 }
+const fly = [[8, 10, 0.72, 0.5, 0.7, 1, 0, 2.6]];
+step(makePlayer(1), fly, rules, DT);
+const fx = fly[0][1];
+if (!(fx < 9.97 && fx > 9.94)) {
+  console.error(`flyer did not close ${fx}`);
+  process.exit(1);
+}
 console.log(`sim matches aura golden (${got.length} lines)`);

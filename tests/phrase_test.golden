@@ -8,3 +8,11 @@ styled-meta 1 1
 styled 1 fair
 badloot 0 symbol
 badbend 0 range
+flyer 1 fair
+flyer-two 1 fair
+flyer-wall 0 geometry
+flyer-missile 0 symbol
+said 1 fair
+said-bomb 0 banned
+say 1
+fly-step 1

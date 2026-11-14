@@ -133,8 +133,20 @@ function overlap(ax1, ay1, ax2, ay2, bx1, by1, bx2, by2) {
   return ax1 < bx2 && ax2 > bx1 && ay1 < by2 && ay2 > by1;
 }
 
+// Kind 8 stores a visual code at [6] and a speed at [7]. It flies toward
+// the runner, so x decreases. Missing speed stays put.
+function nudgeFlyers(pieces, dt) {
+  for (let i = 0; i < pieces.length; i++) {
+    const q = pieces[i];
+    if (q[0] !== 8) continue;
+    const spd = q.length > 7 ? q[7] : 0;
+    if (spd) q[1] -= spd * dt;
+  }
+}
+
 export function step(p, pieces, rules, dt) {
   if (p[5] <= 0) return "dead";
+  nudgeFlyers(pieces, dt);
   const g = rules.g;
   const jump = rules.jump;
   const speed = runSpeed(rules.speed, p);
@@ -217,7 +229,7 @@ function collide(p, pieces, rules) {
     const x2 = x1 + q[2];
     const y2 = y1 + q[3];
     const hit = hitsLane(q, lane) && overlap(left, bottom, right, top, x1, y1, x2, y2);
-    if (hit && (k === 3 || k === 4 || k === 7)) {
+    if (hit && (k === 3 || k === 4 || k === 7 || k === 8)) {
       if (rules.strict) {
         p[5] = 0;
         return "dead";
