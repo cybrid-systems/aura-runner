@@ -18,6 +18,7 @@ const badgeEl = document.getElementById("badge");
 const notesEl = document.getElementById("notes");
 const noteList = document.getElementById("note-list");
 const modelBtn = document.getElementById("model");
+const markEl = document.getElementById("mark");
 
 const params = new URLSearchParams(location.search);
 const reducedPref = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -56,6 +57,9 @@ let pals = [
   { kind: "kitten", name: "mochi", r: 0.95, g: 0.62, b: 0.35, motion: "hop", plan: "kitten" },
   { kind: "car", name: "beep", r: 0.3, g: 0.55, b: 0.95, motion: "pace", plan: "car" },
 ];
+let bend = 0.38;
+let loot = "coin";
+const LOOTS = new Set(["coin", "star", "gem", "blossom", "apple"]);
 let provider = "";
 let modelName = "";
 let providers = [];
@@ -147,6 +151,11 @@ function applyProvider(msg) {
   paintModel();
 }
 
+function applyLook(msg) {
+  if (typeof msg.bend === "number" && msg.bend >= 0.05 && msg.bend <= 0.75) bend = msg.bend;
+  if (typeof msg.loot === "string" && LOOTS.has(msg.loot)) loot = msg.loot;
+}
+
 function applyRules(msg) {
   const slide = typeof msg["slide-dur"] === "number" ? msg["slide-dur"] : msg.slide;
   rules = rulesOf(
@@ -159,6 +168,7 @@ function applyRules(msg) {
   );
   if (typeof msg.hue === "number") hue = msg.hue;
   applyScene(msg);
+  applyLook(msg);
   applyPals(msg);
   applyProvider(msg);
 }
@@ -200,13 +210,25 @@ function showCue(text) {
   toastQ.push(text);
 }
 
+function showMark(word) {
+  const clean = String(word).toLowerCase().replace(/[^a-z]/g, "").slice(0, 12);
+  if (!clean || !markEl) return;
+  markEl.hidden = false;
+  markEl.textContent = clean;
+  markEl.animate(
+    [{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "none" }],
+    { duration: 180, easing: "ease-out", fill: "both" },
+  );
+}
+
 function remember(msg) {
   const cue = msg.cue || "";
   if (!cue) return;
   gardenNotes.unshift({ cue, why: msg.why || "" });
   if (gardenNotes.length > 6) gardenNotes.pop();
   if (!notesEl.hidden) paintNotes();
-  showCue(cue);
+  if (msg.mark) showMark(msg.mark);
+  else showCue(cue);
 }
 
 function addChunk(msg) {
@@ -313,6 +335,7 @@ function connect() {
     } else if (msg.op === "state") {
       reconcile(msg);
       applyScene(msg);
+      applyLook(msg);
       window.__lumen = Object.assign(window.__lumen || {}, {
         chunks: msg.chunks,
         motif: msg.motif || (window.__lumen && window.__lumen.motif),
@@ -372,6 +395,9 @@ function publishProbe() {
   };
   root.dataset.pals = pals.map((row) => row.name).join(",");
   root.dataset.provider = provider;
+  root.dataset.loot = loot;
+  root.dataset.bend = bend.toFixed(2);
+  root.dataset.mark = markEl && !markEl.hidden ? markEl.textContent : "";
 }
 
 function frame(now) {
@@ -446,7 +472,7 @@ function frame(now) {
       slide: player[3], hue, time: now / 1000, now, reduced, pieces,
       event: spark, alive: true, speed: rules.speed, g: rules.g,
       near: nearSpark, reject: rejectSpark,
-      scene: sceneView, stumble: stumble / 1500, pals,
+      scene: sceneView, stumble: stumble / 1500, pals, bend, loot,
     });
     spark = "";
     nearSpark = false;

@@ -126,12 +126,22 @@ try {
   io.send({ op: "propose", form: "(seq (ground 3) (gap 6) (ground 3))" });
   const bad = await readUntil(io, (m) => m.op === "state");
   if (!bad.some((m) => m.op === "decision" && m.kind === "ROLLBACK")) throw new Error("unfair form was kept");
-  io.send({ op: "propose", form: "(seq (ground 6) (block 0 1) (hurdle 0.4 0.7) (ground 4) (gap 1.1) (ground 5))" });
-  const fair = await readUntil(io, (m) => m.op === "state", 30);
-  const kept = fair.find((m) => m.op === "decision" && m.kind === "KEEP");
-  if (!kept) throw new Error("fair 3D form rejected " + JSON.stringify(fair));
+  const fairForm = "(seq (ground 6) (block 0 1) (hurdle 0.4 0.7) (ground 4) (gap 1.1) (ground 5))";
+  io.send({ op: "propose", form: fairForm });
+  const fair = [];
+  let kept = null;
+  let ruled = null;
+  for (let i = 0; i < 90 && !kept; i++) {
+    if (i > 0) io.send({ op: "tick", jump: 0, slide: 0, lane: 0 });
+    fair.push(...await readUntil(io, (m) => m.op === "state", 40));
+    const landed = fair.some((m) => m.op === "state" && m.motif === fairForm);
+    const decision = [...fair].reverse().find((m) => m.op === "decision" && m.kind === "KEEP" && m.arm === "motif" && m.mark);
+    ruled = [...fair].reverse().find((m) => m.op === "rules");
+    if (landed && decision) kept = decision;
+  }
+  if (!kept) throw new Error("fair 3D form rejected " + JSON.stringify(fair.map((m) => m.op + ":" + (m.kind || m.motif || ""))));
   if (!kept.cue) throw new Error("keep had no cue " + JSON.stringify(kept));
-  const ruled = fair.find((m) => m.op === "rules");
+  if (!kept.mark) throw new Error("keep had no corner mark " + JSON.stringify(kept));
   if (!ruled || ruled.via !== "rebind") throw new Error("propose via " + JSON.stringify(ruled));
   io.send({ op: "bye" });
   sock.end();

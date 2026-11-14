@@ -34,3 +34,16 @@
 (report "h" "(seq (ground 6) (hurdle H 0.7) (ground 4))")
 (report "lane" "(seq (ground 6) (block LANE 1) (ground 4))")
 (report "depth" "(seq (ground 6) (block 0 DEPTH) (ground 4))")
+
+; Loot and bend do not occupy the track. A known pickup and a gentle
+; turn stay fair. An unknown word and a sharp turn do not.
+(define styled "(seq (ground 6) (loot star) (coin 1.2) (bend 0.4) (ground 5))")
+(define laid (layout-form styled rules))
+(display "styled-meta ")
+(display (if (and laid (string=? (hash-ref laid "loot") "star")) 1 0))
+(display " ")
+(display (if (and laid (> (hash-ref laid "bend") 0.39) (< (hash-ref laid "bend") 0.41)) 1 0))
+(newline)
+(report "styled" styled)
+(report "badloot" "(seq (ground 6) (loot sword) (ground 4))")
+(report "badbend" "(seq (ground 6) (bend 2) (ground 4))")

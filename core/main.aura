@@ -12,13 +12,13 @@
 (require "lib/pals")
 
 (define SYS
-  "You design one obstacle phrase for a children's 3D endless runner called Lumen Run. The runner has three lanes (0 left, 1 centre, 2 right), jumps, and slides. Reply with ONLY one s-expression and no markdown. Allowed pieces: (seq (ground W) (gap W) (hurdle H W) (gate BOTTOM W) (coin Y) (spring W) (block LANE DEPTH) (coin-lane LANE Y)). Every parameter is a number; never write the words BOTTOM, W, H, LANE, DEPTH or other placeholders. Ranges in meters: spring W 0.45-1.6, hurdle W 0.35-2.2 and H 0.15-0.9, gate W 0.35-2.0 and BOTTOM 0.58-0.85, coin Y 0.4-2.4, coin-lane LANE 0, 1 or 2 and Y 0.4-2.4, ground W 0.8-18, gap W 0.4-2.0, block LANE 0, 1 or 2 and DEPTH 0.5-2.2. Start and end with ground. Leave at least one lane open beside every block. No violence, fear, weapons, or scary words. Bright garden, friendly shapes. Example: (seq (ground 6) (block 0 1) (hurdle 0.4 0.7) (ground 5) (gate 0.72 0.8) (ground 5) (gap 1.1) (ground 5))")
+  "You design one obstacle phrase for a children's 3D endless runner called Lumen Run. The runner has three lanes (0 left, 1 centre, 2 right), jumps, and slides. Reply with ONLY one s-expression and no markdown. Allowed pieces: (seq (ground W) (gap W) (hurdle H W) (gate BOTTOM W) (coin Y) (spring W) (block LANE DEPTH) (coin-lane LANE Y)). Every parameter is a number; never write the words BOTTOM, W, H, LANE, DEPTH or other placeholders. Ranges in meters: spring W 0.45-1.6, hurdle W 0.35-2.2 and H 0.15-0.9, gate W 0.35-2.0 and BOTTOM 0.58-0.85, coin Y 0.4-2.4, coin-lane LANE 0, 1 or 2 and Y 0.4-2.4, ground W 0.8-18, gap W 0.4-2.0, block LANE 0, 1 or 2 and DEPTH 0.5-2.2. Optional (loot KIND) restyles every pickup. KIND is coin, star, gem, blossom, or apple. Optional (bend AMP) turns the road. AMP is 0.12 to 0.65. Start and end with ground. Leave at least one lane open beside every block. No violence, fear, weapons, or scary words. Bright garden, friendly shapes. Example: (seq (ground 6) (block 0 1) (hurdle 0.4 0.7) (ground 5) (gate 0.72 0.8) (ground 5) (gap 1.1) (ground 5))")
 
 (define SCENE-SYS
   "You redesign the garden backdrop for a children's 3D endless runner called Lumen Run. Reply with ONLY one s-expression and no markdown. Form: (garden (sky R G B) (ground R G B) (flower KIND DENSITY) (light L)). KIND is one of daisy, tulip, blossom, buttercup. Sky channels are 0.25 to 1 and the sky stays bright. Ground is green: G is at least 0.30 and at least as large as R, and not much smaller than B. Density is 0.15 to 1. Light is 0.50 to 1, never night. Optional (fog F) is 0 to 0.38; do not ask for thicker fog. No violence, fear, weapons, or scary words. Make it look different from a plain blue sky and daisies. Example: (garden (sky 0.95 0.45 0.55) (ground 0.35 0.72 0.32) (flower tulip 0.85) (light 0.9))")
 
 (define PALS-SYS
-  "You add one friendly companion to a children's 3D endless runner called Lumen Run. Reply with ONLY one s-expression and no markdown. Form: (pal KIND NAME R G B MOTION). KIND is kitten, car, bunny, bird, butterfly, frog, duck, or a new gentle word of 3 to 12 letters. NAME is 2 to 12 letters. R G B are 0.25 to 1 and the colour stays bright. MOTION is hop, pace, float, follow, or side. No violence, fear, weapons, or scary words. Example: (pal bird lark 0.95 0.86 0.35 float)")
+  "You change one friendly companion in a children's 3D endless runner called Lumen Run. Reply with ONLY one s-expression and no markdown. Restyle a friend who is already here by keeping the same name, or add one new gentle friend. Form: (pal KIND NAME R G B MOTION). KIND is kitten, car, bunny, bird, butterfly, frog, duck, or a new gentle word of 3 to 12 letters. NAME is 2 to 12 letters. R G B are 0.25 to 1 and the colour stays bright. MOTION is hop, pace, float, follow, or side. No violence, fear, weapons, or scary words. Example: (pal bird lark 0.95 0.86 0.35 float)")
 
 (define g-now 32.0)
 (define jump-now 11.2)
@@ -43,6 +43,9 @@
 (define density-now 0.45)
 (define light-now 0.82)
 (define fog-now 0.22)
+; Gentle weave until a phrase asks for another. Same default as web/render.mjs.
+(define bend-now 0.38)
+(define loot-now "coin")
 (define speed-lock #f)
 (define rule-rev 1)
 (define publish-via "set-code")
@@ -128,6 +131,17 @@
 (define dream-i 0)
 (define dream-form "")
 (define dream-span 0.0)
+; A kept motif waits here and is autopiloted a few steps per tick.
+; The reply tick only lays the phrase out, so the run does not stop.
+(define hold-phase 0)
+(define hold-pieces (list))
+(define hold-sim (list))
+(define hold-body #f)
+(define hold-i 0)
+(define hold-form "")
+(define hold-span 0.0)
+(define hold-loot "")
+(define hold-bend -1.0)
 (define tuned #f)
 
 (define (publish-named! name value)
@@ -138,9 +152,11 @@
     how))
 
 (define (note! kind why arm . rest)
-  (let ((cue (if (and (pair? rest) (string? (car rest))) (car rest) "")))
+  (let ((cue (if (and (pair? rest) (string? (car rest))) (car rest) ""))
+        (mark (if (and (pair? rest) (pair? (cdr rest)) (string? (car (cdr rest))))
+                (car (cdr rest)) "")))
     (let ((row (hash "op" "decision" "kind" kind "why" why "arm" arm
-                     "via" publish-via "cue" cue)))
+                     "via" publish-via "cue" cue "mark" mark)))
     (set! audit (cons (hash "kind" kind "why" why "arm" arm "cue" cue) audit))
     (if (> (length audit) 12)
       (set! audit (take-n audit 12))
@@ -410,6 +426,7 @@
   (set! scene-next 5000.0)
   (set! pals-next 8000.0)
   (set! dream-phase 0)
+  (set! hold-phase 0)
   (if (not speed-lock) (set! speed-now 5.0) #f)
   (if tuned
     (begin (sync-rules!) (set! tuned #f))
@@ -440,6 +457,7 @@
         "ground" (list ground-r ground-g ground-b)
         "flower" flower-now "density" density-now "light" light-now
         "fog" fog-now
+        "bend" bend-now "loot" loot-now
         "motif" motif-now "scene" scene-now
         "pals" pals-rows "provider" llm-provider
         "model" (active-model) "providers" (ready-providers)))
@@ -455,6 +473,7 @@
         "ground" (list ground-r ground-g ground-b)
         "flower" flower-now "density" density-now "light" light-now
         "fog" fog-now
+        "bend" bend-now "loot" loot-now
         "motif" motif-now "scene" scene-now
         "pals" pals-rows "provider" llm-provider
         "model" (active-model) "providers" (ready-providers)))
@@ -489,6 +508,8 @@
         "density" density-now
         "light" light-now
         "fog" fog-now
+        "bend" bend-now
+        "loot" loot-now
         "motif" motif-now
         "scene" scene-now
         "ahead" (obstacles-ahead)
@@ -680,51 +701,70 @@
               (evo:commit! search cand))
        (catch (e) #f)))
 
+(define (layout-fair? laid)
+  (and (hash? laid)
+       (<= (hash-ref laid "geometry" 1.0) 0.0)
+       (<= (hash-ref laid "budget" 1.0) 0.0)
+       (> (hash-ref laid "x1" 0.0) 0.0)))
+
+; Geometry only. A full autopilot is about a second, and doing it inside
+; the reply tick is the hitch. The slice below spends that budget later.
+(define (reject-form! form)
+  ; open-trial while another fiber is inside http-post wedges that call
+  ; on this pin, so a hung garden never reaches its timeout.
+  (if (and scene-working (not stall-waiting))
+    (let ((found (layout-form form (rules-hash))))
+      (note! "ROLLBACK"
+             (cond
+               ((and (hash? found) (> (hash-ref found "geometry" 0.0) 0.0)) "geometry")
+               ((and (hash? found) (> (hash-ref found "budget" 0.0) 0.0)) "budget")
+               (else "shape"))
+             "motif" "That shape drifted away"))
+    (reject-trial! form)))
+
+(define (reject-trial! form)
+  (let ((found #f))
+    (let* ((cand (evo:candidate form (hash "id" (string-append "m" (int-str next-id))
+                                          "target" "motif-form")))
+           (trial (open-trial cand
+                             (hash "timeout-ms" 1500
+                                   "apply" (lambda (c) #t)
+                                   "evaluate"
+                                   (lambda (c)
+                                     (set! found (layout-form form (rules-hash)))
+                                     (hash "status" "ok"
+                                           "objectives" (hash "fair" 0.0)
+                                           "constraints"
+                                           (hash "budget" (if (hash? found) (hash-ref found "budget" 1.0) 1.0)
+                                                 "geometry" (if (hash? found) (hash-ref found "geometry" 1.0) 1.0)
+                                                 "reachable" 1.0
+                                                 "safe" 0.0)
+                                           "behavior" (hash "band" (exact->inexact band))))))))
+      (note! "ROLLBACK"
+             (cond
+               ((and (hash? found) (> (hash-ref found "geometry" 0.0) 0.0)) "geometry")
+               ((and (hash? found) (> (hash-ref found "budget" 0.0) 0.0)) "budget")
+               ((not trial) "trial")
+               (else "shape"))
+             "motif" "That shape drifted away"))))
+
+(define (queue-hold! form laid)
+  (set! hold-phase 1)
+  (set! hold-form form)
+  (set! hold-pieces (hash-ref laid "pieces"))
+  (set! hold-span (hash-ref laid "x1"))
+  (set! hold-sim hold-pieces)
+  (set! hold-body (make-player 0.4))
+  (set! hold-i 0)
+  (set! hold-loot (if (string? (hash-ref laid "loot" "")) (hash-ref laid "loot" "") ""))
+  (set! hold-bend (hash-ref laid "bend" -1.0)))
+
 (define (consider-form! text)
   (let ((form (one-line (if (string? text) text ""))))
-    (let ((found #f))
-      (let* ((cand (evo:candidate form (hash "id" (string-append "m" (int-str next-id))
-                                            "target" "motif-form")))
-             (trial (open-trial cand
-                               (hash "timeout-ms" 4000
-                                     "apply" (lambda (c) #t)
-                                     "evaluate"
-                                     (lambda (c)
-                                       (set! found (check-source form (rules-hash)))
-                                       (hash "status" "ok"
-                                             "objectives"
-                                             (hash "fair" (if (and found (hash-ref found "ok")) 1.0 0.0))
-                                             "constraints"
-                                             (if (and found (hash? (hash-ref found "violations")))
-                                               (hash-ref found "violations")
-                                               (hash "reachable" 1.0))
-                                             "behavior" (hash "band" (exact->inexact band))))))))
-        (cond
-          ((or (not found) (not (hash-ref found "ok"))
-               (not trial) (not (evo:trial-ok? trial)) (not (evo:feasible? trial)))
-           (note! "ROLLBACK" (if (and found (string? (hash-ref found "why")))
-                               (hash-ref found "why")
-                               "trial")
-                  "motif" "That shape drifted away"))
-          (else
-           (let ((prev-form motif-now))
-             (set! motif-now form)
-             (let ((ev (hash "status" "ok"
-                             "objectives" (hash "fair" 1.0)
-                             "constraints" (hash-ref found "violations")
-                             "behavior" (hash "band" (exact->inexact band))))
-                   (search (phrase-search "motif-form")))
-               (try-tell-commit! search cand ev)
-               (if (binding-landed? "motif-form" (motif-body form) form)
-                 (begin
-                   (set! motif-pieces (hash-ref found "pieces"))
-                   (set! motif-span (hash-ref found "x1"))
-                   (set! hue-now (exact->inexact (modulo (+ (floor hue-now) 1) 6)))
-                   (publish-named! "rule-hue" hue-now)
-                   (note! "KEEP" "fair" "motif" "A new shape bloomed"))
-                 (begin
-                   (set! motif-now prev-form)
-                   (note! "ROLLBACK" "commit" "motif" "That shape drifted away")))))))))))
+    (let ((laid (layout-form form (rules-hash))))
+      (if (layout-fair? laid)
+        (queue-hold! form laid)
+        (reject-form! form)))))
 
 (define (lref xs i)
   (if (<= i 0) (car xs) (lref (cdr xs) (- i 1))))
@@ -761,8 +801,10 @@
                 (> (hash-ref found "budget" 1.0) 0.0)
                 (not trial) (not (evo:trial-ok? trial)) (not (evo:feasible? trial)))
           (note! "ROLLBACK" "reachable" "motif" "That shape drifted away")
-          (let ((prev-form motif-now))
+          (let ((prev-form motif-now)
+                (prev-hue hue-now))
             (set! motif-now form)
+            (set! hue-now (exact->inexact (modulo (+ (floor prev-hue) 1) 6)))
             (let ((ev (hash "status" "ok"
                             "objectives" (hash "fair" 1.0)
                             "constraints" (hash "budget" 0.0 "geometry" 0.0 "reachable" 0.0 "safe" 0.0)
@@ -773,11 +815,12 @@
                 (begin
                   (set! motif-pieces pieces)
                   (set! motif-span span)
-                  (set! hue-now (exact->inexact (modulo (+ (floor hue-now) 1) 6)))
-                  (publish-named! "rule-hue" hue-now)
-                  (note! "KEEP" "fair" "motif" "A new shape bloomed"))
+                  (set! rules-dirty #t)
+                  (set! rule-rev (+ rule-rev 1))
+                  (note! "KEEP" "fair" "motif" "A new shape bloomed" "shape"))
                 (begin
                   (set! motif-now prev-form)
+                  (set! hue-now prev-hue)
                   (note! "ROLLBACK" "commit" "motif" "That shape drifted away"))))))))))
 
 (define (begin-dream!)
@@ -809,10 +852,92 @@
         (seal-sliced! (if (lref r 4) #t #f)))
       #f)))
 
+; The held phrase already passed layout. This records the sliced
+; autopilot and rebinds once. Hue is part of that one publish.
+(define (seal-hold! cleared?)
+  (let ((form hold-form)
+        (pieces hold-pieces)
+        (span hold-span)
+        (loot hold-loot)
+        (bend hold-bend))
+    (let ((found #f))
+      (let* ((cand (evo:candidate form (hash "id" (string-append "h" (int-str next-id))
+                                            "target" "motif-form")))
+             (trial (open-trial cand
+                               (hash "timeout-ms" 1500
+                                     "apply" (lambda (c) #t)
+                                     "evaluate"
+                                     (lambda (c)
+                                       (set! found (layout-form form (rules-hash)))
+                                       (hash "status" "ok"
+                                             "objectives"
+                                             (hash "fair" (if (and cleared? found
+                                                                   (<= (hash-ref found "geometry" 1.0) 0.0)
+                                                                   (<= (hash-ref found "budget" 1.0) 0.0))
+                                                            1.0 0.0))
+                                             "constraints"
+                                             (hash "budget" (if found (hash-ref found "budget" 1.0) 1.0)
+                                                   "geometry" (if found (hash-ref found "geometry" 1.0) 1.0)
+                                                   "reachable" (if cleared? 0.0 1.0)
+                                                   "safe" 0.0)
+                                             "behavior" (hash "band" (exact->inexact band))))))))
+        (if (or (not found) (not cleared?)
+                (> (hash-ref found "geometry" 1.0) 0.0)
+                (> (hash-ref found "budget" 1.0) 0.0)
+                (not trial) (not (evo:trial-ok? trial)) (not (evo:feasible? trial)))
+          (note! "ROLLBACK" "reachable" "motif" "That shape drifted away")
+          (let ((prev-form motif-now)
+                (prev-hue hue-now)
+                (prev-loot loot-now)
+                (prev-bend bend-now))
+            (set! motif-now form)
+            (if (and (string? loot) (> (string-length loot) 0)) (set! loot-now loot) #f)
+            (if (and (number? bend) (>= bend 0.12)) (set! bend-now bend) #f)
+            (set! hue-now (exact->inexact (modulo (+ (floor prev-hue) 1) 6)))
+            (let ((ev (hash "status" "ok"
+                            "objectives" (hash "fair" 1.0)
+                            "constraints" (hash "budget" 0.0 "geometry" 0.0 "reachable" 0.0 "safe" 0.0)
+                            "behavior" (hash "band" (exact->inexact band))))
+                  (search (phrase-search "motif-form"))
+                  (mark (cond
+                          ((not (string=? loot-now prev-loot)) loot-now)
+                          ((> (abs (- bend-now prev-bend)) 0.02) "bend")
+                          (else "shape"))))
+              (try-tell-commit! search cand ev)
+              (if (binding-landed? "motif-form" (motif-body form) form)
+                (begin
+                  (set! motif-pieces pieces)
+                  (set! motif-span span)
+                  (set! rules-dirty #t)
+                  (set! rule-rev (+ rule-rev 1))
+                  (note! "KEEP" "fair" "motif" "A new shape bloomed" mark))
+                (begin
+                  (set! motif-now prev-form)
+                  (set! hue-now prev-hue)
+                  (set! loot-now prev-loot)
+                  (set! bend-now prev-bend)
+                  (note! "ROLLBACK" "commit" "motif" "That shape drifted away"))))))))))
+
+(define (step-hold!)
+  (let ((r (autopilot-slice hold-pieces (rules-hash) hold-body hold-sim hold-i 12)))
+    (set! hold-i (lref r 1))
+    (set! hold-body (lref r 2))
+    (set! hold-sim (lref r 3))
+    (if (lref r 0)
+      (begin
+        (set! hold-phase 0)
+        (seal-hold! (if (lref r 4) #t #f)))
+      #f)))
+
+(define (maybe-hold!)
+  (if (= hold-phase 1) (step-hold!) #f))
+
 ; An in-progress slice keeps going after a fall so the verdict still lands.
 ; A new dream starts only while the run is alive, a couple of seconds in.
+; A phrase the model just sent goes first, so the two autopilots do not
+; share a tick.
 (define (maybe-dream!)
-  (if (env-on? "LUMEN_SKIP_DREAM")
+  (if (or (env-on? "LUMEN_SKIP_DREAM") (> hold-phase 0))
     #f
     (cond
       ((= dream-phase 1) (step-dream!))
@@ -871,7 +996,7 @@
                   (apply-scene! found form)
                   (set! rule-rev (+ rule-rev 1))
                   (set! rules-dirty #t)
-                  (note! "KEEP" "fair" "scene" (hash-ref found "cue" "The garden changed color")))
+                  (note! "KEEP" "fair" "scene" (hash-ref found "cue" "The garden changed color") "sky"))
                 (begin
                   (set! scene-now prev-form)
                   (note! "ROLLBACK" "commit" "scene" "The garden stayed"))))))))))
@@ -914,7 +1039,7 @@
               (begin
                 (set! rule-rev (+ rule-rev 1))
                 (set! rules-dirty #t)
-                (note! "KEEP" "fair" "pals" (hash-ref merged "cue" "A new friend came along")))
+                (note! "KEEP" "fair" "pals" (hash-ref merged "cue" "A new friend came along") "friend"))
               (begin
                 (set! pals-now prev-form)
                 (set! pals-rows prev-rows)
@@ -943,11 +1068,13 @@
                     ". Suggest a different bright garden."))
     ((string=? kind "pals")
      (string-append "Friends already here: " (pal-names pals-rows)
-                    ". Add one new gentle friend who is not in that list."))
+                    ". Restyle one friend already here by keeping the same name, or add one new gentle friend who is not in that list."))
     (else
      (string-append "Difficulty band " (number->string band)
+                    ". Pickups are " loot-now
+                    ". The road bends by " (num-src bend-now)
                     ". Jump speed is " (num-src speed-now)
-                    " m/s. Invent a different rhythm from a straight row of hurdles."))))
+                    " m/s. Invent a different rhythm from a straight row of hurdles. You may add (loot KIND) and (bend AMP)."))))
 
 ; Game-side budget. The runtime's own HTTP cap is LLM_TIMEOUT; if that
 ; call never comes back, give up LLM_TIMEOUT+10 seconds later and drop
@@ -1104,11 +1231,25 @@
   (if (not llm-on)
     #f
     (begin
-      ; try-recv only while a call is outstanding. An idle poll that still
-      ; touches the channel every tick retains a capture frame per call on
-      ; this Aura pin and a long run exhausts the arena.
+      ; try-recv only while a call is outstanding. An idle poll retains a
+      ; capture frame per tick on this pin and a long run exhausts the
+      ; arena. http-post only notices its timeout if this fiber yields.
+      ; One yield is enough for a live call. After the watchdog the garden
+      ; worker is still inside http-post with scene-busy already clear, so
+      ; that overdue call gets a short burst. A normal turn does not spin.
+      (if (and scene-working (not stall-waiting)
+               (> scene-asked-at 0.0)
+               (> (- (monotonic-ms) scene-asked-at) (watchdog-ms)))
+        (let spin ((k 30))
+          (if (<= k 0)
+            #t
+            (begin (try (fiber:yield) (catch (e) #f)) (spin (- k 1)))))
+        (if (or scene-busy motif-busy pals-busy
+                scene-working motif-working pals-working)
+          (try (fiber:yield) (catch (e) #f))
+          #f))
       (if (or scene-busy motif-busy pals-busy) (expire-llm!) #f)
-      (if scene-busy
+      (if (and scene-busy (not stall-waiting))
         (let ((scene-msg (channel:try-recv scene-res)))
           (if (hash? scene-msg) (take-scene! c scene-msg) #f))
         #f)
@@ -1178,6 +1319,7 @@
       (note! "BUMP" ev "run"
              (if (string=? ev "oops") "Back on the path" "Oops! Keep going"))
       #f)
+    (maybe-hold!)
     (maybe-dream!)
     (ensure-ahead!)
     (poll-llm! c)

@@ -94,10 +94,18 @@ await withCore(18771, { LUMEN_SKIP_REBIND: "1" }, async (io) => {
   io.send({ op: "hello", seed: 42 });
   await readUntil(io, (m) => m.op === "state");
   io.send({ op: "propose", form: MOTIF });
-  const kept = await readUntil(io, (m) => m.op === "state", 40);
-  const decision = kept.find((m) => m.op === "decision" && m.kind === "KEEP" && m.arm === "motif");
-  const rules = kept.find((m) => m.op === "rules");
-  const state = kept.find((m) => m.op === "state");
+  const kept = [];
+  let decision = null;
+  let rules = null;
+  let state = null;
+  for (let i = 0; i < 90 && !decision; i++) {
+    if (i > 0) io.send({ op: "tick", jump: 0, slide: 0, lane: 0 });
+    kept.push(...await readUntil(io, (m) => m.op === "state", 40));
+    state = [...kept].reverse().find((m) => m.op === "state" && String(m.motif || "").includes("(gate "));
+    rules = [...kept].reverse().find((m) => m.op === "rules");
+    const found = [...kept].reverse().find((m) => m.op === "decision" && m.kind === "KEEP" && m.arm === "motif");
+    if (state && found) decision = found;
+  }
   if (!decision) throw new Error("gated phrase was not kept " + JSON.stringify(kept.map((m) => m.op + ":" + m.kind)));
   if (!rules || rules.via !== "set-code") throw new Error("via " + JSON.stringify(rules && rules.via));
   if (!state || !String(state.motif).includes("(gate ")) throw new Error("motif missing gate " + (state && state.motif));

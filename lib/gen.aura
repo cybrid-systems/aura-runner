@@ -71,6 +71,18 @@
        (if (or (not (lane-id? lane)) (not (positive-range? y 0.4 2.4)))
          #f
          (list (list (piece 5.0 (+ x 0.4) 0.42 0.42 y lane)) x))))
+    ; Restyle every pickup, or bias how hard the road turns. Neither
+    ; occupies the track, so a coin's timing stays where the phrase put it.
+    ((string=? kind "loot")
+     (let ((name (spec-sym sp 1)))
+       (if (loot-name? name)
+         (list (list) x)
+         #f)))
+    ((string=? kind "bend")
+     (let ((amp (spec-num sp 1 -1.0)))
+       (if (and (>= amp 0.12) (<= amp 0.65))
+         (list (list) x)
+         #f)))
     (else #f)))
 
 (define (lane-id? v)
@@ -79,6 +91,15 @@
 (define (spec-num sp i fallback)
   (let ((v (list-ref-or sp i #f)))
     (if (number? v) (exact->inexact v) fallback)))
+
+(define (spec-sym sp i)
+  (let ((v (list-ref-or sp i #f)))
+    (if (string? v) (string-downcase v) #f)))
+
+(define (loot-name? s)
+  (and (string? s)
+       (or (string=? s "coin") (string=? s "star") (string=? s "gem")
+           (string=? s "blossom") (string=? s "apple"))))
 
 (define (list-ref-or xs i fallback)
   (if (or (not (pair? xs)) (< i 0))
@@ -188,16 +209,18 @@
             #f
             (loop (cdr xs) (cons sp acc))))))))
 
+; Takeoff pushes at jump/TAKEOFF-S for TAKEOFF-S, then gravity.
+; Apex adds the height gained while speeding up. Air time adds that push.
 (define (jump-apex rules)
   (let ((v (hash-ref rules "jump"))
         (g (hash-ref rules "g")))
-    (/ (* v v) (* 2.0 g))))
+    (+ (* 0.5 v TAKEOFF-S) (/ (* v v) (* 2.0 g)))))
 
 (define (jump-distance rules)
   (let ((v (hash-ref rules "jump"))
         (g (hash-ref rules "g"))
         (s (hash-ref rules "speed")))
-    (* s (/ (* 2.0 v) g))))
+    (* s (+ TAKEOFF-S (/ (* 2.0 v) g)))))
 
 ; Numeric pre-checks plus an autopilot that has to finish the chunk alive.
 ; Violation magnitudes follow std/evo-core: 0 means the constraint holds.
@@ -370,7 +393,10 @@
 (define (allowed-symbol? s)
   (or (string=? s "seq") (string=? s "ground") (string=? s "gap")
       (string=? s "hurdle") (string=? s "gate") (string=? s "coin")
-      (string=? s "spring") (string=? s "block") (string=? s "coin-lane")))
+      (string=? s "spring") (string=? s "block") (string=? s "coin-lane")
+      (string=? s "loot") (string=? s "bend")
+      (string=? s "star") (string=? s "gem") (string=? s "blossom")
+      (string=? s "apple")))
 
 (define (symbols-allowed? form)
   (let loop ((ss (form-symbols form)))
@@ -527,6 +553,20 @@
       b
       (loop (cdr ss) (string-append b " " (spec-src (car ss)))))))
 
+; Last (loot KIND) and (bend AMP) in the phrase. Empty loot and a
+; negative bend mean the phrase did not ask to change them.
+(define (phrase-meta specs)
+  (let loop ((ss specs) (loot "") (bend -1.0))
+    (if (null? ss)
+      (list loot bend)
+      (let ((sp (car ss)))
+        (cond
+          ((string=? (car sp) "loot")
+           (loop (cdr ss) (or (spec-sym sp 1) "") bend))
+          ((string=? (car sp) "bend")
+           (loop (cdr ss) loot (spec-num sp 1 -1.0)))
+          (else (loop (cdr ss) loot bend)))))))
+
 ; Layout and the numeric envelope only. The autopilot is separate so a
 ; running game can spread it across ticks.
 (define (layout-form text rules)
@@ -539,11 +579,14 @@
           (let ((laid (layout-specs specs 0.0)))
             (if (not laid)
               #f
-              (let ((pieces (car laid)))
+              (let* ((pieces (car laid))
+                     (meta (phrase-meta specs)))
                 (hash "pieces" pieces
                       "x1" (car (cdr laid))
                       "geometry" (geom-violation pieces rules)
-                      "budget" (budget-violation pieces))))))))))
+                      "budget" (budget-violation pieces)
+                      "loot" (car meta)
+                      "bend" (car (cdr meta)))))))))))
 
 ; The same seeded pattern the offline chunk lays out, as one s-expression
 ; the fairness gate can trial.
