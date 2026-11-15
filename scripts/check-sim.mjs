@@ -128,7 +128,7 @@ function slidePop() {
 function popperFor(id, x0, span) {
   if (span < 12) return null;
   if (id > 0 && id % 5 === 0) return null;
-  const want = id === 0 ? 18 : 10 + ((id + 2) % 9);
+  const want = id === 0 ? 46 : 10 + ((id + 2) % 9);
   const along = Math.min(want, span - 3);
   if (along < 6) return null;
   return { x: x0 + along, lane: id === 0 ? 1 : id % 3 };
@@ -136,7 +136,7 @@ function popperFor(id, x0, span) {
 const opened = popperFor(0, 0, 40);
 const laneA = popperFor(1, 0, 40);
 const laneB = popperFor(2, 0, 40);
-const popOpen = opened && opened.lane === 1 && opened.x > 17 && opened.x < 19 ? 1 : 0;
+const popOpen = opened && opened.lane === 1 && opened.x > 36 && opened.x < 38 ? 1 : 0;
 const popSkip = !popperFor(5, 0, 40) && !popperFor(1, 0, 8) ? 1 : 0;
 const popLanes = laneA && laneB && laneA.lane !== laneB.lane ? 1 : 0;
 

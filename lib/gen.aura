@@ -17,10 +17,12 @@
 (define REF-SPEED 8.0)
 (define BEAT-S 1.3)
 (define REST-S 0.6)
-; The camera look-at, about 7.4 m ahead of the runner. Readable lead is
-; this distance, not the horizon. Do not treat it as a reason to move
-; the camera.
-(define LOOK-M 7.4)
+; The camera looks one beat ahead: pace times 1.3 s. At 8 m/s that is
+; 10.4 m, and at 14 m/s it is 18.2 m. Spare and the autopilot use that
+; same distance, so the check matches the picture.
+(define (look-m pace)
+  (* (if (and (number? pace) (> pace 0.1)) (exact->inexact pace) REF-SPEED)
+     BEAT-S))
 (define SPARE-S 0.25)
 (define LEAD-JUMP 0.22)
 (define LEAD-SLIDE 0.20)
@@ -238,25 +240,35 @@
 ; Authored ground is a beat at the opening pace: 10.4 m is 1.3 s, 4.8 m
 ; is a 0.6 s rest. A jump is followed by a full beat so the landing is
 ; down before the next hazard. A rest is only a pause or a close.
-; Band 4 uses a lantern or a bubble. A plane or a ball closes too fast
-; to leave a quarter-second once the pace is 14 m/s.
+; Band 0 teaches one move at a time: slide under the gate, then step
+; off a centre block, then one jump. A full beat separates those moves.
+; Coins sit on lane 2, the lane that step chooses, low enough to take
+; while running. The flyer has its own beat, off the gate and off that
+; coin line. Later bands may mix moves.
+; Band 4 keeps a lantern or a bubble, the slower of the toys.
 (define patterns-0
   (list
     (list (list "ground" 10.4) (list "gate" 0.84 0.85 "ribbon") (list "ground" 4.8)
+          (list "ground" 10.4) (list "block" 1.0 1.0 "stump")
+          (list "coin-lane" 2.0 0.7) (list "ground" 1.2)
+          (list "coin-lane" 2.0 0.7) (list "ground" 1.2)
+          (list "coin-lane" 2.0 0.7) (list "ground" 10.4)
           (list "flyer" "plane" 1.0 0.7) (list "ground" 10.4)
-          (list "block" 1.0 1.0 "stump") (list "coin-lane" 2.0 1.3)
-          (list "ground" 10.4) (list "hurdle" 0.36 0.6 "log") (list "ground" 10.4)
-          (list "gap" 1.0) (list "ground" 4.8))
+          (list "hurdle" 0.36 0.6 "log") (list "ground" 10.4))
     (list (list "ground" 10.4) (list "gate" 0.82 0.8 "vine") (list "ground" 4.8)
+          (list "ground" 10.4) (list "block" 1.0 1.1 "mushroom")
+          (list "coin-lane" 2.0 0.7) (list "ground" 1.2)
+          (list "coin-lane" 2.0 0.7) (list "ground" 1.2)
+          (list "coin-lane" 2.0 0.7) (list "ground" 10.4)
           (list "flyer" "bubble" 0.0 0.65) (list "ground" 10.4)
-          (list "block" 1.0 1.1 "mushroom") (list "ground" 10.4)
-          (list "hurdle" 0.38 0.65 "fence") (list "ground" 10.4) (list "gap" 0.95)
-          (list "coin" 1.4) (list "ground" 4.8))
+          (list "gap" 0.95) (list "ground" 10.4))
     (list (list "ground" 10.4) (list "gate" 0.80 0.9 "lights") (list "ground" 4.8)
-          (list "flyer" "lantern" 2.0 0.75) (list "ground" 10.4)
-          (list "hurdle" 0.34 0.6 "bloom") (list "ground" 10.4)
-          (list "block" 1.0 1.0 "bush") (list "coin-lane" 0.0 1.2) (list "ground" 10.4)
-          (list "gap" 1.05) (list "ground" 4.8))))
+          (list "ground" 10.4) (list "block" 1.0 1.0 "bush")
+          (list "coin-lane" 2.0 0.7) (list "ground" 1.2)
+          (list "coin-lane" 2.0 0.7) (list "ground" 1.2)
+          (list "coin-lane" 2.0 0.7) (list "ground" 10.4)
+          (list "flyer" "lantern" 1.0 0.75) (list "ground" 10.4)
+          (list "hurdle" 0.34 0.6 "bloom") (list "ground" 10.4))))
 
 (define patterns-1
   (list
@@ -383,7 +395,7 @@
   (let ((dx (- (piece-x q) START-X)))
     (if (< (+ dx (piece-w q)) 0.0)
       9.0
-      (let ((sight (min LOOK-M (max 0.0 dx)))
+      (let ((sight (min (look-m pace) (max 0.0 dx)))
             (approach (approach-of q pace)))
         (if (<= approach 0.1)
           0.0
@@ -570,17 +582,17 @@
   (if (<= approach 0.1) 99.0 (/ dx approach)))
 
 ; In the camera look, and still early enough that a lane change finishes.
-(define (lane-commit? dx approach)
+(define (lane-commit? dx approach pace)
   (and (> dx -0.05)
-       (<= dx LOOK-M)
+       (<= dx (look-m pace))
        (>= (time-left dx approach) LEAD-LANE)))
 
 ; Jump and slide commit inside a short window: late enough that the
 ; action is still going at contact, early enough that it finishes.
-(define (act-commit? dx approach lead)
+(define (act-commit? dx approach lead pace)
   (let ((t (time-left dx approach)))
     (and (> dx 0.0)
-         (<= dx LOOK-M)
+         (<= dx (look-m pace))
          (>= t lead)
          (<= t (+ lead PRESS-SLACK)))))
 
@@ -588,7 +600,7 @@
 ; misses a crate sitting beside the one we are leaving, and the body
 ; walks back and forth until it hits one of them.
 (define (lane-clear? pieces x lane pace)
-  (not (or (block-ahead? pieces x lane -0.05 LOOK-M)
+  (not (or (block-ahead? pieces x lane -0.05 (look-m pace))
            (flyer-blocking? pieces x lane pace))))
 
 ; Leave a crate by one lane once it is in view. Only commits a switch
@@ -596,7 +608,7 @@
 (define (dodge-block p pieces pace)
   (let ((lane (body-lane p))
         (x (player-x p)))
-    (if (and (block-ahead? pieces x lane (* pace LEAD-LANE) LOOK-M)
+    (if (and (block-ahead? pieces x lane (* pace LEAD-LANE) (look-m pace))
              (= (player-lane p) lane))
       (cond
         ((and (< lane 1.5) (lane-clear? pieces x (+ lane 1.0) pace))
@@ -613,7 +625,7 @@
       (let ((q (car ps)))
         (if (and (= (piece-k q) 8.0)
                  (hits-lane? q lane)
-                 (lane-commit? (- (piece-x q) x) (approach-of q pace)))
+                 (lane-commit? (- (piece-x q) x) (approach-of q pace) pace))
           #t
           (loop (cdr ps)))))))
 
@@ -649,11 +661,11 @@
                     (k (piece-k q))
                     (approach (approach-of q pace)))
                 (cond
-                  ((and (= k 4.0) (act-commit? dx pace LEAD-SLIDE))
+                  ((and (= k 4.0) (act-commit? dx pace LEAD-SLIDE pace))
                    (press-slide p2))
-                  ((and (= k 8.0) (act-commit? dx approach LEAD-SLIDE))
+                  ((and (= k 8.0) (act-commit? dx approach LEAD-SLIDE pace))
                    (press-slide p2))
-                  ((and (or (= k 2.0) (= k 3.0)) (act-commit? dx pace LEAD-JUMP))
+                  ((and (or (= k 2.0) (= k 3.0)) (act-commit? dx pace LEAD-JUMP pace))
                    (press-jump p2))
                   (else p2))))))))))
 

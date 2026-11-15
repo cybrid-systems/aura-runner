@@ -155,7 +155,8 @@ export function gateBarDepth(w) {
   return Math.max(0.22, depth * 0.35);
 }
 
-// A pot is about 1.05 across and its leaves top out near 1.16.
+// A pot's hit is about 1.05 across and stops near 1.12. The picture
+// reads taller than the body. The hit does not grow with that picture.
 // A toy is smaller than the lane it flies in. Twins: lib/phys.aura, web/sim.mjs.
 export const POT_REACH = 0.84;
 export const POT_TOP = 1.12;
@@ -895,10 +896,13 @@ export function createRenderer(canvas) {
       camY + bob,
       basis.z + oz * 0.62 - Math.cos(psi) * 4.7 - leanWorld * Math.sin(psi),
     ];
+    // One beat ahead, so the next move sits in the view. The eye stays
+    // 4.7 m behind, and a bend still rebases only past 8 m.
+    const lookAhead = speed * 1.3;
     const at = [
-      basis.x + ox * 0.22 + Math.sin(psi) * 7.4,
+      basis.x + ox * 0.22 + Math.sin(psi) * lookAhead,
       0.95 + py * 0.18 + floaty * 0.4,
-      basis.z + oz * 0.22 + Math.cos(psi) * 7.4,
+      basis.z + oz * 0.22 + Math.cos(psi) * lookAhead,
     ];
     perspective(proj, camFov, w / h, 0.08, 96);
     lookAt(view, eye, at, [0, 1, 0]);
@@ -1007,7 +1011,9 @@ export function createRenderer(canvas) {
     }
     // Look is field 6. A stored look is kept. A phrase that left the word
     // out stays the first mesh until it blooms; a bloomed one changes
-    // along the road. Heights stay inside the same hit.
+    // along the road. The hit stays put. A block reads taller than the
+    // standing body and stays one lane wide. A hurdle stays low. A gate
+    // keeps daylight under the bar.
     function variedLook(q, k) {
       const raw = q.length > 6 ? q[6] | 0 : 0;
       if (raw > 0 || !q.born) return raw;
@@ -1113,8 +1119,32 @@ export function createRenderer(canvas) {
       }
     }
 
-    // Round body on one lane. The hit is that lane's box in sim, so the
-    // patch on the road marks the lane and the sphere stays the body.
+    // Pale quads along one lane, sampled so a bend stays under the stripe.
+    // This is a read, not a hit box.
+    function laneStripe(fromS, toS, lat, rgb) {
+      const a = Math.min(fromS, toS);
+      const b = Math.max(fromS, toS);
+      const len = b - a;
+      if (len < 0.5) return;
+      const nSeg = Math.min(12, Math.max(1, Math.ceil(len / 1.7)));
+      const step = len / nSeg;
+      for (let i = 0; i < nSeg; i++) {
+        const s = a + (i + 0.5) * step;
+        const at = onRoad(s, lat);
+        push(at.x, 0.05, at.z, 1.2, 0.022, step * 0.92, 0, rgb, 0.35, 0.55, at.psi);
+      }
+    }
+
+    function paintLane(q, lat, rgb) {
+      const reach = Math.max(14, speed * 1.3);
+      const ahead = q[1] - pz;
+      if (ahead < reach && q[1] + (q[2] || 0) > pz - 1) {
+        laneStripe(Math.max(pz - 0.3, q[1] - reach), q[1] + 0.2, lat, rgb);
+      }
+    }
+
+    // Round body on one lane. The stripe runs the lane from the moment
+    // the toy is in view, and the burst stays the small one.
     function drawPopper(q, here) {
       const yaw = here.psi;
       const phase = q.length > 6 ? q[6] : 0;
@@ -1131,11 +1161,12 @@ export function createRenderer(canvas) {
         }
         return;
       }
+      const popLane = q.length > 5 && q[5] >= 0 ? q[5] : 1;
+      paintLane(q, laneX(popLane), [1, 0.55, 0.12]);
       const cy = q[4] + q[3] * 0.5;
       const rad = 0.32;
       const shadow = 0.42 / (1 + cy * 0.45);
       push(here.x, 0.03, here.z, shadow * 1.6, 0.02, shadow, 0, [0.2, 0.14, 0.08], 1, 0, yaw);
-      push(here.x, 0.045, here.z, 1.35, 0.025, 0.7, 0, [1, 0.62, 0.25], 0.35, 0.35, yaw);
       push(here.x, cy, here.z, rad * 2, rad * 2, rad * 2, 1, [0.95, 0.42, 0.16], 0.3, 0.22, yaw);
       push(here.x, cy, here.z, rad * 2.05, 0.08, rad * 2.05, 0, [1, 0.86, 0.42], 0.25, 0.35, yaw);
       push(here.x, cy + rad + 0.08, here.z, 0.05, 0.16, 0.05, 0, [0.35, 0.22, 0.12], 0.5, 0.05, yaw);
@@ -1149,38 +1180,38 @@ export function createRenderer(canvas) {
       const here = onRoad(zc, lat);
       const yaw = here.psi;
       if (look === 1) {
-        push(here.x, 0.4 * sc, here.z, 0.72 * sc, 0.8 * sc, 0.72 * sc, 0, [0.52, 0.34, 0.2], 0.6, 0.05, yaw);
-        push(here.x, 0.86 * sc, here.z, 0.92 * sc, 0.16 * sc, 0.92 * sc, 0, [0.7, 0.5, 0.32], 0.45, 0.08, yaw);
-        push(here.x, 1.0 * sc, here.z, 0.62 * sc, 0.12 * sc, 0.62 * sc, 0, [0.62, 0.42, 0.26], 0.5, 0.06, yaw);
+        push(here.x, 0.62 * sc, here.z, 0.78 * sc, 1.24 * sc, 0.78 * sc, 0, [0.52, 0.34, 0.2], 0.6, 0.05, yaw);
+        push(here.x, 1.3 * sc, here.z, 0.98 * sc, 0.18 * sc, 0.98 * sc, 0, [0.7, 0.5, 0.32], 0.45, 0.08, yaw);
+        push(here.x, 1.46 * sc, here.z, 0.66 * sc, 0.14 * sc, 0.66 * sc, 0, [0.62, 0.42, 0.26], 0.5, 0.06, yaw);
       } else if (look === 2) {
-        push(here.x, 0.3 * sc, here.z, 0.36 * sc, 0.6 * sc, 0.36 * sc, 0, [0.96, 0.9, 0.78], 0.4, 0.06, yaw);
-        push(here.x, 0.74 * sc, here.z, 1.08 * sc, 0.26 * sc, 1.08 * sc, 0, [0.9, 0.24, 0.3], 0.35, 0.1, yaw);
-        push(here.x, 0.92 * sc, here.z, 0.4 * sc, 0.4 * sc, 0.4 * sc, 1, [0.92, 0.28, 0.32], 0.3, 0.12, yaw);
+        push(here.x, 0.48 * sc, here.z, 0.38 * sc, 0.96 * sc, 0.38 * sc, 0, [0.96, 0.9, 0.78], 0.4, 0.06, yaw);
+        push(here.x, 1.12 * sc, here.z, 1.05 * sc, 0.36 * sc, 1.05 * sc, 0, [0.9, 0.24, 0.3], 0.35, 0.1, yaw);
+        push(here.x, 1.32 * sc, here.z, 0.52 * sc, 0.4 * sc, 0.52 * sc, 1, [0.92, 0.28, 0.32], 0.3, 0.12, yaw);
         const spots = [[-0.22, 0.04], [0.2, -0.08], [0.02, 0.16]];
         for (let i = 0; i < spots.length; i++) {
           const spot = onRoad(zc + spots[i][1], lat + spots[i][0]);
-          push(spot.x, 0.9 * sc, spot.z, 0.12 * sc, 0.12 * sc, 0.12 * sc, 1, [1, 0.97, 0.92], 0.2, 0.25, spot.psi);
+          push(spot.x, 1.2 * sc, spot.z, 0.14 * sc, 0.14 * sc, 0.14 * sc, 1, [1, 0.97, 0.92], 0.2, 0.25, spot.psi);
         }
       } else if (look === 3) {
-        push(here.x, 0.38 * sc, here.z, 0.9 * sc, 0.76 * sc, 0.9 * sc, 0, [0.76, 0.52, 0.28], 0.5, 0.06, yaw);
-        push(here.x, 0.52 * sc, here.z, 0.96 * sc, 0.08 * sc, 0.96 * sc, 0, [0.5, 0.32, 0.16], 0.45, 0.04, yaw);
-        push(here.x, 0.9 * sc, here.z, 0.28 * sc, 0.28 * sc, 0.28 * sc, 1, [0.95, 0.32, 0.38], 0.3, 0.2, yaw);
-        push(here.x, 1.05 * sc, here.z, 0.05 * sc, 0.08 * sc, 0.05 * sc, 0, pal.leaf, 0.4, 0.08, yaw);
+        push(here.x, 0.68 * sc, here.z, 0.92 * sc, 1.36 * sc, 0.92 * sc, 0, [0.76, 0.52, 0.28], 0.5, 0.06, yaw);
+        push(here.x, 0.72 * sc, here.z, 0.98 * sc, 0.08 * sc, 0.98 * sc, 0, [0.5, 0.32, 0.16], 0.45, 0.04, yaw);
+        push(here.x, 1.46 * sc, here.z, 0.26 * sc, 0.26 * sc, 0.26 * sc, 1, [0.95, 0.32, 0.38], 0.3, 0.2, yaw);
+        push(here.x, 1.62 * sc, here.z, 0.05 * sc, 0.1 * sc, 0.05 * sc, 0, pal.leaf, 0.4, 0.08, yaw);
       } else if (look === 4) {
-        const blobs = [[0, 0.4, 0.56, pal.leaf], [-0.24, 0.34, 0.44, pal.leaf2], [0.22, 0.32, 0.46, pal.leaf], [0.02, 0.66, 0.4, pal.leaf2]];
+        const blobs = [[0, 0.5, 0.7, pal.leaf], [-0.22, 0.62, 0.52, pal.leaf2], [0.22, 0.58, 0.52, pal.leaf], [0, 1.05, 0.58, pal.leaf2], [0.02, 1.34, 0.4, pal.leaf]];
         for (let i = 0; i < blobs.length; i++) {
           const blob = blobs[i];
           const at = onRoad(zc, lat + blob[0]);
           push(at.x, blob[1] * sc, at.z, blob[2] * sc, blob[2] * sc, blob[2] * sc, 1, blob[3], 0.45, 0.08, at.psi);
         }
         const bloom = onRoad(zc, lat + 0.05);
-        push(bloom.x, 0.92 * sc, bloom.z, 0.18 * sc, 0.18 * sc, 0.18 * sc, 1, pal.flower, 0.3, 0.45, bloom.psi);
+        push(bloom.x, 1.52 * sc, bloom.z, 0.18 * sc, 0.18 * sc, 0.18 * sc, 1, pal.flower, 0.3, 0.45, bloom.psi);
       } else {
-        const pot = 1.05 * sc;
-        push(here.x, 0.28 * sc, here.z, pot * 1.16, 0.58 * sc, pot * 1.16, 0, [1, 0.96, 0.84], 0.2, 0.9, yaw);
-        push(here.x, 0.28 * sc, here.z, pot, 0.5 * sc, pot, 0, pal.pot, 0.38, 0.48 + glow, yaw);
-        push(here.x, 0.62 * sc, here.z, pot * 1.05, 0.16 * sc, pot * 1.05, 0, pal.potRim, 0.35, 0.05, yaw);
-        push(here.x, 0.95 * sc, here.z, 0.55 * sc, 0.42 * sc, 0.55 * sc, 1, pal.leaf, 0.55, 0.08, yaw);
+        const pot = 0.98 * sc;
+        push(here.x, 0.46 * sc, here.z, pot * 1.08, 0.92 * sc, pot * 1.08, 0, [1, 0.96, 0.84], 0.2, 0.9, yaw);
+        push(here.x, 0.46 * sc, here.z, pot, 0.84 * sc, pot, 0, pal.pot, 0.38, 0.48 + glow, yaw);
+        push(here.x, 0.98 * sc, here.z, pot * 1.1, 0.16 * sc, pot * 1.1, 0, pal.potRim, 0.35, 0.05, yaw);
+        push(here.x, 1.28 * sc, here.z, 0.62 * sc, 0.5 * sc, 0.62 * sc, 1, pal.leaf, 0.55, 0.08, yaw);
       }
     }
 
@@ -1211,6 +1242,7 @@ export function createRenderer(canvas) {
       } else if (k === 7) {
         drawBlock(q, zc, lane, sc, glow);
       } else if (k === 8) {
+        paintLane(q, laneX(lane < 0 ? 1 : lane), [0.7, 0.9, 1]);
         const vis = q.length > 6 ? q[6] : 0;
         const bob = reduced ? 0 : Math.sin((st.time || 0) * 5 + q[1]) * 0.08;
         const fy = (q[4] + q[3] * 0.5 + bob) * sc;

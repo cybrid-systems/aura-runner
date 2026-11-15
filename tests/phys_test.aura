@@ -310,7 +310,7 @@
 (define lane-a (popper-for 1 0.0 40.0))
 (define lane-b (popper-for 2 0.0 40.0))
 (display "pop-open ")
-(display (if (and opened (= (piece-lane opened) 1.0) (> (piece-x opened) 17.0) (< (piece-x opened) 19.0)) 1 0))
+(display (if (and opened (= (piece-lane opened) 1.0) (> (piece-x opened) 36.0) (< (piece-x opened) 38.0)) 1 0))
 (newline)
 (display "pop-skip ")
 (display (if (and (not (popper-for 5 0.0 40.0)) (not (popper-for 1 0.0 8.0))) 1 0))
