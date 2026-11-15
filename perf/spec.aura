@@ -111,9 +111,13 @@
                             (begin (pxs p 14) (loop (+ i 1))))))))))
 
 ; ── the catalog ──────────────────────────────────────────────────────
-(define (candidate id path target thought)
+(define (candidate id path target thought . rest)
   (hash "id" id
         "target" target
+        ; The site is the define whose time the floor is measured on. A
+        ; candidate that changes a predicate wins in the caller, so it
+        ; names the caller.
+        "site" (if (pair? rest) (car rest) target)
         "genome" (perf:read-text path)
         "thought" thought))
 
@@ -130,7 +134,8 @@
     (candidate "collide-slack"
                "perf/candidates/collide-slack.aura"
                "collide-far?"
-               "the metre of slack around the body is more than the geometry needs")
+               "the metre of slack around the body is more than the geometry needs"
+               "collide")
     (candidate "wrong-scale"
                "perf/candidates/wrong-scale.aura"
                "pset"
@@ -139,6 +144,10 @@
 ; ── the intend and the strategy genes ────────────────────────────────
 (define expert-intend
   (hash "min-faster-pct" 10
+        ; The site floor: a candidate that changes one define is judged
+        ; on that define, not on the whole program. The program floor
+        ; stays as the second bar.
+        "site-min-faster-pct" 20
         "checksum" #t
         "budget" 4
         "protected" '()))

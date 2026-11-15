@@ -84,10 +84,14 @@
 (define saved-collide collide)
 (define saved-pset pset)
 (define saved-pxs pxs)
+(define saved-nudge-flyers nudge-flyers)
+(define saved-step-poppers step-poppers)
 
 (define (perf-worldline-measure kernel xs)
   (let ((box (hash "collide" 0 "pset" 0 "pxs" 0
-                   "collide-ms" 0 "pset-ms" 0 "pxs-ms" 0)))
+                   "nudge-flyers" 0 "step-poppers" 0
+                   "collide-ms" 0 "pset-ms" 0 "pxs-ms" 0
+                   "nudge-flyers-ms" 0 "step-poppers-ms" 0)))
     (set! collide
       (lambda (p pieces rules)
         (let ((t0 (monotonic-ms)))
@@ -112,10 +116,28 @@
             (hash-set! box "pxs-ms"
                        (+ (hash-ref box "pxs-ms" 0) (- (monotonic-ms) t0)))
             v))))
+    (set! nudge-flyers
+      (lambda (pieces dt)
+        (let ((t0 (monotonic-ms)))
+          (let ((v (saved-nudge-flyers pieces dt)))
+            (hash-set! box "nudge-flyers" (+ (hash-ref box "nudge-flyers" 0) 1))
+            (hash-set! box "nudge-flyers-ms"
+                       (+ (hash-ref box "nudge-flyers-ms" 0) (- (monotonic-ms) t0)))
+            v))))
+    (set! step-poppers
+      (lambda (pieces player dt)
+        (let ((t0 (monotonic-ms)))
+          (let ((v (saved-step-poppers pieces player dt)))
+            (hash-set! box "step-poppers" (+ (hash-ref box "step-poppers" 0) 1))
+            (hash-set! box "step-poppers-ms"
+                       (+ (hash-ref box "step-poppers-ms" 0) (- (monotonic-ms) t0)))
+            v))))
     (try (kernel xs) (catch (e) #f))
     (set! collide saved-collide)
     (set! pset saved-pset)
     (set! pxs saved-pxs)
+    (set! nudge-flyers saved-nudge-flyers)
+    (set! step-poppers saved-step-poppers)
     (list (hash "name" "collide"
                 "calls" (hash-ref box "collide" 0)
                 "task-clock" (hash-ref box "collide-ms" 0)
@@ -127,4 +149,12 @@
           (hash "name" "pxs"
                 "calls" (hash-ref box "pxs" 0)
                 "task-clock" (hash-ref box "pxs-ms" 0)
-                "stack" (list "bench-kernel" "pxs")))))
+                "stack" (list "bench-kernel" "pxs"))
+          (hash "name" "nudge-flyers"
+                "calls" (hash-ref box "nudge-flyers" 0)
+                "task-clock" (hash-ref box "nudge-flyers-ms" 0)
+                "stack" (list "bench-kernel" "nudge-flyers"))
+          (hash "name" "step-poppers"
+                "calls" (hash-ref box "step-poppers" 0)
+                "task-clock" (hash-ref box "step-poppers-ms" 0)
+                "stack" (list "bench-kernel" "step-poppers")))))
