@@ -990,6 +990,19 @@
                  (if (hash? found) (hash-ref found "margin" 0.0) 0.0))
           (release-slot!))))))
 
+; The slice can take a few dozen ticks. A browser that only pumps on
+; demand would otherwise keep the model's sentence off the page until
+; the seal, which is later than the garden line. This row is not recorded:
+; a second decision would drag the mean.
+(define (show-say! cue)
+  (if (and (string? cue) (> (string-length cue) 0))
+    (set! pending (cons
+                    (hash "op" "decision" "kind" "SAY" "why" "heard" "arm" "motif"
+                          "via" publish-via "cue" cue "mark" "shape"
+                          "ask" "What should come down the path?")
+                    pending))
+    #f))
+
 (define (queue-hold! form laid say)
   (set! hold-rules (rules-hash))
   (set! hold-geom (hash-ref laid "geometry" 0.0))
@@ -1004,7 +1017,8 @@
   (set! hold-i 0)
   (set! hold-loot (if (string? (hash-ref laid "loot" "")) (hash-ref laid "loot" "") ""))
   (set! hold-bend (hash-ref laid "bend" -1.0))
-  (set! hold-say (if (string? say) say "")))
+  (set! hold-say (if (string? say) say ""))
+  (show-say! hold-say))
 
 (define (consider-form! text say)
   (let ((form (one-line (if (string? text) text ""))))
@@ -1658,6 +1672,9 @@
           (if (hash? pals-msg) (take-pals! c pals-msg) #f))
         #f)
       (sync-llm-busy!)
+      ; The take above may be the moment the slot freed. Score the waiting
+      ; phrase on this tick, before another ask marks an arm busy again.
+      (flush-deferred!)
       ; A reply that arrived during another chat is waiting. Asking again
       ; keeps some arm busy, and the waiting phrase is then never scored.
       (if (or (pair? wait-motif) (pair? wait-scene) (pair? wait-pals))
