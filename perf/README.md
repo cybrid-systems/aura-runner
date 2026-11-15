@@ -61,6 +61,20 @@ stretch has no popper and no flyer in it.
 - `wrong-scale`: the score is doubled on the way in; the checksum has to
   reject it.
 
+## The run remembers
+
+Every run writes the ideas that failed on the hot leaf into
+`perf/out/memory.json`, and the next run reads them back: a candidate
+that already failed there is skipped (`negative-skip`) and the budget
+goes to something else. Delete `perf/out/memory.json` to start over.
+
+```
+memory-loaded 4 path=perf/out/memory.json
+negative-skip nudge-flyers-noop class=flat-hot hot-node=collide
+negative-skip step-poppers-noop class=flat-hot hot-node=collide
+budget-used 0
+```
+
 ## A candidate cannot be judged yet
 
 A `mutate:rebind` inside an `evo:trial` loses the variadic parameter
