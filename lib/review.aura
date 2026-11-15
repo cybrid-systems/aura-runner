@@ -193,29 +193,41 @@
                 "geometry" (hash-ref r "geometry" 0.0)
                 "budget" (hash-ref r "budget" 0.0)))))))
 
-; One isolated trial. The spare is behavior, never a constraint.
+; The note is decided on this fiber, before the child workspace exists.
+; Scoring inside evaluate is not the verdict: on the image CI runs, that
+; walk can call the same stacked phrase fair, and a set! of the result
+; does not cross back out of the child. Spare stays behavior, never a
+; constraint. The trial records the parent note.
+(define (freeze-review r)
+  (if (not (hash? r))
+    (hash "ok" #f "hint" HINT-SHAPE "spare" 0.0 "geometry" 1.0 "budget" 0.0)
+    (hash "ok" (if (hash-ref r "ok") #t #f)
+          "hint" (hash-ref r "hint" "")
+          "spare" (hash-ref r "spare" 0.0)
+          "geometry" (hash-ref r "geometry" 0.0)
+          "budget" (hash-ref r "budget" 0.0))))
+
 (define (review-trial text rules)
-  (let ((found #f))
-    (let* ((cand (evo:candidate text (hash "id" "review" "target" "motif-form")))
-           (trial (evo:trial cand
-                             (hash "timeout-ms" 4000
-                                   "apply" (lambda (c) #t)
-                                   "evaluate"
-                                   (lambda (c)
-                                     (set! found (review-text text rules))
-                                     (hash "status" "ok"
-                                           "objectives"
-                                           (hash "fair" (if (and (hash? found) (hash-ref found "ok")) 1.0 0.0))
-                                           "constraints"
-                                           (hash "geometry" (if (hash? found) (hash-ref found "geometry" 0.0) 1.0)
-                                                 "reachable" (if (and (hash? found) (hash-ref found "ok")) 0.0 1.0)
-                                                 "budget" 0.0
-                                                 "safe" 0.0)
-                                           "behavior"
-                                           (hash "spare" (if (hash? found) (hash-ref found "spare" 0.0) 0.0))))))))
-      (if (hash? found)
-        found
-        (hash "ok" #f "hint" "" "spare" 0.0 "geometry" 1.0 "budget" 0.0 "trial" trial)))))
+  (let* ((verdict (freeze-review (review-text text rules)))
+         (fair (if (hash-ref verdict "ok") 1.0 0.0))
+         (spare (hash-ref verdict "spare" 0.0))
+         (geom (hash-ref verdict "geometry" 0.0))
+         (budget (hash-ref verdict "budget" 0.0))
+         (cand (evo:candidate text (hash "id" "review" "target" "motif-form"))))
+    (evo:trial cand
+               (hash "timeout-ms" 4000
+                     "apply" (lambda (c) #t)
+                     "evaluate"
+                     (lambda (c)
+                       (hash "status" "ok"
+                             "objectives" (hash "fair" fair)
+                             "constraints"
+                             (hash "geometry" geom
+                                   "reachable" (if (> fair 0.0) 0.0 1.0)
+                                   "budget" budget
+                                   "safe" 0.0)
+                             "behavior" (hash "spare" spare)))))
+    verdict))
 
 (define (review-better? row best)
   (let ((a (car (cdr row)))
@@ -250,34 +262,44 @@
       acc
       (loop (cdr xs) (insert-row (car xs) acc)))))
 
-(define (review-race-seq texts rules)
+; Notes are taken before any trial. A later child workspace must not be
+; what the ranking reads.
+(define (parent-rows texts rules)
   (let loop ((xs texts) (i 0) (rows (list)))
     (if (null? xs)
-      (let ((sorted (sort-race-rows rows)))
-        (let ((best (pick-winner sorted #f)))
-          (hash "winner" (if best (car best) -1)
-                "mark" race-mark
-                "fibers" 0
-                "rows" sorted)))
+      (sort-race-rows rows)
       (loop (cdr xs)
             (+ i 1)
-            (cons (list i (review-trial (car xs) rules)) rows)))))
+            (cons (list i (freeze-review (review-text (car xs) rules))) rows)))))
+
+(define (run-trials texts rules)
+  (let loop ((xs texts))
+    (if (null? xs)
+      #t
+      (begin
+        (try (review-trial (car xs) rules) (catch (e) #f))
+        (loop (cdr xs))))))
+
+(define (race-result rows fibers)
+  (let ((best (pick-winner rows #f)))
+    (hash "winner" (if best (car best) -1)
+          "mark" race-mark
+          "fibers" fibers
+          "rows" rows)))
 
 ; workspace:switch is process-global, so the trials take one token and
-; run one at a time. A plain set! in a fiber writes through to the parent.
-; The overlay is the per-fiber copy: the child sets race-mark, rolls the
-; copy back, and the parent binding stays. The trial itself stays outside
-; the overlay so its result hash is not rolled away.
+; run one at a time. The overlay is the per-fiber copy: the child sets
+; race-mark, rolls the copy back, and the parent binding stays. The trial
+; stays outside the overlay. Ranking reads the notes frozen above, before
+; the first trial, so a child workspace cannot flip a row.
 (define (race-child text idx slot out rules)
   (channel:recv slot)
   (mutate :overlay-begin)
   (set! race-mark 0)
   (mutate :overlay-rollback)
-  (let ((r (try (review-trial text rules)
-                (catch (e)
-                  (hash "ok" #f "hint" "" "spare" 0.0 "geometry" 1.0 "budget" 0.0)))))
-    (channel:send out (list idx r))
-    (channel:send slot #t)))
+  (try (review-trial text rules) (catch (e) #f))
+  (channel:send out (list idx))
+  (channel:send slot #t))
 
 (define (spawn-race xs i slot out rules)
   (if (null? xs)
@@ -287,26 +309,27 @@
         (fiber:spawn (lambda () (race-child text idx slot out rules))))
       (spawn-race (cdr xs) (+ i 1) slot out rules))))
 
-(define (gather-n out n acc)
+(define (gather-n out n)
   (if (<= n 0)
-    acc
-    (gather-n out (- n 1) (cons (channel:recv out) acc))))
+    #t
+    (begin
+      (channel:recv out)
+      (gather-n out (- n 1)))))
 
 (define (review-race texts rules)
   (set! race-mark 1)
   (if (not (pair? texts))
     (hash "winner" -1 "mark" race-mark "fibers" 0 "rows" (list))
-    (let ((probe (try (fiber:spawn (lambda () #t)) (catch (e) 0))))
+    (let ((rows (parent-rows texts rules))
+          (probe (try (fiber:spawn (lambda () #t)) (catch (e) 0))))
       (if (not (and (integer? probe) (> probe 0)))
-        (review-race-seq texts rules)
+        (begin
+          (run-trials texts rules)
+          (race-result rows 0))
         (let ((slot (channel:create 1))
               (out (channel:create 8)))
           (channel:send slot #t)
           (let ((n (spawn-race texts 0 slot out rules)))
             (try (fiber:yield) (catch (e) #f))
-            (let ((sorted (sort-race-rows (gather-n out n (list)))))
-              (let ((best (pick-winner sorted #f)))
-                (hash "winner" (if best (car best) -1)
-                      "mark" race-mark
-                      "fibers" 1
-                      "rows" sorted)))))))))
+            (gather-n out n)
+            (race-result rows 1)))))))

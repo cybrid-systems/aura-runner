@@ -79,6 +79,7 @@ let seenChunks = new Set();
 const frames = new Float32Array(240);
 let frameN = 0;
 let lastNow = performance.now();
+let lastPump = performance.now();
 let acc = 0;
 let sendAcc = 0;
 let jumpQ = 0;
@@ -420,6 +421,20 @@ function sendTick() {
   laneQ = 0;
 }
 
+// Headless Chrome pauses requestAnimationFrame while a test is only
+// reading the page. The socket still has to move, and the probe has to
+// publish, or a kept garden never shows up. A live frame updates
+// lastPump; the test calls __lumenPump itself.
+function pumpNet(now) {
+  const dt = Math.min(0.1, Math.max(0.016, (now - lastPump) / 1000));
+  lastPump = now;
+  sendTick();
+  lerpScene(dt);
+  publishProbe();
+}
+
+window.__lumenPump = () => pumpNet(performance.now());
+
 function restart() {
   resetLocal();
   if (connected && ws.readyState === 1) {
@@ -468,6 +483,7 @@ function publishProbe() {
 }
 
 function frame(now) {
+  requestAnimationFrame(frame);
   const dt = Math.min(0.05, (now - lastNow) / 1000);
   lastNow = now;
   frames[frameN % frames.length] = dt * 1000;
@@ -542,6 +558,7 @@ function frame(now) {
   if (sendAcc >= 0.05) {
     sendTick();
     sendAcc = 0;
+    lastPump = now;
   }
   stumble = Math.max(0, stumble - dt * 1000);
   if (!flashEl.hidden) {
@@ -552,14 +569,18 @@ function frame(now) {
   publishProbe();
   audio.music(reduced);
   if (renderer) {
-    renderer.resize();
-    renderer.frame({
-      x: player[0], y: player[1], vy: player[2], lx: player[10],
-      slide: player[3], hue, time: now / 1000, now, reduced, pieces,
-      event: spark, alive: true, speed: rules.speed, g: rules.g,
-      near: nearSpark, reject: rejectSpark,
-      scene: sceneView, stumble: stumble / 1500, pals, hero, bend, loot,
-    });
+    try {
+      renderer.resize();
+      renderer.frame({
+        x: player[0], y: player[1], vy: player[2], lx: player[10],
+        slide: player[3], hue, time: now / 1000, now, reduced, pieces,
+        event: spark, alive: true, speed: rules.speed, g: rules.g,
+        near: nearSpark, reject: rejectSpark,
+        scene: sceneView, stumble: stumble / 1500, pals, hero, bend, loot,
+      });
+    } catch (err) {
+      console.error(err);
+    }
     spark = "";
     nearSpark = false;
     rejectSpark = false;
@@ -615,7 +636,6 @@ function frame(now) {
   paintMeter();
   if (showStats && frameN % 20 === 0) paintStats();
   if (benchMode && frameN === 180) finishBench();
-  requestAnimationFrame(frame);
 }
 
 function showGain(text, big) {
