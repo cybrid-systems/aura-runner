@@ -1,0 +1,15 @@
+; over-gap? walks the whole stretch every frame to find the gap under
+; the runner. A gap can only be under the body, so the pieces that are
+; not under it are skipped.
+
+(define (over-gap? x lane pieces)
+  (let loop ((ps pieces))
+    (if (null? ps)
+      #f
+      (let ((q (car ps)))
+        (if (and (= (piece-k q) 2.0)
+                 (hits-lane? q lane)
+                 (>= x (piece-x q))
+                 (< x (+ (piece-x q) (piece-w q))))
+          #t
+          (loop (cdr ps)))))))

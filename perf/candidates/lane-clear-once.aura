@@ -1,0 +1,23 @@
+; dodge-flyer asks the same two questions twice: once for the lane the
+; runner is in, and once more for the lane it would move to. The
+; answers are the ones the scans give; the scan for the other lane is
+; only needed when the first answer says the way is not clear.
+
+(define (dodge-flyer p pieces pace)
+  (let* ((lane (body-lane p))
+         (x (player-x p))
+         (blocked (flyer-blocking? pieces x lane pace)))
+    (if (and blocked (= (player-lane p) lane))
+      (let ((right (+ lane 1.0))
+            (left (- lane 1.0)))
+        (cond
+          ((and (< lane 1.5)
+                (not (block-ahead? pieces x right -0.05 (look-m pace)))
+                (not (flyer-blocking? pieces x right pace)))
+           (press-lane p 1.0))
+          ((and (> lane 0.5)
+                (not (block-ahead? pieces x left -0.05 (look-m pace)))
+                (not (flyer-blocking? pieces x left pace)))
+           (press-lane p -1.0))
+          (else p)))
+      p)))

@@ -1,8 +1,10 @@
 # perf harness
 
-An aura-perf target for this repository's physics.
+Two aura-perf targets for this repository: the physics the server tick
+runs, and the autopilot the fairness gate runs.
 
-    aura-perf autotune perf/spec.aura
+    aura-perf autotune perf/spec.aura            ; the physics
+    aura-perf autotune perf/spec-autopilot.aura  ; the fairness gate
 
 The target program is `lib/phys.aura`. The runtime set-codes the seed
 (`lib/phys.aura` + `perf/workload.aura`), so the defines a candidate
@@ -72,3 +74,37 @@ breaks the trial: the kernel raises `car: not a pair` and every
 candidate fails its checksum. The same rebind outside a trial keeps the
 digest equal to the golden, so the candidates themselves are sound. See
 <https://github.com/cybrid-systems/aura/issues/5296>.
+
+## The autopilot target
+
+    aura-perf autotune perf/spec-autopilot.aura
+
+The fairness gate's own path: `lib/gen.aura` (the seeded stretches, the
+layout and the autopilot) on top of `lib/phys.aura` and `lib/sexp.aura`,
+flattened into one module so a candidate can rebind `next-hazard`,
+`dodge-flyer` or `over-gap?`.
+
+The checksum is the autopilot's own trace: the runner's position and lane
+every tenth frame of every seeded stretch, then the verdict. It is the
+play-review output and more, so a candidate that plays a stretch
+differently is rejected.
+
+The profile (aarch64, region timer):
+
+```
+hotspot autopilot-kernel self-ms=6858 calls=1   share=77
+hotspot step             self-ms=872  calls=900 share=9
+hotspot autopilot-press  self-ms=336  calls=900 share=3
+hotspot collide          self-ms=280  calls=900 share=3
+hotspot next-hazard      self-ms=157  calls=900 share=1
+hotspot dodge-flyer      self-ms=82   calls=900 share=0
+hotspot dodge-block      self-ms=81   calls=900 share=0
+hotspot flyer-blocking?  self-ms=72   calls=900 share=0
+hotspot block-ahead?     self-ms=67   calls=900 share=0
+```
+
+Two things fall out of it. The autopilot's own scans are about 12% of its
+time; the rest is the physics step, the same code the server tick runs.
+And a single define can only win a few percent of the target, so a gate
+with a program-wide floor can never pass it - see
+<aura-perf/docs/roadmap.md>.

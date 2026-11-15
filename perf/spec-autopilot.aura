@@ -1,0 +1,194 @@
+; aura-perf target for the fairness gate's own path: the autopilot.
+;
+;   aura-perf autotune perf/spec-autopilot.aura
+;
+; The target program is lib/gen.aura (the seeded stretches, the layout
+; and the autopilot) on top of lib/phys.aura and lib/sexp.aura. The
+; runtime set-codes the seed, so the defines a candidate rebinds -
+; next-hazard, dodge-flyer, dodge-block - live in the module the runtime
+; mutates.
+;
+; The checksum is the autopilot's own trace: the runner's position and
+; lane every tenth frame of every seeded stretch, then the verdict. It
+; is the play-review output and more, so a candidate that plays the
+; stretch differently is rejected.
+
+(require "lib/perf/loop" all:)
+(require "lib/perf/util" all:)
+(require "lib/perf/score" all:)
+(require "std/string" all:)
+
+; ── the seed ─────────────────────────────────────────────────────────
+; The target program is lib/gen.aura on top of lib/phys.aura and
+; lib/sexp.aura, flattened into one module.
+(require "./seed-source-autopilot")
+
+(define seed-path "perf/out/seed-autopilot.aura")
+(shell "mkdir -p perf/out")
+(perf:write-text seed-path (seed-source-autopilot))
+
+; ── the oracle ───────────────────────────────────────────────────────
+; One line per stretch count: line n is the digest of the first n+1
+; stretches.
+(define golden
+  (string-split (perf:read-text "perf/golden-autopilot.txt") "\n"))
+
+(define (golden-digest rows)
+  (let ((i (- (length rows) 1)))
+    (if (or (< i 0) (>= i (length golden)))
+        "perf-missing-golden"
+        (list-ref golden i))))
+
+; ── the regions ──────────────────────────────────────────────────────
+; The autopilot's own defines and the physics ones it leans on. The
+; counts are the calls one play of the seeded stretches makes.
+(define (regions)
+  (let* ((row (car (autopilot-rows)))
+         (rules (car (cdr (cdr row))))
+         (laid (layout-form (form-text (string-append "(seq" (specs-src (car (cdr row))) ")")) rules))
+         (pieces (if (hash? laid) (hash-ref laid "pieces" '()) '()))
+         (p (make-player 0.4))
+         (strict (strict-rules rules)))
+    (list
+      (hash "name" "autopilot-kernel" "calls" 1 "workload" #t
+            "stack" (list "autopilot-kernel")
+            "thunk" (lambda () (autopilot-kernel (autopilot-rows))))
+      (hash "name" "autopilot-press" "calls" 900
+            "stack" (list "autopilot-kernel" "autopilot-press")
+            "thunk" (lambda ()
+                      (let loop ((i 0))
+                        (if (>= i 900) 0
+                            (begin (autopilot-press p pieces strict) (loop (+ i 1)))))))
+      (hash "name" "next-hazard" "calls" 900
+            "stack" (list "autopilot-kernel" "next-hazard")
+            "thunk" (lambda ()
+                      (let loop ((i 0))
+                        (if (>= i 900) 0
+                            (begin (next-hazard pieces 5.0 1.0) (loop (+ i 1)))))))
+      (hash "name" "dodge-flyer" "calls" 900
+            "stack" (list "autopilot-kernel" "dodge-flyer")
+            "thunk" (lambda ()
+                      (let loop ((i 0))
+                        (if (>= i 900) 0
+                            (begin (dodge-flyer p pieces 8.0) (loop (+ i 1)))))))
+      (hash "name" "dodge-block" "calls" 900
+            "stack" (list "autopilot-kernel" "dodge-block")
+            "thunk" (lambda ()
+                      (let loop ((i 0))
+                        (if (>= i 900) 0
+                            (begin (dodge-block p pieces 8.0) (loop (+ i 1)))))))
+      (hash "name" "block-ahead?" "calls" 900
+            "stack" (list "autopilot-kernel" "block-ahead?")
+            "thunk" (lambda ()
+                      (let loop ((i 0))
+                        (if (>= i 900) 0
+                            (begin (block-ahead? pieces 5.0 1.0 0.0 12.0) (loop (+ i 1)))))))
+      (hash "name" "flyer-blocking?" "calls" 900
+            "stack" (list "autopilot-kernel" "flyer-blocking?")
+            "thunk" (lambda ()
+                      (let loop ((i 0))
+                        (if (>= i 900) 0
+                            (begin (flyer-blocking? pieces 5.0 1.0 8.0) (loop (+ i 1)))))))
+      (hash "name" "step" "calls" 900
+            "stack" (list "autopilot-kernel" "step")
+            "thunk" (lambda ()
+                      (let loop ((i 0))
+                        (if (>= i 900) 0
+                            (begin (step p pieces strict PHYS-DT) (loop (+ i 1)))))))
+      (hash "name" "collide" "calls" 900
+            "stack" (list "autopilot-kernel" "collide")
+            "thunk" (lambda ()
+                      (let loop ((i 0))
+                        (if (>= i 900) 0
+                            (begin (collide p pieces strict) (loop (+ i 1))))))))))
+
+; ── the catalog ──────────────────────────────────────────────────────
+(define (candidate id path target thought)
+  (hash "id" id
+        "target" target
+        "genome" (perf:read-text path)
+        "thought" thought))
+
+(define catalog
+  (list
+    (candidate "hazard-window"
+               "perf/candidates/hazard-window.aura"
+               "next-hazard"
+               "next-hazard walks every piece of the stretch for one hazard")
+    (candidate "lane-clear-once"
+               "perf/candidates/lane-clear-once.aura"
+               "dodge-flyer"
+               "dodge-flyer asks the same question twice per frame")
+    (candidate "gap-window"
+               "perf/candidates/gap-window.aura"
+               "over-gap?"
+               "over-gap? walks the whole stretch every frame to find the gap")
+    (candidate "wrong-scale"
+               "perf/candidates/wrong-scale.aura"
+               "pset"
+               "the score is doubled on the way in; the checksum has to reject it")))
+
+; ── the intend and the strategy genes ────────────────────────────────
+(define expert-intend
+  (hash "min-faster-pct" 10
+        "checksum" #t
+        "budget" 4
+        "protected" '()))
+
+(define strategy-genes
+  (list
+    (hash "id" "gene-ratio-2"
+          "ratio" 2
+          "actionable-ms" 1
+          "per-round" 2
+          "order" (list "hazard-window" "lane-clear-once"
+                        "gap-window" "wrong-scale"))
+    (hash "id" "gene-ratio-8"
+          "ratio" 8
+          "actionable-ms" 1
+          "per-round" 1
+          "order" (list "hazard-window" "lane-clear-once"
+                        "gap-window" "wrong-scale"))
+    (hash "id" "gene-high-threshold"
+          "ratio" 2
+          "actionable-ms" 1000000
+          "per-round" 1
+          "order" (list "hazard-window"))
+    (hash "id" "gene-drop-checksum"
+          "ratio" 2
+          "actionable-ms" 1
+          "per-round" 1
+          "checksum" #f
+          "order" (list "wrong-scale" "hazard-window"))))
+
+; ── the run ──────────────────────────────────────────────────────────
+(define worker-path
+  (let ((w (getenv "AURA_PERF_WORKER")))
+    (if (and (string? w) (> (string-length w) 0)) w "worker.aura")))
+
+(define spec
+  (hash "label" "aura-runner-autopilot"
+        "seed-path" seed-path
+        "worker" worker-path
+        "target" "next-hazard"
+        "kernel" "autopilot-kernel"
+        "out-dir" "perf/out"
+        "heldout-n" 3
+        "repeats" 5
+        "profile-repeats" 3
+        "min-speedup-pct" 20
+        "screen-n" 1
+        "screen-slack-ms" 50
+        "genes" strategy-genes
+        "intend" expert-intend
+        "call" (lambda (rows) (autopilot-kernel rows))
+        "regions-fn" regions
+        "inputs" (lambda (n) (autopilot-take (autopilot-rows) n))
+        "oracle" golden-digest
+        "check-inputs" (lambda () (list (autopilot-take (autopilot-rows) 11)))
+        "count-defines" #t
+        "catalog" catalog))
+
+(define result (perf:autotune spec))
+(display "done\n")
+(exit (if (and (hash? result) (= (hash-ref result "intend-met" 0) 1)) 0 1))

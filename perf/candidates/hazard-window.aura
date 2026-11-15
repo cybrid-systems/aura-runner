@@ -1,0 +1,19 @@
+; next-hazard walks every piece of the stretch to find the nearest
+; hazard. The autopilot only acts on a hazard inside the look, and the
+; look is at most eighteen metres, so a hazard further ahead cannot
+; change the play: the scan can skip it.
+
+(define (next-hazard pieces x lane)
+  (let loop ((ps pieces) (best #f) (best-dx 9999.0))
+    (if (null? ps)
+      best
+      (let* ((q (car ps))
+             (k (piece-k q))
+             (dx (- (piece-x q) x)))
+        (if (or (> dx 24.0)
+                (not (or (= k 2.0) (= k 3.0) (= k 4.0) (= k 8.0)))
+                (not (hits-lane? q lane))
+                (< dx -0.05)
+                (>= dx best-dx))
+          (loop (cdr ps) best best-dx)
+          (loop (cdr ps) q dx))))))
