@@ -13,6 +13,11 @@ function mix3(a, b, t) {
   return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 }
 
+function laneHash(n) {
+  const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+  return x - Math.floor(x);
+}
+
 function mul(rgb, s) {
   return [rgb[0] * s, rgb[1] * s, rgb[2] * s];
 }
@@ -936,6 +941,56 @@ export function createRenderer(canvas) {
     const z0 = pz - 8;
     const z1 = pz + 42;
     const onRoad = (s, lateral) => sample(s, lateral);
+    function nextCoin(list, q) {
+      const lane = q.length > 5 ? q[5] : -1;
+      let best = null;
+      let bestDx = 3.6;
+      for (let j = 0; j < list.length; j++) {
+        const o = list[j];
+        if (o === q || o[0] !== 5) continue;
+        const ol = o.length > 5 ? o[5] : -1;
+        if (lane >= 0 && ol >= 0 && Math.abs(ol - lane) > 0.1) continue;
+        if (lane < 0 && ol >= 0) continue;
+        const dx = o[1] - q[1];
+        if (dx > 0.35 && dx < bestDx) {
+          bestDx = dx;
+          best = o;
+        }
+      }
+      return best;
+    }
+    // Five roadside shapes, picked from the arc so the row does not repeat
+    // one lollipop. Scale, offset and side stay stable as the camera moves.
+    function drawTree(along, lat, kind, scale, near, sway) {
+      const at = onRoad(along, lat);
+      const swayX = sway * Math.cos(at.psi);
+      const swayZ = -sway * Math.sin(at.psi);
+      const leaf = mix3(pal.leaf, pal.leaf2, kind === 2 ? 0.2 : 0.62);
+      const trunk = mix3(pal.trunk, [0.32, 0.2, 0.13], kind === 1 ? 0.15 : 0.4);
+      const top = [at.x + swayX, at.z + swayZ];
+      if (kind === 1) {
+        push(at.x, 0.72 * scale, at.z, 0.11 * scale, 1.45 * scale, 0.11 * scale, 0, trunk, 0.8, 0, at.psi);
+        push(top[0], 1.62 * scale, top[1], 0.38 * scale, 1.2 * scale, 0.38 * scale, 1, leaf, 0.7, 0.02, at.psi);
+      } else if (kind === 2) {
+        const pine = mul(leaf, 0.82);
+        push(at.x, 0.32 * scale, at.z, 0.12 * scale, 0.64 * scale, 0.12 * scale, 0, trunk, 0.78, 0, at.psi);
+        push(at.x + swayX * 0.25, 0.82 * scale, at.z + swayZ * 0.25, 0.92 * scale, 0.5 * scale, 0.92 * scale, 1, pine, 0.72, 0.02, at.psi);
+        push(at.x + swayX * 0.55, 1.28 * scale, at.z + swayZ * 0.55, 0.66 * scale, 0.46 * scale, 0.66 * scale, 1, leaf, 0.7, 0.03, at.psi);
+        push(top[0], 1.68 * scale, top[1], 0.34 * scale, 0.4 * scale, 0.34 * scale, 1, mix3(leaf, [0.72, 0.84, 0.58], 0.4), 0.68, 0.04, at.psi);
+      } else if (kind === 3) {
+        push(at.x, 0.46 * scale, at.z, 0.22 * scale, 0.92 * scale, 0.22 * scale, 0, trunk, 0.82, 0, at.psi);
+        push(top[0], 1.12 * scale, top[1], 1.28 * scale, 0.52 * scale, 1.15 * scale, 1, leaf, 0.7, 0.02, at.psi);
+        push(at.x + swayX * 0.4, 1.5 * scale, at.z + swayZ * 0.4, 0.78 * scale, 0.46 * scale, 0.78 * scale, 1, pal.leaf2, 0.68, 0.03, at.psi);
+      } else if (kind === 4) {
+        push(at.x, 0.38 * scale, at.z, 0.11 * scale, 0.76 * scale, 0.11 * scale, 0, trunk, 0.78, 0, at.psi);
+        push(top[0], 1.12 * scale, top[1], 0.9 * scale, 0.66 * scale, 0.9 * scale, 1, pal.flower, 0.42, 0.08, at.psi);
+        push(top[0] + 0.18 * scale, 1.32 * scale, top[1], 0.42 * scale, 0.36 * scale, 0.42 * scale, 1, pal.flower2, 0.38, 0.12, at.psi);
+      } else {
+        push(at.x, 0.4 * scale, at.z, 0.15 * scale, 0.8 * scale, 0.15 * scale, 0, trunk, 0.8, 0, at.psi);
+        push(top[0], 1.12 * scale, top[1], 0.98 * scale, 0.88 * scale, 0.98 * scale, near ? 1 : 0, leaf, 0.72, 0.02, at.psi);
+        if (near) push(top[0] + 0.16, 1.22 * scale, top[1], 0.11, 0.11, 0.11, 1, [0.95, 0.34, 0.3], 0.32, 0.16, at.psi);
+      }
+    }
     for (let z = Math.floor(z0 / 2) * 2; z < z1; z += 2) {
       const cz = z + 1;
       const s0 = cz - 1;
@@ -969,15 +1024,15 @@ export function createRenderer(canvas) {
         push(hedgeL.x, 0.1, hedgeL.z, 0.72, 0.22, 4.06, 0, pal.hedge, 0.8, 0, hedgeL.psi);
         push(hedgeR.x, 0.1, hedgeR.z, 0.72, 0.22, 4.06, 0, pal.hedge, 0.8, 0, hedgeR.psi);
       }
-      if (dist < 30 && ((z / 2) | 0) % 6 === 0) {
-        const sway = reduced ? 0 : Math.sin(st.time * 1.2 + z * 0.2) * 0.05;
+      if (dist < 34) {
+        const sway = reduced ? 0 : Math.sin(st.time * 1.15 + z * 0.17) * 0.06;
         for (const side of [-1, 1]) {
-          const tree = onRoad(cz, side * 5.4);
-          const swayX = sway * Math.cos(tree.psi);
-          const swayZ = -sway * Math.sin(tree.psi);
-          push(tree.x, 0.42, tree.z, 0.16, 0.84, 0.16, 0, pal.trunk, 0.8, 0);
-          const nearTree = dist < 16;
-          push(tree.x + swayX, 1.2, tree.z + swayZ, 1.05, 0.95, 1.05, nearTree ? 1 : 0, side < 0 ? pal.leaf : pal.leaf2, 0.72, 0.02);
+          if (laneHash(z * 0.17 + side * 13.0) > 0.62) continue;
+          const kind = Math.floor(laneHash(z * 0.09 + side * 3.7) * 5);
+          const scale = 0.78 + laneHash(z * 0.23 + side * 5.1) * 0.5;
+          const lat = side * (4.85 + laneHash(z * 0.31 + 2.2) * 1.35);
+          const along = cz + (laneHash(z * 0.47 + side * 8.0) - 0.5) * 1.6;
+          drawTree(along, lat, kind, scale, dist < 16, sway);
         }
       }
       const stride = pal.density >= 0.75 ? 2 : pal.density >= 0.4 ? 4 : 8;
@@ -1231,10 +1286,19 @@ export function createRenderer(canvas) {
       } else if (k === 4) {
         drawGate(q, zc, sc, glow);
       } else if (k === 5) {
-        const bobc = reduced ? 0 : Math.sin(st.time * 3.2 + q[1]) * 0.08;
-        const s = 0.34 * sc;
+        const bobc = reduced ? 0 : Math.sin(st.time * 4.6 - q[1] * 1.7) * 0.1;
+        const ripple = reduced ? 1 : 1 + Math.sin(st.time * 4.6 - q[1] * 1.7) * 0.08;
+        const s = 0.34 * sc * ripple;
         spin = here.psi;
         drawLoot(here, (q[4] + bobc) * sc, s, lootKind);
+        const mate = nextCoin(pieces, q);
+        if (mate) {
+          const mateS = mate[1] + mate[2] * 0.5;
+          const midS = (zc + mateS) / 2;
+          const midY = (q[4] + bobc + mate[4]) * 0.5;
+          const bead = onRoad(midS, laneX(lane < 0 ? 1 : lane));
+          drawLoot(bead, midY * sc, s * 0.42, lootKind);
+        }
         spin = 0;
       } else if (k === 6) {
         push(here.x, 0.06, here.z, Math.max(0.7, q[2]) * sc, 0.1, 0.72 * sc, 0, pal.spring, 0.35, 0.2, here.psi);

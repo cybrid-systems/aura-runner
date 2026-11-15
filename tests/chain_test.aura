@@ -1,0 +1,99 @@
+; Pickup strings follow the next move and the pace. Hazards stay put.
+(require "lib/gen")
+
+(define (show k v)
+  (display k)
+  (display " ")
+  (display v)
+  (newline))
+
+(define (coins ps)
+  (let loop ((xs ps) (acc (list)))
+    (if (null? xs)
+      acc
+      (loop (cdr xs) (if (= (piece-k (car xs)) 5.0) (cons (car xs) acc) acc)))))
+
+(define (ncoins ps)
+  (let loop ((xs (coins ps)) (n 0))
+    (if (null? xs) n (loop (cdr xs) (+ n 1)))))
+
+(define (ymin ps)
+  (let loop ((xs (coins ps)) (m 99.0))
+    (if (null? xs)
+      m
+      (let ((y (piece-y (car xs))))
+        (loop (cdr xs) (if (< y m) y m))))))
+
+(define (ymax ps)
+  (let loop ((xs (coins ps)) (m 0.0))
+    (if (null? xs)
+      m
+      (let ((y (piece-y (car xs))))
+        (loop (cdr xs) (if (> y m) y m))))))
+
+(define (min-gap ps)
+  (let ((xs (coins ps)))
+    (let loop ((ys xs) (m 99.0))
+      (if (or (null? ys) (null? (cdr ys)))
+        m
+        (let* ((a (car ys))
+               (b (car (cdr ys)))
+               (d (abs-diff (piece-x a) (piece-x b))))
+          (loop (cdr ys) (if (and (> d 0.2) (< d m)) d m)))))))
+
+(define (find-k ps k)
+  (let loop ((xs ps))
+    (if (null? xs)
+      #f
+      (if (= (piece-k (car xs)) k) (car xs) (loop (cdr xs))))))
+
+(define (lay text band)
+  (let ((rules (feel-rules band)))
+    (let ((laid (layout-form text rules)))
+      (if (not laid)
+        (list)
+        (string-pickups (hash-ref laid "pieces") band (hash-ref laid "x1"))))))
+
+(define (all-lane? ps lane)
+  (let loop ((xs (coins ps)))
+    (if (null? xs)
+      #t
+      (if (= (piece-lane (car xs)) lane)
+        (loop (cdr xs))
+        #f))))
+
+(define (clear-of? ps hazard)
+  (if (not hazard)
+    #f
+    (let ((x1 (piece-x hazard))
+          (x2 (+ (piece-x hazard) (piece-w hazard))))
+      (let loop ((xs (coins ps)))
+        (if (null? xs)
+          #t
+          (let ((x (piece-x (car xs))))
+            (if (and (< x x2) (> (+ x 0.42) x1))
+              #f
+              (loop (cdr xs)))))))))
+
+(define wave (lay "(seq (ground 10.4) (coin 0.7) (ground 12))" 0))
+(define wave-fast (lay "(seq (ground 10.4) (coin 0.7) (ground 12))" 4))
+(define arc (lay "(seq (ground 8) (coin 0.7) (ground 3.2) (hurdle 0.45 0.7) (ground 8))" 0))
+(define arc-plain (let ((laid (layout-form "(seq (ground 8) (coin 0.7) (ground 3.2) (hurdle 0.45 0.7) (ground 8))" (feel-rules 0))))
+                    (hash-ref laid "pieces")))
+(define lane (lay "(seq (ground 8) (block 1 1) (coin-lane 1 0.7) (ground 12))" 0))
+(define low (lay "(seq (ground 8) (coin 0.7) (ground 3.2) (gate 0.72 0.8) (ground 8))" 0))
+(define open (let ((ch (pattern-chunk 1 0 0 8.0)))
+               (string-pickups (hash-ref ch "pieces") 0 (hash-ref ch "x1"))))
+
+(show "wave-n" (if (>= (ncoins wave) 4) 1 0))
+(show "wave-low" (if (and (>= (ymin wave) 0.45) (<= (ymax wave) 0.85)) 1 0))
+(show "wave-step" (let ((g (min-gap wave))) (if (and (> g 1.2) (< g 1.8)) 1 0)))
+(show "pace" (if (> (min-gap wave-fast) (+ (min-gap wave) 0.6)) 1 0))
+(show "rise" (if (> (ymax arc) (+ (ymin arc) 0.35)) 1 0))
+(show "hurdle" (let ((a (find-k arc 3.0)) (b (find-k arc-plain 3.0)))
+                 (if (and a b (< (abs-diff (piece-x a) (piece-x b)) 0.01)) 1 0)))
+(show "clear" (if (clear-of? arc (find-k arc 3.0)) 1 0))
+(show "open-lane" (if (and (>= (ncoins lane) 3) (all-lane? lane 2.0)) 1 0))
+(show "slide" (if (and (>= (ncoins low) 3) (<= (ymax low) 0.55)) 1 0))
+(show "teach" (if (and (>= (ncoins open) 4) (all-lane? open 2.0)) 1 0))
+(void)

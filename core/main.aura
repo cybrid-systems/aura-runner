@@ -486,7 +486,7 @@
   (let* ((margin (if (and (pair? rest) (number? (car rest)))
                    (exact->inexact (car rest))
                    9.0))
-         (placed (shift-onto pieces next-x))
+         (placed (shift-onto (string-pickups pieces b span) next-x))
          (id next-id)
          (x0 next-x)
          (x1 (+ next-x span))
