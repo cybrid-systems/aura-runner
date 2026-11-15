@@ -165,7 +165,9 @@ async function drive() {
     let sawSay = false;
     let sawRunner = false;
     let maxChunks = 0;
-    const deadline = Date.now() + 40000;
+    // The x86 nightly can spend this whole window before the kept garden
+    // and the runner are both on the wire. Stop as soon as they are.
+    const deadline = Date.now() + 75000;
     while (Date.now() < deadline && !(sawMotif && sawScene && sawCue && sawPal && sawShape && sawSay && sawRunner)) {
       io.send({ op: "tick", jump: 0, slide: 0, lane: 0 });
       batch = await readUntil(io, (m) => m.op === "state", 40);
@@ -328,26 +330,44 @@ async function screenshots() {
     if (!names.includes("mochi") || !names.includes("beep")) {
       throw new Error("companions missing " + pals);
     }
-    const deadline = Date.now() + 40000;
+    // Headless Chrome pauses requestAnimationFrame while this process is
+    // only reading the page, so a single pump per CDP round trip lets the
+    // run fall behind the mock. The page itself waits between ticks, which
+    // also gives the socket a turn to deliver the kept garden.
+    const deadline = Date.now() + 90000;
     let sky = "";
     let chat = "";
     let heroNow = "";
     let roster = "";
     let sawBodySay = false;
+    await cdp.call("Runtime.evaluate", {
+      expression: `(() => {
+        if (window.__lumenDrive) return 0;
+        window.__lumenDrive = setInterval(() => {
+          if (window.__lumenPump) window.__lumenPump();
+        }, 50);
+        return 1;
+      })()`,
+      returnByValue: true,
+    });
     while (Date.now() < deadline) {
       const value = await cdp.call("Runtime.evaluate", {
-        expression: `(() => {
-          if (window.__lumenPump) window.__lumenPump();
+        expression: `(() => new Promise(async (resolve) => {
+          for (let i = 0; i < 8; i++) {
+            if (window.__lumenPump) window.__lumenPump();
+            await new Promise((r) => setTimeout(r, 40));
+          }
           const root = document.documentElement;
-          return {
+          resolve({
             sky: root.dataset.sky || "",
             chat: root.dataset.chat || "",
             hero: root.dataset.hero || "",
             pals: root.dataset.pals || "",
             body: document.body.innerText || "",
             chatGone: document.getElementById("chat") === null,
-          };
-        })()`,
+          });
+        }))()`,
+        awaitPromise: true,
         returnByValue: true,
       });
       const probe = (value.result && value.result.value) || {};
@@ -362,7 +382,6 @@ async function screenshots() {
       }
       if (body.includes(MOTIF_SAY)) sawBodySay = true;
       if ((sky.startsWith("0.9") || sky.startsWith("0.8")) && chat.includes(MOTIF_SAY) && sawBodySay && heroNow && heroNow !== "keeper") break;
-      await new Promise((r) => setTimeout(r, 40));
     }
     if (!chat.includes(MOTIF_SAY) || !sawBodySay) {
       throw new Error("chat missing the model sentence " + chat + " sky " + sky + " mock " + JSON.stringify(mock.hits) + " page " + JSON.stringify(cdp.logs) + "\n" + core.log().slice(-1500));
