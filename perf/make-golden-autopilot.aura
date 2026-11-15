@@ -1,0 +1,39 @@
+; Writes perf/golden-autopilot.txt: the expected digest of the
+; autopilot's own trace.
+;
+; Run it after lib/gen.aura, lib/phys.aura or the workload changes:
+;
+;   aura --preset dev perf/make-golden-autopilot.aura
+;
+; The file is a plain table: line n is the digest of the first n+1
+; seeded stretches. A candidate that plays a stretch differently changes
+; the digest, and the checksum rejects it.
+
+(require "std/string" all:)
+(require "./seed-source-autopilot")
+
+(require "std/process" all:)
+(shell "mkdir -p perf/out")
+(write-file "perf/out/seed-autopilot.aura" (seed-source-autopilot))
+
+(set-code (read-file "perf/out/seed-autopilot.aura"))
+(eval-current)
+
+(define GOLDEN-STRETCHES 11)
+
+(define lines
+  (let loop ((n 1) (acc '()))
+    (if (> n GOLDEN-STRETCHES)
+        (reverse acc)
+        (loop (+ n 1) (cons (autopilot-kernel (autopilot-take (autopilot-rows) n)) acc)))))
+
+(define text
+  (let loop ((xs lines) (acc ""))
+    (if (null? xs)
+        acc
+        (loop (cdr xs) (string-append acc (car xs) "\n")))))
+
+(write-file "perf/golden-autopilot.txt" text)
+(display "wrote perf/golden-autopilot.txt ")
+(display (length lines))
+(display " lines\n")

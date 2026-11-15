@@ -1,0 +1,120 @@
+; The autopilot workload: the fairness gate's own path.
+;
+; Appended to lib/phys.aura + lib/sexp.aura + lib/gen.aura to form the
+; perf seed. The autopilot plays every seeded stretch of every band,
+; the same stretches play-review walks, and the digest is the runner's
+; state every tenth frame plus the verdict. A candidate that plays the
+; stretch differently shows up in the digest, so the checksum is the
+; play-review output and more.
+
+(define (feel-rules band)
+  (cond
+    ((= band 0) (rules-of 32.0 11.2 8.0 0.48 0.12 0.12))
+    ((= band 1) (rules-of 31.4 11.5 10.0 0.50 0.12 0.12))
+    ((= band 2) (rules-of 30.8 11.8 12.0 0.52 0.12 0.12))
+    ((= band 3) (rules-of 30.2 12.1 13.0 0.54 0.12 0.12))
+    (else (rules-of 29.6 12.4 14.0 0.56 0.12 0.12))))
+
+; The seeded stretches, in the order play-review walks them.
+(define (autopilot-rows)
+  (let loop ((band 0) (acc '()))
+    (if (> band 4)
+        (reverse acc)
+        (let ((rules (feel-rules band)))
+          (let loop2 ((xs (pattern-table band)) (acc acc))
+            (if (null? xs)
+                (loop (+ band 1) acc)
+                (loop2 (cdr xs)
+                       (cons (list band (car xs) rules) acc))))))))
+
+(define (autopilot-take xs n)
+  (let loop ((ys xs) (i 0) (acc '()))
+    (if (or (null? ys) (>= i n))
+        (reverse acc)
+        (loop (cdr ys) (+ i 1) (cons (car ys) acc)))))
+
+; One stretch, played by the autopilot under the strict rules. The
+; digest is the runner's position and lane every tenth frame, then the
+; verdict: clear or stuck.
+(define (autopilot-digest row)
+  (let* ((band (car row))
+         (specs (car (cdr row)))
+         (rules (car (cdr (cdr row))))
+         (text (string-append "(seq" (specs-src specs) ")"))
+         (laid (layout-form (form-text text) rules)))
+    (if (not (hash? laid))
+        "no-layout;"
+        (let ((pieces (hash-ref laid "pieces" '()))
+              (strict (strict-rules rules)))
+          (let loop ((k 0) (p (make-player 0.4)) (sim pieces) (acc ""))
+            (let ((end (chunk-end sim)))
+              (if (or (>= k 900) (not (player-alive? p)) (>= (player-x p) end))
+                  (string-append acc
+                                 (if (and (player-alive? p) (>= (player-x p) (- end 0.05)))
+                                     "clear;" "stuck;"))
+                  (let* ((p1 (autopilot-press p sim strict))
+                         (r (step p1 sim strict PHYS-DT))
+                         (p2 (car r)))
+                    (loop (+ k 1) p2 (car (cdr r))
+                          (if (= (modulo k 10) 0)
+                              (string-append acc (number->string (player-x p2)) ","
+                                             (number->string (pxs p2 9)) ";")
+                              acc))))))))))
+
+; The kernel the runtime measures: the rows it is given, one digest each.
+(define (autopilot-kernel rows)
+  (let loop ((xs rows) (acc ""))
+    (if (null? xs)
+        acc
+        (loop (cdr xs) (string-append acc (autopilot-digest (car xs)))))))
+
+; The strategy the runtime rebinds. The order names the catalog ids.
+(define (perf-strategy ctx)
+  (let* ((mine (hash-ref ctx "mine"))
+         (profile (hash-ref ctx "profile" (hash)))
+         (mined (mine profile))
+         (class (hash-ref mined "class" "")))
+    (hash "rank" "region-timer"
+          "hotspot" (hash-ref mined "hot-node" "")
+          "class" class
+          "site" (hash-ref mined "site" "")
+          "prefix" (hash-ref mined "prefix" '())
+          "order" (list "hazard-window" "lane-clear-once" "block-window"
+                        "wrong-scale")
+          "per-round" 2)))
+
+; The worldline measurement: the target measures its own tree.
+(define saved-next-hazard next-hazard)
+(define saved-dodge-flyer dodge-flyer)
+(define saved-dodge-block dodge-block)
+
+(define (autopilot-worldline-measure kernel rows)
+  (let ((box (hash "next-hazard" 0 "dodge-flyer" 0 "dodge-block" 0)))
+    (set! next-hazard
+      (lambda (pieces x lane)
+        (hash-set! box "next-hazard" (+ (hash-ref box "next-hazard" 0) 1))
+        (saved-next-hazard pieces x lane)))
+    (set! dodge-flyer
+      (lambda (p pieces pace)
+        (hash-set! box "dodge-flyer" (+ (hash-ref box "dodge-flyer" 0) 1))
+        (saved-dodge-flyer p pieces pace)))
+    (set! dodge-block
+      (lambda (p pieces pace)
+        (hash-set! box "dodge-block" (+ (hash-ref box "dodge-block" 0) 1))
+        (saved-dodge-block p pieces pace)))
+    (try (kernel rows) (catch (e) #f))
+    (set! next-hazard saved-next-hazard)
+    (set! dodge-flyer saved-dodge-flyer)
+    (set! dodge-block saved-dodge-block)
+    (list (hash "name" "next-hazard"
+                "calls" (hash-ref box "next-hazard" 0)
+                "task-clock" 0
+                "stack" (list "autopilot-kernel" "next-hazard"))
+          (hash "name" "dodge-flyer"
+                "calls" (hash-ref box "dodge-flyer" 0)
+                "task-clock" 0
+                "stack" (list "autopilot-kernel" "dodge-flyer"))
+          (hash "name" "dodge-block"
+                "calls" (hash-ref box "dodge-block" 0)
+                "task-clock" 0
+                "stack" (list "autopilot-kernel" "dodge-block")))))

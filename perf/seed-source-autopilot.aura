@@ -1,0 +1,29 @@
+; The seed of the autopilot target: the target program's own source.
+;
+; lib/gen.aura needs lib/phys.aura and lib/sexp.aura, so the seed is
+; the three files flattened into one module: the runtime set-codes it,
+; and the defines a candidate rebinds live there.
+;
+; Three float literals of lib/phys.aura are written as their exact
+; quotients. The Aura runtime unparses a float whose shortest spelling
+; is scientific (0.0001 -> "1e-04") as "1e-04.0", which is not a
+; number, and the mutation path re-parses that text. See
+; cybrid-systems/aura#5295. Each replacement is the same double.
+
+(define (seed-source-autopilot)
+  (let ((phys (read-file "lib/phys.aura"))
+        (sexp (read-file "lib/sexp.aura"))
+        (gen (read-file "lib/gen.aura")))
+    (string-append
+     (string-replace
+      (string-replace
+       (string-replace phys "0.0000001" "(/ 1.0 (* 1000.0 10000.0))")
+       "0.0008" "(/ 8.0 10000.0)")
+      "0.0001" "(/ 1.0 10000.0)")
+     "\n"
+     sexp "\n"
+     (string-replace
+      (string-replace gen "(require \"lib/phys\")\n" "")
+      "(require \"lib/sexp\")\n" "")
+     "\n"
+     (read-file "perf/workload-autopilot.aura"))))
