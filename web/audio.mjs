@@ -1,14 +1,17 @@
 // Small synthesized cues, plus Symphony No. 29 when the bridge can see the
-// recording. The first gesture unlocks the audio context and starts the piece.
+// recording. play() has to run inside the key, pointer, or touch listener.
+// A later animation frame is no longer a user gesture, and the browser drops it.
+// The piece goes straight to the speakers. Routing it through a media-element
+// source leaves it silent while that context is still suspended.
 
 export function createAudio() {
   let ctx = null;
   let muted = false;
   let master = null;
-  let musicGain = null;
   let song = null;
   let songState = "wait";
   let nextBeat = 0;
+  const SONG_VOL = 0.8;
 
   function mark(state, time) {
     const root = document.documentElement;
@@ -22,48 +25,71 @@ export function createAudio() {
     if (!AC) return null;
     ctx = new AC();
     master = ctx.createGain();
-    master.gain.value = 0.18;
+    master.gain.value = muted ? 0 : 0.18;
     master.connect(ctx.destination);
-    musicGain = ctx.createGain();
-    musicGain.gain.value = muted ? 0 : 0.35;
-    musicGain.connect(ctx.destination);
     return ctx;
   }
 
   function ensureSong() {
-    if (song || songState === "soft" || !ctx) return;
-    const el = new Audio("/symphony.mp4");
+    if (song || songState === "soft") return;
+    const el = document.createElement("audio");
+    el.src = "/symphony.mp4";
     el.loop = true;
+    el.playsInline = true;
     el.preload = "metadata";
-    try {
-      ctx.createMediaElementSource(el).connect(musicGain);
-    } catch {
-      songState = "soft";
-      mark("soft");
-      return;
-    }
+    el.volume = SONG_VOL;
+    el.setAttribute("playsinline", "");
+    el.setAttribute("aria-hidden", "true");
+    el.style.cssText = "position:fixed;left:0;top:0;width:0;height:0;opacity:0;pointer-events:none";
     el.addEventListener("error", () => {
       song = null;
       songState = "soft";
       mark("soft");
     });
+    document.body.appendChild(el);
     song = el;
   }
 
-  function startSong() {
-    const c = ensure();
-    if (!c || muted) return;
-    if (c.state === "suspended") c.resume();
-    ensureSong();
-    if (!song || !song.paused) return;
-    song.play().then(() => {
-      songState = "play";
-      mark("play", song.currentTime);
-    }).catch(() => {});
+  function startSong(fromUser) {
+    if (muted) return;
+    if (fromUser) {
+      const c = ensure();
+      if (c && c.state === "suspended") c.resume();
+      ensureSong();
+    }
+    if (!song || !song.paused) {
+      if (song && !song.paused) mark("play", song.currentTime);
+      return;
+    }
+    const pending = song.play();
+    if (pending && typeof pending.then === "function") {
+      pending.then(() => {
+        if (!song || song.paused) return;
+        songState = "play";
+        delete document.documentElement.dataset.musicError;
+        mark("play", song.currentTime);
+      }).catch((err) => {
+        document.documentElement.dataset.musicError = (err && err.name) || "play";
+      });
+    }
   }
 
+  function fromMute(e) {
+    const t = e.target;
+    return !!(t && t.closest && t.closest("#mute"));
+  }
+
+  function onGesture(e) {
+    if (e.repeat || muted || fromMute(e)) return;
+    startSong(true);
+  }
+
+  window.addEventListener("keydown", onGesture, true);
+  window.addEventListener("pointerdown", onGesture, true);
+  window.addEventListener("touchstart", onGesture, { capture: true, passive: true });
+
   function unlock() {
-    startSong();
+    startSong(false);
   }
 
   function tone(freq, dur, type, gain) {
@@ -115,13 +141,13 @@ export function createAudio() {
   function pop() { tone(180, 0.09, "sine", 0.4); tone(520, 0.12, "triangle", 0.28); }
 
   function music(reduced) {
-    if (!ctx || muted) return;
-    if (song) {
-      if (song.paused && ctx.state === "running") startSong();
-      if (!song.paused) mark("play", song.currentTime);
+    if (muted) return;
+    if (song && !song.paused) {
+      songState = "play";
+      mark("play", song.currentTime);
       return;
     }
-    if (songState !== "soft" || reduced) return;
+    if (songState !== "soft" || reduced || !ctx) return;
     if (ctx.currentTime < nextBeat) return;
     const scale = [262, 294, 330, 392, 440];
     const f = scale[Math.floor(ctx.currentTime * 2) % scale.length];
@@ -133,13 +159,13 @@ export function createAudio() {
   function setMuted(v) {
     muted = v;
     if (master) master.gain.value = v ? 0 : 0.18;
-    if (musicGain) musicGain.gain.value = v ? 0 : 0.35;
+    if (song) song.volume = v ? 0 : SONG_VOL;
     if (v) {
       if (song && !song.paused) song.pause();
       mark("mute", song ? song.currentTime : 0);
       return;
     }
-    startSong();
+    startSong(true);
   }
 
   return { unlock, jump, slide, coin, pickup, cheer, rise, nice, spring, die, keep, land, near, pop, music, setMuted, get muted() { return muted; } };
