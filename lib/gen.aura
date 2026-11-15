@@ -998,3 +998,193 @@
   (let* ((rng (make-random (modulo (+ seed (* index 9973) (* band 13)) 2147483646)))
          (picked (pick-pattern band rng)))
     (string-append "(seq" (specs-src (car picked)) ")")))
+
+; A pickup becomes a short string when the stretch is shown. Spacing is a
+; slice of time, so the same chain is the same rhythm at every pace. The
+; shape follows the next move: a rise into a jump, a low line into a slide,
+; the open lane beside a block, otherwise a low wave you can take running.
+; The authored layout stays as written for the fairness gate. This pass
+; runs when the chunk is placed, and it does not move a hazard.
+(define CHAIN-DT 0.18)
+(define CHAIN-MAX 6)
+
+(define (coin-piece? q)
+  (= (piece-k q) 5.0))
+
+(define (mover? k)
+  (or (= k 2.0) (= k 3.0) (= k 4.0) (= k 7.0)))
+
+(define (insert-x q xs)
+  (if (null? xs)
+    (list q)
+    (if (<= (piece-x q) (piece-x (car xs)))
+      (cons q xs)
+      (cons (car xs) (insert-x q (cdr xs))))))
+
+(define (sort-by-x ps)
+  (let loop ((xs ps) (acc (list)))
+    (if (null? xs)
+      acc
+      (loop (cdr xs) (insert-x (car xs) acc)))))
+
+(define (take-coins pieces)
+  (let loop ((ps pieces) (acc (list)))
+    (if (null? ps)
+      (sort-by-x acc)
+      (loop (cdr ps) (if (coin-piece? (car ps)) (cons (car ps) acc) acc)))))
+
+(define (drop-coins pieces)
+  (let loop ((ps pieces) (acc (list)))
+    (if (null? ps)
+      (reverse acc)
+      (loop (cdr ps) (if (coin-piece? (car ps)) acc (cons (car ps) acc))))))
+
+(define (cluster-coins coins gap)
+  (if (null? coins)
+    (list)
+    (let loop ((xs (cdr coins)) (cur (list (car coins))) (acc (list)))
+      (if (null? xs)
+        (reverse (cons (reverse cur) acc))
+        (let ((dx (- (piece-x (car xs)) (piece-x (car cur)))))
+          (if (<= dx gap)
+            (loop (cdr xs) (cons (car xs) cur) acc)
+            (loop (cdr xs) (list (car xs)) (cons (reverse cur) acc))))))))
+
+(define (next-mover pieces x)
+  (let loop ((ps pieces) (best #f) (best-x 100000.0))
+    (if (null? ps)
+      best
+      (let ((q (car ps)))
+        (if (and (mover? (piece-k q))
+                 (> (piece-x q) (+ x 0.25))
+                 (< (piece-x q) best-x))
+          (loop (cdr ps) q (piece-x q))
+          (loop (cdr ps) best best-x))))))
+
+(define (nearest-block pieces x reach)
+  (let loop ((ps pieces) (best #f) (best-d reach))
+    (if (null? ps)
+      best
+      (let ((q (car ps)))
+        (if (= (piece-k q) 7.0)
+          (let ((d (abs-diff (piece-x q) x)))
+            (if (< d best-d)
+              (loop (cdr ps) q d)
+              (loop (cdr ps) best best-d)))
+          (loop (cdr ps) best best-d))))))
+
+(define (chain-mode mover x0 pace)
+  (if (not mover)
+    "wave"
+    (let ((dx (- (piece-x mover) x0))
+          (k (piece-k mover)))
+      (if (or (> dx (* pace 2.4)) (< dx 0.3))
+        "wave"
+        (cond
+          ((or (= k 2.0) (= k 3.0)) "arc")
+          ((= k 4.0) "low")
+          ((= k 7.0) "lane")
+          (else "wave"))))))
+
+(define (open-lane block-lane prefer)
+  (cond
+    ((and (>= prefer 0.0) (not (= prefer block-lane))) prefer)
+    ((= block-lane 0.0) 2.0)
+    ((= block-lane 2.0) 0.0)
+    (else 2.0)))
+
+(define (chain-lane group hazards x0 pace)
+  (let ((prefer (piece-lane (car group)))
+        (block (nearest-block hazards x0 (max 6.0 (* pace 0.8)))))
+    (if block
+      (open-lane (piece-lane block) prefer)
+      prefer)))
+
+(define (chain-limit mover mode x0 pace span)
+  (let ((ahead (+ x0 (* pace 1.15)))
+        (end (- span 0.45)))
+    (let ((cap (if (< ahead end) ahead end)))
+      (if (not mover)
+        cap
+        (let ((hx (piece-x mover))
+              (far (if (and (string=? mode "arc") (= (piece-k mover) 2.0))
+                     (+ hx (piece-w mover))
+                     (- hx 0.55))))
+          (if (< far cap) far cap))))))
+
+(define (fit-count x0 limit step)
+  (let loop ((i 0))
+    (let ((x (+ x0 (* step (exact->inexact i)))))
+      (if (or (>= i CHAIN-MAX) (> x limit))
+        i
+        (loop (+ i 1))))))
+
+(define (chain-y mode i n base)
+  (let* ((den (if (<= n 1) 1.0 (exact->inexact (- n 1))))
+         (u (/ (exact->inexact i) den)))
+    (cond
+      ((string=? mode "arc")
+       (let ((peak (min 1.32 (max 1.05 base))))
+         (+ 0.56 (* u (- peak 0.56)))))
+      ((string=? mode "low") 0.48)
+      ((string=? mode "lane") 0.66)
+      (else (+ 0.52 (* 0.72 (* u (- 1.0 u))))))))
+
+(define (overlaps-mover? pieces x lane mode)
+  (let loop ((ps pieces))
+    (if (null? ps)
+      #f
+      (let* ((q (car ps))
+             (k (piece-k q))
+             (x1 (piece-x q))
+             (x2 (+ x1 (piece-w q))))
+        (if (and (mover? k)
+                 (not (and (string=? mode "arc") (= k 2.0)))
+                 (or (< lane -0.5) (< (piece-lane q) -0.5) (= lane (piece-lane q)))
+                 (< x x2)
+                 (> (+ x 0.42) x1))
+          #t
+          (loop (cdr ps)))))))
+
+(define (emit-chain hazards x0 lane n step mode base)
+  (let loop ((i 0) (acc (list)))
+    (if (>= i n)
+      (reverse acc)
+      (let ((x (+ x0 (* step (exact->inexact i)))))
+        (if (overlaps-mover? hazards x lane mode)
+          (loop (+ i 1) acc)
+          (loop (+ i 1)
+                (cons (piece 5.0 x 0.42 0.42 (chain-y mode i n base) lane) acc)))))))
+
+(define (chain-for group hazards step pace span)
+  (let* ((head (car group))
+         (x0 (piece-x head))
+         (base (piece-y head))
+         (mover (next-mover hazards x0))
+         (mode (chain-mode mover x0 pace))
+         (lane (chain-lane group hazards x0 pace))
+         (limit (chain-limit mover mode x0 pace span))
+         (n (fit-count x0 limit step)))
+    (if (< n 2)
+      group
+      (let ((made (emit-chain hazards x0 lane n step mode base)))
+        (if (< (length made) 2) group made)))))
+
+(define (lay-groups kept groups step pace span)
+  (let loop ((gs groups) (acc kept))
+    (if (null? gs)
+      acc
+      (let ((stop (if (pair? (cdr gs)) (piece-x (car (car (cdr gs)))) span)))
+        (loop (cdr gs)
+              (append acc (chain-for (car gs) kept step pace (min span stop))))))))
+
+(define (string-pickups pieces band span)
+  (if (or (not (pair? pieces)) (not (number? span)) (<= span 1.0))
+    pieces
+    (let* ((b (if (and (number? band) (>= band 0) (<= band 4)) band 0))
+           (pace (feel-speed (feel-for b)))
+           (step (max 1.15 (* pace CHAIN-DT)))
+           (groups (cluster-coins (take-coins pieces) (* step 1.7))))
+      (if (null? groups)
+        pieces
+        (lay-groups (drop-coins pieces) groups step pace span)))))
