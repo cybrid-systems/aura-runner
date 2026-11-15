@@ -1,0 +1,40 @@
+; Writes perf/golden.txt: the expected digest of the perf workload.
+;
+; The oracle of the perf spec reads this file, so a candidate is
+; compared against a value that does not come from the code under test.
+; Run it after lib/phys.aura changes:
+;
+;   aura --preset dev perf/make-golden.aura
+;
+; The file is a plain table: line n is the digest of the first n+1
+; courses. A candidate that changes the physics by one float changes
+; the digest, and the checksum rejects it.
+
+(require "lib/phys")
+(require "./workload")
+
+(define GOLDEN-COURSES 4)
+
+(define golden-path "perf/golden.txt")
+
+(define lines
+  (let loop ((n 1) (acc '()))
+    (if (> n GOLDEN-COURSES)
+        (reverse acc)
+        (loop (+ n 1) (cons (bench-kernel (perf-courses n)) acc)))))
+
+(define text
+  (let loop ((xs lines) (acc ""))
+    (if (null? xs)
+        acc
+        (loop (cdr xs) (string-append acc (car xs) "\n")))))
+
+(if (> (length lines) 0)
+    (begin
+      (write-file golden-path text)
+      (display "wrote ")
+      (display golden-path)
+      (display " ")
+      (display (length lines))
+      (display " lines\n"))
+    (display "no lines\n"))
