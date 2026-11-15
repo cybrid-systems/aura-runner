@@ -1,0 +1,32 @@
+; Every seeded pattern passes the walk critic at its feel pace.
+; This does not run the autopilot. scripts/play-review.aura does.
+(require "lib/review")
+(require "lib/gen")
+
+(define (row-ok? band i specs)
+  (let ((text (string-append "(seq" (specs-src specs) ")")))
+    (let ((r (review-text text (feel-rules band))))
+      (if (and (hash? r) (hash-ref r "ok"))
+        1
+        (begin
+          (display "band ")
+          (display band)
+          (display " row ")
+          (display i)
+          (display " ")
+          (display (hash-ref r "hint" ""))
+          (newline)
+          0)))))
+
+(define (walk band)
+  (let loop ((xs (pattern-table band)) (i 0) (bad 0))
+    (if (null? xs)
+      bad
+      (loop (cdr xs)
+            (+ i 1)
+            (+ bad (if (= (row-ok? band i (car xs)) 1) 0 1))))))
+
+(let ((bad (+ (walk 0) (walk 1) (walk 2) (walk 3) (walk 4))))
+  (display "patterns ")
+  (display (if (= bad 0) 1 0))
+  (newline))

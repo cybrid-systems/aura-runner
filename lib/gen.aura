@@ -17,6 +17,29 @@
 (define REF-SPEED 8.0)
 (define BEAT-S 1.3)
 (define REST-S 0.6)
+; One table for the live run and for play-review. Coyote and forgive
+; stay put while gravity, jump, slide and speed ease with the band.
+; The list is gravity, jump, slide, speed.
+(define FEEL-COYOTE 0.12)
+(define FEEL-FORGIVE 0.12)
+
+(define (feel-for b)
+  (cond
+    ((= b 0) (list 32.0 11.2 0.48 8.0))
+    ((= b 1) (list 31.4 11.5 0.50 10.0))
+    ((= b 2) (list 30.8 11.8 0.52 12.0))
+    ((= b 3) (list 30.2 12.1 0.54 13.0))
+    (else (list 29.6 12.4 0.56 14.0))))
+
+(define (feel-g f) (list-ref f 0))
+(define (feel-jump f) (list-ref f 1))
+(define (feel-slide f) (list-ref f 2))
+(define (feel-speed f) (list-ref f 3))
+
+(define (feel-rules band)
+  (let ((f (feel-for band)))
+    (rules-of (feel-g f) (feel-jump f) (feel-speed f) (feel-slide f)
+              FEEL-COYOTE FEEL-FORGIVE)))
 ; The camera looks one beat ahead: pace times 1.3 s. At 8 m/s that is
 ; 10.4 m, and at 14 m/s it is 18.2 m. Spare and the autopilot use that
 ; same distance, so the check matches the picture.
@@ -97,6 +120,8 @@
          (list (list (piece 6.0 x w 0.32 0.0)) (+ x w 0.7)))))
     ; Side or centre crate. Does not advance the track, so it sits beside
     ; the piece that follows and the fair centre line keeps its timing.
+    ; BLOCK-INSET is how far onto that ground the crate is drawn. The
+    ; critic adds it back when it measures the rest before the next move.
     ((string=? kind "block")
      (let ((lane (spec-num sp 1 0.0))
            (w (spec-num sp 2 1.1))
@@ -105,7 +130,7 @@
                (not (positive-range? w 0.5 2.2))
                (< style 0.0))
          #f
-         (list (list (piece 7.0 (+ x 0.15) w 1.65 0.0 lane style)) x))))
+         (list (list (piece 7.0 (+ x BLOCK-INSET) w 1.65 0.0 lane style)) x))))
     ((string=? kind "coin-lane")
      (let ((lane (spec-num sp 1 2.0))
            (y (spec-num sp 2 1.3)))
@@ -136,6 +161,8 @@
          (list (list) x)
          #f)))
     (else #f)))
+
+(define BLOCK-INSET 0.15)
 
 (define (lane-id? v)
   (or (= v 0.0) (= v 1.0) (= v 2.0)))
@@ -244,7 +271,8 @@
 ; off a centre block, then one jump. A full beat separates those moves.
 ; Coins sit on lane 2, the lane that step chooses, low enough to take
 ; while running. The flyer has its own beat, off the gate and off that
-; coin line. Later bands may mix moves.
+; coin line. A rest between a gate and a flyer puts the toy on the gate.
+; Later bands may mix moves.
 ; Band 4 keeps a lantern or a bubble, the slower of the toys.
 (define patterns-0
   (list
@@ -307,7 +335,7 @@
           (list "coin" 1.6) (list "ground" 10.4) (list "gap" 1.55)
           (list "ground" 4.8) (list "spring" 0.75) (list "ground" 4.8))
     (list (list "ground" 10.4) (list "block" 1.0 1.0 "mushroom") (list "ground" 10.4)
-          (list "gate" 0.62 0.7 "vine") (list "ground" 4.8)
+          (list "gate" 0.62 0.7 "vine") (list "ground" 10.4)
           (list "flyer" "leaf" 0.0 0.74) (list "ground" 10.4)
           (list "gap" 1.7) (list "ground" 10.4) (list "hurdle" 0.75 0.7 "log")
           (list "ground" 4.8) (list "coin" 1.5) (list "spring" 0.7)
@@ -324,7 +352,7 @@
           (list "ground" 4.8))
     (list (list "ground" 10.4) (list "block" 1.0 1.0 "bush") (list "ground" 10.4)
           (list "gap" 1.9) (list "ground" 10.4)
-          (list "gate" 0.6 0.66 "lights") (list "ground" 4.8)
+          (list "gate" 0.6 0.66 "lights") (list "ground" 10.4)
           (list "flyer" "bubble" 2.0 0.7) (list "ground" 10.4)
           (list "hurdle" 0.88 0.68 "drum")
           (list "ground" 4.8) (list "coin" 1.5) (list "spring" 0.7)
@@ -419,8 +447,9 @@
         (geom (geom-violation pieces rules)))
     ; Geometry already failed, so skip the autopilot. A margin under a
     ; quarter-second is also a miss, and that check is a walk, not a sim.
-    ; Measured on v0.2.2: a full fair autopilot is about a second, so the
-    ; dream slices that work across ticks instead.
+    ; A full fair autopilot used to take a few seconds of wall time per
+    ; stretch. Field access and the far-piece skip cut that, and it is
+    ; still too much for one tick, so the dream path keeps a short slice.
     (let ((margin (if (> geom 0.0) 0.0 (spare-time pieces rules))))
       (let ((auto (cond
                     ((> geom 0.0) 1.0)
@@ -566,17 +595,27 @@
           (loop (cdr ps) q dx)
           (loop (cdr ps) best best-dx))))))
 
+; A piece this far from [x+lo, x+hi] cannot be the one the check wants.
+; The extra metre covers a pot or a gate that sticks out of its box.
+; The piece stays in the world; the scan only skips the lane test.
+(define (outside-window? q x lo hi)
+  (let ((px (piece-x q)))
+    (or (> px (+ (+ x hi) 1.0))
+        (< (+ (+ px (piece-w q)) 1.0) (+ x lo)))))
+
 (define (block-ahead? pieces x lane lo hi)
   (let loop ((ps pieces))
     (if (null? ps)
       #f
       (let ((q (car ps)))
-        (if (and (= (piece-k q) 7.0) (hits-lane? q lane))
+        (if (or (not (= (piece-k q) 7.0))
+                (outside-window? q x lo hi)
+                (not (hits-lane? q lane)))
+          (loop (cdr ps))
           (let ((dx (- (piece-x q) x)))
             (if (and (>= dx lo) (<= dx hi))
               #t
-              (loop (cdr ps))))
-          (loop (cdr ps)))))))
+              (loop (cdr ps)))))))))
 
 (define (time-left dx approach)
   (if (<= approach 0.1) 99.0 (/ dx approach)))
@@ -619,15 +658,17 @@
       p)))
 
 (define (flyer-blocking? pieces x lane pace)
-  (let loop ((ps pieces))
-    (if (null? ps)
-      #f
-      (let ((q (car ps)))
-        (if (and (= (piece-k q) 8.0)
-                 (hits-lane? q lane)
-                 (lane-commit? (- (piece-x q) x) (approach-of q pace) pace))
-          #t
-          (loop (cdr ps)))))))
+  (let ((hi (look-m pace)))
+    (let loop ((ps pieces))
+      (if (null? ps)
+        #f
+        (let ((q (car ps)))
+          (if (or (not (= (piece-k q) 8.0))
+                  (outside-window? q x -0.05 hi)
+                  (not (hits-lane? q lane))
+                  (not (lane-commit? (- (piece-x q) x) (approach-of q pace) pace)))
+            (loop (cdr ps))
+            #t))))))
 
 (define (flyer-lane-open? pieces x lane pace)
   (and (lane-clear? pieces x lane pace)

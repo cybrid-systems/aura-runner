@@ -15,6 +15,10 @@ jobs:
         env:
           AURA_SANDBOX: "off"
         run: aura test
+      - name: Seeded stretch notes
+        env:
+          AURA_SANDBOX: "off"
+        run: aura --quiet --preset dev scripts/play-review.aura
 
   frontend:
     runs-on: ubuntu-latest

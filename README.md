@@ -48,7 +48,7 @@ The files are one token each and are not printed:
 
 MiniMax uses `https://api.minimaxi.com/v1` and `MiniMax-M3.1-Flash`. `https://api.minimax.io` returns 401 for a China key, so the probe does not call it. An `LLM_API_KEY` already in the environment is left as it is, which is how the mock tests point at a local server.
 
-The model is asked for an obstacle phrase, a garden phrase, and one friend. Each reply starts with one short sentence, then an allowlisted s-expression. The line by the model name shows that sentence. A friend phrase also restyles the runner. Aura checks the form before it can appear. A rejected phrase is rolled back and the run continues. The calls run on fibers, so the run does not wait on them. A developer can play every seeded stretch with `aura --quiet --preset dev scripts/play-review.aura`, and a kept or turned-away phrase leaves a short note on the next model ask.
+The model is asked for an obstacle phrase, a garden phrase, and one friend. Each reply starts with one short sentence, then an allowlisted s-expression. The line by the model name shows that sentence. A friend phrase also restyles the runner. Aura checks the form before it can appear. A rejected phrase is rolled back and the run continues. The calls run on fibers, so the run does not wait on them. A developer can play every seeded stretch with `aura --quiet --preset dev scripts/play-review.aura`. Each line names the band, the spare to two decimals, and how many milliseconds that stretch took. A hard miss exits non-zero. `PLAY_REVIEW_LOOSE=1` prints the same notes and exits 0. A kept or turned-away phrase leaves a short note on the next model ask.
 
 ## What you feel
 
