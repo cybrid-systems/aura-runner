@@ -17,6 +17,7 @@ The first run downloads Aura nightly for this machine (Linux x86_64 or arm64) in
 | ↑, Space, or a tap | jump |
 | ↓ | slide |
 | ← → | change lane |
+| R, or Restart | start this run over |
 
 Left, A, a left swipe and a left stick all move the runner toward the left of the screen. A gamepad uses A to jump, B or down to slide, and the d-pad for lanes.
 

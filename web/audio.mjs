@@ -139,6 +139,7 @@ export function createAudio() {
   function land() { tone(140, 0.07, "sine", 0.3); }
   function near() { tone(740, 0.06, "sine", 0.22); tone(980, 0.08, "triangle", 0.12); }
   function pop() { tone(180, 0.09, "sine", 0.4); tone(520, 0.12, "triangle", 0.28); }
+  function ward() { tone(494, 0.09, "sine", 0.14); tone(740, 0.14, "triangle", 0.1); }
 
   function music(reduced) {
     if (muted) return;
@@ -168,5 +169,5 @@ export function createAudio() {
     startSong(true);
   }
 
-  return { unlock, jump, slide, coin, pickup, cheer, rise, nice, spring, die, keep, land, near, pop, music, setMuted, get muted() { return muted; } };
+  return { unlock, jump, slide, coin, pickup, cheer, rise, nice, spring, die, keep, land, near, pop, ward, music, setMuted, get muted() { return muted; } };
 }

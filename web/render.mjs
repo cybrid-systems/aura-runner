@@ -822,6 +822,44 @@ export function createRenderer(canvas) {
     }
   }
 
+  // Cloth, clasp, and circlet in the road frame. Negative ds trails
+  // behind the runner, toward the camera. spot() is the only placement.
+  function drawGear(spot, py, leanLat, sliding, t, reduced, gear, wardAmt, pal, stride) {
+    const rose = [0.86, 0.28, 0.32];
+    const gold = pal.cape;
+    const segs = reduced ? 2 : 3;
+    const neckY = py + (sliding ? 0.42 : 0.74);
+    const sway = reduced ? 0 : Math.sin(t * 2.4) * 0.04 + stride * 0.02;
+    for (let i = 0; i < segs; i++) {
+      const tip = reduced ? 0 : Math.sin(t * 2.4 + 0.5) * 0.02 * i;
+      const at = spot(-0.18 - i * 0.14, leanLat * 0.2 + sway + tip);
+      const cloth = i === 0 ? gold : rose;
+      const tall = Math.max(0.16, (sliding ? 0.22 : 0.42) - i * 0.05);
+      push(at.x, neckY - 0.04 - i * 0.05, at.z, 0.46 - i * 0.08, tall, 0.14, 0, cloth, 0.48, i === 0 ? 0.18 : 0.05);
+    }
+    if (gear >= 2) {
+      const clasp = spot(-0.2, leanLat + sway);
+      push(clasp.x, neckY + 0.12, clasp.z, 0.14, 0.14, 0.1, 1, gold, 0.16, 0.95);
+    }
+    if (gear >= 3 && !sliding) {
+      const hy = py + 1.08;
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        const at = spot(-0.08 + Math.sin(a) * 0.04, leanLat + Math.cos(a) * 0.28);
+        push(at.x, hy, at.z, 0.07, 0.045, 0.07, 0, gold, 0.18, 0.75);
+      }
+    }
+    const beads = Math.max(0, Math.min(5, Math.round((Number(wardAmt) || 0) * 5)));
+    if (beads > 0) {
+      const blue = [0.72, 0.9, 1];
+      for (let i = 0; i < beads; i++) {
+        const a = (i / 5) * Math.PI * 2 + (reduced ? 0 : t * 0.6);
+        const at = spot(Math.sin(a) * 0.28, leanLat + Math.cos(a) * 0.42);
+        push(at.x, py + 0.62, at.z, 0.11, 0.11, 0.11, 0, blue, 0.12, 0.85);
+      }
+    }
+  }
+
   function sproutOf(q, pz) {
     if (!q.born) return 1;
     const dist = q[1] - pz;
@@ -1410,6 +1448,7 @@ export function createRenderer(canvas) {
 
     drawFinish(st.goal);
 
+    if (st.event === "ward") burst(rx, py + 0.7, rz, [0.72, 0.9, 1], 8, 0.04, 4);
     if (st.event === "coin") {
       const kind = typeof st.loot === "string" ? st.loot : "coin";
       const rich = kind === "gem" ? [18, 0.11, 4]
@@ -1457,8 +1496,6 @@ export function createRenderer(canvas) {
         const torso = sliding ? 0.52 : 0.46 * widen;
         const hip = spot(0, leanLat);
         push(hip.x, torsoY, hip.z, torso, sliding ? 0.3 : 0.42 * squash, sliding ? 0.62 : 0.4, 0, pal.body, 0.35, 0.14);
-        const cape = spot(-0.28, leanLat + (reduced ? 0 : -stride * 0.04));
-        push(cape.x, torsoY - 0.02, cape.z, 0.1, 0.08, 0.22, 0, pal.cape, 0.2, 0.9);
         const hy = torsoY + (sliding ? 0.16 : 0.34 * squash);
         const head = spot(sliding ? 0.16 : 0, leanLat * 0.2);
         push(head.x, hy, head.z, sliding ? 0.32 : 0.44, sliding ? 0.26 : 0.4, sliding ? 0.3 : 0.4, 1, pal.head, 0.2, 0.28);
@@ -1468,6 +1505,7 @@ export function createRenderer(canvas) {
           push(tuft.x, hy + 0.32 + flame + pulse * 0.05, tuft.z, 0.13, 0.3, 0.13, 1, pal.cape, 0.12, 1);
         }
       }
+      drawGear(spot, py, leanLat, sliding, st.time || 0, reduced, st.gear || 1, st.ward == null ? 1 : st.ward, pal, reduced ? 0 : stride);
       const trailN = reduced ? 0 : Math.min(6, 3 + Math.floor(Math.max(0, speed - 5)));
       for (let t = 1; t <= trailN; t++) {
         const fade = 1 - t / (trailN + 1);

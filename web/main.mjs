@@ -27,6 +27,9 @@ const notesEl = document.getElementById("notes");
 const noteList = document.getElementById("note-list");
 const modelBtn = document.getElementById("model");
 const markEl = document.getElementById("mark");
+const wardEl = document.getElementById("ward");
+const recordEl = document.getElementById("record");
+const againBtn = document.getElementById("again");
 
 const params = new URLSearchParams(location.search);
 const reducedPref = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -71,6 +74,11 @@ let loot = "coin";
 let levelN = 1;
 let levelGoal = 0;
 let levelStart = 0;
+let formN = 0;
+const WARD_WAIT = 9;
+let wardReady = true;
+let wardLeft = 0;
+const RECORD_KEY = "lumen-record";
 const LOOTS = new Set(["coin", "star", "gem", "blossom", "apple"]);
 let provider = "";
 let modelName = "";
@@ -341,6 +349,9 @@ function resetLocal() {
   levelN = 1;
   levelGoal = 0;
   levelStart = 0;
+  formN = 0;
+  wardReady = true;
+  wardLeft = 0;
   if (goalFill) goalFill.style.width = "0%";
   paintMeter();
   nearSeen.clear();
@@ -367,6 +378,108 @@ function applyLevel(msg) {
   if (typeof msg.level === "number") levelN = msg.level;
   if (typeof msg.goal === "number") levelGoal = msg.goal;
   if (typeof msg.level0 === "number") levelStart = msg.level0;
+  if (typeof msg.pace === "number") formN = Math.max(0, Math.min(4, Math.round(msg.pace)));
+}
+
+function clampInt(v, lo, hi, fallback) {
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(lo, Math.min(hi, Math.round(n)));
+}
+
+function blankRecord() {
+  return { level: 1, form: 0, points: 0, grade: 1, bank: 0, bestLevel: 1, bestPoints: 0 };
+}
+
+function sanitizeRecord(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return blankRecord();
+  const level = clampInt(raw.level, 1, 40, 1);
+  const form = clampInt(raw.form, 0, 4, 0);
+  const points = clampInt(raw.points, 0, 500000, 0);
+  const grade = clampInt(raw.grade, 1, 5, 1);
+  const bank = clampInt(raw.bank, 0, 99, 0);
+  const bestLevel = Math.max(clampInt(raw.bestLevel, 1, 40, 1), level);
+  const bestPoints = Math.max(clampInt(raw.bestPoints, 0, 500000, 0), points);
+  return { level, form, points, grade, bank, bestLevel, bestPoints };
+}
+
+function readRecord() {
+  try {
+    return sanitizeRecord(JSON.parse(localStorage.getItem(RECORD_KEY) || "null"));
+  } catch {
+    return blankRecord();
+  }
+}
+
+let record = readRecord();
+let carry = null;
+// Stale ticks from the run we just left must not write over a restart.
+let freshRun = false;
+
+function writeRecord() {
+  if (!booted) return;
+  try {
+    localStorage.setItem(RECORD_KEY, JSON.stringify(record));
+  } catch {
+    /* a private window can refuse the record */
+  }
+}
+
+function gearTier() {
+  if (record.bestLevel >= 3) return 3;
+  if (record.bestLevel >= 2) return 2;
+  return 1;
+}
+
+function noteGear(prev, next) {
+  if (prev < 2 && next >= 2) showCue("A clasp on the cape");
+  if (prev < 3 && next >= 3) showCue("A circlet");
+}
+
+function paintRecord() {
+  if (!recordEl) return;
+  const show = record.bestLevel > 1 || record.bestPoints > 0;
+  recordEl.hidden = !show;
+  recordEl.textContent = show ? ("Best L" + record.bestLevel + " · " + record.bestPoints) : "";
+}
+
+function sameRecord(a, b) {
+  return a.level === b.level && a.form === b.form && a.points === b.points
+    && a.grade === b.grade && a.bank === b.bank
+    && a.bestLevel === b.bestLevel && a.bestPoints === b.bestPoints;
+}
+
+function syncRecord() {
+  if (!booted || freshRun) return;
+  const points = Math.max(0, Math.floor(player[6]));
+  const prevBest = record.bestLevel;
+  const next = {
+    level: clampInt(levelN, 1, 40, 1),
+    form: clampInt(formN, 0, 4, 0),
+    points,
+    grade: clampInt(grade, 1, 5, 1),
+    bank: clampInt(gradeBank, 0, 99, 0),
+    bestLevel: Math.max(record.bestLevel, clampInt(levelN, 1, 40, 1)),
+    bestPoints: Math.max(record.bestPoints, points),
+  };
+  if (sameRecord(record, next)) return;
+  record = next;
+  noteGear(prevBest, record.bestLevel);
+  writeRecord();
+  paintRecord();
+}
+
+function paintWard() {
+  if (!wardEl) return;
+  wardEl.textContent = "Shield";
+  wardEl.classList.toggle("down", !wardReady);
+}
+
+function wardStep(ready, left, ev, dt) {
+  if (ready && ev === "bump") return { ready: false, left: WARD_WAIT, held: true };
+  if (ready) return { ready: true, left: 0, held: false };
+  const left2 = Math.max(0, left - dt);
+  return { ready: left2 <= 0, left: left2, held: false };
 }
 
 function connect() {
@@ -382,18 +495,36 @@ function connect() {
       ws.send(JSON.stringify({ op: "resync" }));
     } else {
       const seedParam = params.get("seed");
-      ws.send(JSON.stringify({ op: "hello", seed: seedParam ? Number(seedParam) : 42 }));
+      const hello = { op: "hello", seed: seedParam ? Number(seedParam) : 42 };
+      if (record.level > 1 || record.form > 0 || record.points > 0) {
+        hello.resume = { level: record.level, form: record.form, points: record.points };
+        carry = { grade: record.grade, bank: record.bank, level: record.level };
+      }
+      ws.send(JSON.stringify(hello));
     }
   };
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
+    if (freshRun && msg.op !== "welcome" && msg.op !== "resync") return;
     if (msg.op === "welcome") {
+      freshRun = false;
       resetLocal();
       booted = true;
       seed = msg.seed;
       applyRules(msg);
+      feltSpeed = rules.speed;
+      if (typeof msg.points === "number" && msg.points >= 0) player[6] = msg.points;
+      if (carry && typeof msg.level === "number" && msg.level === carry.level) {
+        grade = carry.grade;
+        gradeBank = carry.bank;
+        if (gradeEl) gradeEl.textContent = gradeLabel(grade);
+        paintMeter();
+      }
+      carry = null;
       replayEl.textContent = msg.replay;
+      syncRecord();
     } else if (msg.op === "resync") {
+      freshRun = false;
       pieces = [];
       seenChunks = new Set();
       booted = true;
@@ -469,8 +600,27 @@ window.__lumenFrames = (n) => {
 };
 
 function restart() {
+  freshRun = true;
+  if (booted) {
+    record = {
+      level: 1,
+      form: 0,
+      points: 0,
+      grade: 1,
+      bank: 0,
+      bestLevel: record.bestLevel,
+      bestPoints: record.bestPoints,
+    };
+    writeRecord();
+    paintRecord();
+  }
+  carry = null;
+  toastQ.length = 0;
+  lastCue = "";
+  toastUntil = 0;
+  showCue("From the start");
   resetLocal();
-  if (connected && ws.readyState === 1) {
+  if (connected && ws && ws.readyState === 1) {
     ws.send(JSON.stringify({ op: "restart", seed }));
   }
 }
@@ -509,6 +659,9 @@ function publishProbe() {
   root.dataset.speed = String(rules.speed);
   root.dataset.level = String(levelN);
   root.dataset.goal = Number.isFinite(levelGoal) ? levelGoal.toFixed(1) : "";
+  root.dataset.ward = wardReady ? "1" : "0";
+  root.dataset.gear = String(gearTier());
+  root.dataset.best = String(record.bestLevel);
   root.dataset.bend = bend.toFixed(2);
   root.dataset.mark = markEl && !markEl.hidden ? markEl.textContent : "";
   root.dataset.chat = saidRows.join(" | ");
@@ -547,7 +700,10 @@ function frame(now) {
     audio.unlock();
     inputAt = now;
   }
-  if (alive) {
+  if (alive && inp.restart) {
+    audio.unlock();
+    restart();
+  } else if (alive) {
     if (inp.jump) { pressJump(player); jumpQ = 1; audio.jump(); }
     if (inp.slide) { pressSlide(player); slideQ = 1; audio.slide(); }
     if (inp.lane) { pressLane(player, inp.lane); laneQ = inp.lane; }
@@ -556,7 +712,23 @@ function frame(now) {
     while (acc >= DT && guard < 4) {
       const before = player[2];
       const wasY = player[1];
-      const ev = step(player, pieces, rules, DT);
+      const scoreBefore = player[6];
+      const ev0 = step(player, pieces, rules, DT);
+      const wasWard = wardReady;
+      const ward = wardStep(wardReady, wardLeft, ev0, DT);
+      wardReady = ward.ready;
+      wardLeft = ward.left;
+      let ev = ev0;
+      if (ward.held) {
+        player[6] = scoreBefore;
+        player[12] = 0;
+        ev = "ok";
+        showCue("Shield held");
+        audio.ward();
+        spark = "ward";
+      } else if (!wasWard && wardReady) {
+        showCue("Shield ready");
+      }
       if (inputAt && before <= 0 && player[2] > 0) {
         latency = now - inputAt;
         inputAt = 0;
@@ -575,7 +747,7 @@ function frame(now) {
         showGain(got.text, got.combo >= 3);
         if (rose) celebrateGrade();
       }
-      if (ev !== "bump" && ev !== "oops" && scanPraise()) {
+      if (!ward.held && ev !== "bump" && ev !== "oops" && scanPraise()) {
         const got = praise(grade, gradeBank);
         player[6] += got.points;
         const rose = got.grade > grade;
@@ -632,6 +804,8 @@ function frame(now) {
         near: nearSpark, reject: rejectSpark,
         scene: sceneView, stumble: stumble / 1500, pals, hero, bend, loot,
         goal: levelGoal,
+        gear: gearTier(),
+        ward: wardReady ? 1 : Math.max(0, (WARD_WAIT - wardLeft) / WARD_WAIT),
       });
     } catch (err) {
       console.error(err);
@@ -691,6 +865,8 @@ function frame(now) {
     feltSpeed = rules.speed;
     if (paceEl.textContent !== paceLabel) paceEl.textContent = paceLabel;
   }
+  paintWard();
+  syncRecord();
   paintMeter();
   if (showStats && frameN % 20 === 0) paintStats();
   if (benchMode && frameN === 180) finishBench();
@@ -813,6 +989,14 @@ modelBtn.addEventListener("click", () => {
   const next = providers[(ix + 1) % providers.length];
   ws.send(JSON.stringify({ op: "provider", name: next }));
 });
+if (againBtn) {
+  againBtn.addEventListener("click", () => {
+    audio.unlock();
+    restart();
+  });
+}
+window.addEventListener("pagehide", () => syncRecord());
+paintRecord();
 badgeEl.addEventListener("click", () => {
   const open = notesEl.hidden;
   notesEl.hidden = !open;
