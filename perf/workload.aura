@@ -81,17 +81,19 @@
 ; tree of one worldline: this file knows the arity of its own defines,
 ; so it can count the calls of the hot leaf and of its siblings and
 ; report the rows with their stack.
-(define saved-collide collide)
-(define saved-pset pset)
-(define saved-pxs pxs)
-(define saved-nudge-flyers nudge-flyers)
-(define saved-step-poppers step-poppers)
-
+; The wrappers are installed around the defines as they are *now*: a
+; candidate has already rebound them when the worldline is measured, and
+; a measurement of the pre-candidate code would not see the candidate.
 (define (perf-worldline-measure kernel xs)
-  (let ((box (hash "collide" 0 "pset" 0 "pxs" 0
-                   "nudge-flyers" 0 "step-poppers" 0
-                   "collide-ms" 0 "pset-ms" 0 "pxs-ms" 0
-                   "nudge-flyers-ms" 0 "step-poppers-ms" 0)))
+  (let* ((saved-collide collide)
+         (saved-pset pset)
+         (saved-pxs pxs)
+         (saved-nudge-flyers nudge-flyers)
+         (saved-step-poppers step-poppers)
+         (box (hash "collide" 0 "pset" 0 "pxs" 0
+                    "nudge-flyers" 0 "step-poppers" 0
+                    "collide-ms" 0 "pset-ms" 0 "pxs-ms" 0
+                    "nudge-flyers-ms" 0 "step-poppers-ms" 0)))
     (set! collide
       (lambda (p pieces rules)
         (let ((t0 (monotonic-ms)))
