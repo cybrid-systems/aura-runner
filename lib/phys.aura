@@ -254,13 +254,15 @@
 (define POP-BH 1.25)
 
 ; Same id, same toss. A short stretch and every fifth later id skip it.
-; The opening id is always the centre lane, a short way down the road.
+; The opening id stays on the centre lane, after the slide, the lane
+; change, and the jump, when the stretch is long enough. Later ids stay
+; a short way down their own stretch.
 (define (popper-for id x0 span)
   (if (< span 12.0)
     #f
     (if (and (> id 0) (= (modulo id 5) 0))
       #f
-      (let* ((want (if (= id 0) 18.0 (+ 10.0 (exact->inexact (modulo (+ id 2) 9)))))
+      (let* ((want (if (= id 0) 62.0 (+ 10.0 (exact->inexact (modulo (+ id 2) 9)))))
              (along (min want (- span 3.0)))
              (lane (if (= id 0) 1.0 (exact->inexact (modulo id 3)))))
         (if (< along 6.0)
