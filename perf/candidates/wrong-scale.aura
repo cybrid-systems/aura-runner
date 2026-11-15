@@ -1,0 +1,7 @@
+; A candidate the checksum has to reject: the score is doubled on the
+; way in, so the run still looks alive but the digest changes.
+
+(define (pset p i v)
+  (let ((vec (list->vector p)))
+    (vector-set! vec i (if (= i 6) (* v 2.0) v))
+    (vector->list vec)))

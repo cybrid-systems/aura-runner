@@ -1,0 +1,130 @@
+; The perf workload for aura-runner's physics.
+;
+; This file is appended to lib/phys.aura to form the perf seed, so the
+; target defines (step, collide, pset, pxs) live in the same module the
+; runtime rebinds. Nothing here is part of the game.
+;
+; The workload is a seeded course simulated at the fixed physics step.
+; The kernel returns a digest of the run: the runner's state and the
+; event of every fifth frame. A candidate that changes the physics by
+; one float shows up in the digest, so the checksum is the digest.
+
+(define PERF-FRAMES 600)
+(define PERF-PIECES 60)
+(define PERF-RULES (rules-of 32.0 11.2 8.0 0.48 0.12 0.12))
+
+; Course i is the same shape with a different phase, so two courses are
+; not the same run.
+(define (perf-course i)
+  (let loop ((k 0) (x 0.0) (acc (list)))
+    (if (>= k PERF-PIECES)
+        (reverse acc)
+        (let* ((kind (if (= (modulo (+ k i) 5) 0) 5.0 1.0))
+               (w (if (= kind 5.0) 0.42 6.0))
+               (h (if (= kind 5.0) 0.42 0.45))
+               (lane (exact->inexact (modulo (+ k i) 3))))
+          (loop (+ k 1) (+ x 1.0) (cons (piece kind x w h 0.4 lane) acc))))))
+
+; The runner jumps on a fixed beat. A jump is not the point of the
+; benchmark; a moving runner is, because the pieces behind it are
+; still scanned.
+(define (perf-run-course course)
+  (let loop ((i 0) (p (make-player 0.4)) (ps course) (acc ""))
+    (if (or (>= i PERF-FRAMES) (not (player-alive? p)))
+        acc
+        (let* ((p1 (if (= (modulo i 40) 0) (press-jump p) p))
+               (r (step p1 ps PERF-RULES PHYS-DT))
+               (p2 (car r))
+               (ev (car (cdr (cdr r)))))
+          (loop (+ i 1) p2 (car (cdr r))
+                (if (= (modulo i 5) 0)
+                    (string-append acc
+                                   (number->string (player-x p2)) ","
+                                   (number->string (player-y p2)) ","
+                                   (number->string (player-score p2)) ","
+                                   ev ";")
+                    acc))))))
+
+; The kernel the runtime measures. One course per element of the input.
+(define (bench-kernel courses)
+  (let loop ((cs courses) (acc ""))
+    (if (null? cs)
+        acc
+        (loop (cdr cs) (string-append acc (perf-run-course (car cs)))))))
+
+; The first n courses. The oracle reads the same order, so the digest
+; of a run is a line of the golden file.
+(define (perf-courses n)
+  (let loop ((i 0) (acc '()))
+    (if (>= i n)
+        (reverse acc)
+        (loop (+ i 1) (cons (perf-course i) acc)))))
+
+; The strategy the runtime rebinds. The order names the catalog ids.
+; perf-strategy is workspace code: it reads the profile value the
+; runtime measured and answers with the ids to try.
+(define (perf-strategy ctx)
+  (let* ((mine (hash-ref ctx "mine"))
+         (profile (hash-ref ctx "profile" (hash)))
+         (mined (mine profile))
+         (class (hash-ref mined "class" "")))
+    (hash "rank" "region-timer"
+          "hotspot" (hash-ref mined "hot-node" "")
+          "class" class
+          "site" (hash-ref mined "site" "")
+          "prefix" (hash-ref mined "prefix" '())
+          "order" (list "pset-vector" "collide-window" "pxs-listref"
+                        "wrong-scale")
+          "per-round" 2)))
+
+; The worldline measurement. The runtime asks the target program for the
+; tree of one worldline: this file knows the arity of its own defines,
+; so it can count the calls of the hot leaf and of its siblings and
+; report the rows with their stack.
+(define saved-collide collide)
+(define saved-pset pset)
+(define saved-pxs pxs)
+
+(define (perf-worldline-measure kernel xs)
+  (let ((box (hash "collide" 0 "pset" 0 "pxs" 0
+                   "collide-ms" 0 "pset-ms" 0 "pxs-ms" 0)))
+    (set! collide
+      (lambda (p pieces rules)
+        (let ((t0 (monotonic-ms)))
+          (let ((v (saved-collide p pieces rules)))
+            (hash-set! box "collide" (+ (hash-ref box "collide" 0) 1))
+            (hash-set! box "collide-ms"
+                       (+ (hash-ref box "collide-ms" 0) (- (monotonic-ms) t0)))
+            v))))
+    (set! pset
+      (lambda (p i v)
+        (let ((t0 (monotonic-ms)))
+          (let ((r (saved-pset p i v)))
+            (hash-set! box "pset" (+ (hash-ref box "pset" 0) 1))
+            (hash-set! box "pset-ms"
+                       (+ (hash-ref box "pset-ms" 0) (- (monotonic-ms) t0)))
+            r))))
+    (set! pxs
+      (lambda (p i)
+        (let ((t0 (monotonic-ms)))
+          (let ((v (saved-pxs p i)))
+            (hash-set! box "pxs" (+ (hash-ref box "pxs" 0) 1))
+            (hash-set! box "pxs-ms"
+                       (+ (hash-ref box "pxs-ms" 0) (- (monotonic-ms) t0)))
+            v))))
+    (try (kernel xs) (catch (e) #f))
+    (set! collide saved-collide)
+    (set! pset saved-pset)
+    (set! pxs saved-pxs)
+    (list (hash "name" "collide"
+                "calls" (hash-ref box "collide" 0)
+                "task-clock" (hash-ref box "collide-ms" 0)
+                "stack" (list "bench-kernel" "collide"))
+          (hash "name" "pset"
+                "calls" (hash-ref box "pset" 0)
+                "task-clock" (hash-ref box "pset-ms" 0)
+                "stack" (list "bench-kernel" "pset"))
+          (hash "name" "pxs"
+                "calls" (hash-ref box "pxs" 0)
+                "task-clock" (hash-ref box "pxs-ms" 0)
+                "stack" (list "bench-kernel" "pxs")))))

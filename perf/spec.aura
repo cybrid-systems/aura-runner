@@ -1,0 +1,184 @@
+; aura-perf target for aura-runner: the physics hot path.
+;
+;   cd aura-runner
+;   aura-perf autotune perf/spec.aura
+;
+; The target program is aura-runner's own lib/phys.aura. The runtime
+; set-codes the seed (the physics source plus perf/workload.aura), so
+; the defines a candidate rebinds - step, collide, pset, pxs - live in
+; the module the runtime mutates.
+;
+; The checksum is a digest of the run: the runner's state and the event
+; of every fifth frame. It comes from perf/golden.txt, which the
+; harness wrote with the code under test, so the oracle does not follow
+; a mutation. A candidate that changes the physics by one float is
+; rejected.
+
+(require "lib/perf/loop" all:)
+(require "lib/perf/util" all:)
+(require "lib/perf/score" all:)
+(require "std/string" all:)
+
+; ── the seed ─────────────────────────────────────────────────────────
+; The seed is the target program: aura-runner's physics source plus the
+; workload. The runtime set-codes it, so the defines a candidate rebinds
+; - step, collide, pset, pxs - live in the module the runtime mutates.
+;
+; Three float literals are written as their exact quotients. The Aura
+; runtime unparses a float whose shortest spelling is scientific
+; (0.0001 -> "1e-04") as "1e-04.0", which is not a number, and the
+; mutation path re-parses that text: the workspace then computes
+; different values than the source says. See cybrid-systems/aura
+; (the silent-wrong-value report). Each replacement below is the same
+; double, bit for bit:
+;   (equal? 0.0001 (/ 1.0 10000.0))                 -> #t
+;   (equal? 0.0008 (/ 8.0 10000.0))                 -> #t
+;   (equal? 0.0000001 (/ 1.0 (* 1000.0 10000.0)))   -> #t
+(define (seed-source)
+  (let ((phys (perf:read-text "lib/phys.aura")))
+    (string-append
+     (string-replace
+      (string-replace
+       (string-replace phys "0.0000001" "(/ 1.0 (* 1000.0 10000.0))")
+       "0.0008" "(/ 8.0 10000.0)")
+      "0.0001" "(/ 1.0 10000.0)")
+     "\n"
+     (perf:read-text "perf/workload.aura"))))
+
+(define seed-path "perf/out/seed.aura")
+(define seed-text (seed-source))
+(shell "mkdir -p perf/out")
+(perf:write-text seed-path seed-text)
+
+; ── the oracle ───────────────────────────────────────────────────────
+; The golden file holds one line per course count: line n is the
+; digest of the first n+1 courses.
+(define golden
+  (string-split (perf:read-text "perf/golden.txt") "\n"))
+
+(define (golden-digest courses)
+  (let ((i (- (length courses) 1)))
+    (if (or (< i 0) (>= i (length golden)))
+        "perf-missing-golden"
+        (list-ref golden i))))
+
+; ── the regions ──────────────────────────────────────────────────────
+; The defines to time, and the caller chain each one sits on. The
+; counts are the calls one run of the workload makes, so the region
+; times read as parts of the step.
+(define (regions)
+  (let ((course (perf-course 0))
+        (p (make-player 0.4)))
+    (list
+      (hash "name" "bench-kernel" "calls" 1 "workload" #t
+            "stack" (list "bench-kernel")
+            "thunk" (lambda () (bench-kernel (perf-courses 1))))
+      (hash "name" "collide" "calls" 600
+            "stack" (list "bench-kernel" "collide")
+            "thunk" (lambda ()
+                      (let loop ((i 0))
+                        (if (>= i 600) 0
+                            (begin (collide p course PERF-RULES) (loop (+ i 1)))))))
+      (hash "name" "pset" "calls" 7800
+            "stack" (list "bench-kernel" "pset")
+            "thunk" (lambda ()
+                      (let loop ((i 0))
+                        (if (>= i 7800) 0
+                            (begin (pset p 0 0.5) (loop (+ i 1)))))))
+      (hash "name" "pxs" "calls" 18000
+            "stack" (list "bench-kernel" "pxs")
+            "thunk" (lambda ()
+                      (let loop ((i 0))
+                        (if (>= i 18000) 0
+                            (begin (pxs p 14) (loop (+ i 1))))))))))
+
+; ── the catalog ──────────────────────────────────────────────────────
+(define (candidate id path target thought)
+  (hash "id" id
+        "target" target
+        "genome" (perf:read-text path)
+        "thought" thought))
+
+(define catalog
+  (list
+    (candidate "pset-vector"
+               "perf/candidates/pset-vector.aura"
+               "pset"
+               "the player is a 15 field list; pset consed a whole new one per field write")
+    (candidate "collide-window"
+               "perf/candidates/collide-window.aura"
+               "collide"
+               "collide tests every piece of the stretch; the body can only reach the ones next to it")
+    (candidate "pxs-listref"
+               "perf/candidates/pxs-listref.aura"
+               "pxs"
+               "pxs walked the player list cell by cell; list-ref is native")
+    (candidate "wrong-scale"
+               "perf/candidates/wrong-scale.aura"
+               "pset"
+               "the score is doubled on the way in; the checksum has to reject it")))
+
+; ── the intend and the strategy genes ────────────────────────────────
+(define expert-intend
+  (hash "min-faster-pct" 10
+        "checksum" #t
+        "budget" 4
+        "protected" '()))
+
+(define strategy-genes
+  (list
+    (hash "id" "gene-ratio-2"
+          "ratio" 2
+          "actionable-ms" 1
+          "per-round" 2
+          "order" (list "pset-vector" "collide-window"
+                        "pxs-listref" "wrong-scale"))
+    (hash "id" "gene-ratio-8"
+          "ratio" 8
+          "actionable-ms" 1
+          "per-round" 1
+          "order" (list "pset-vector" "collide-window"
+                        "pxs-listref" "wrong-scale"))
+    (hash "id" "gene-high-threshold"
+          "ratio" 2
+          "actionable-ms" 1000000
+          "per-round" 1
+          "order" (list "pset-vector"))
+    (hash "id" "gene-drop-checksum"
+          "ratio" 2
+          "actionable-ms" 1
+          "per-round" 1
+          "checksum" #f
+          "order" (list "wrong-scale" "pset-vector"))))
+
+; ── the run ──────────────────────────────────────────────────────────
+(define worker-path
+  (let ((w (getenv "AURA_PERF_WORKER")))
+    (if (and (string? w) (> (string-length w) 0)) w "worker.aura")))
+
+(define spec
+  (hash "label" "aura-runner-physics"
+        "seed-path" seed-path
+        "worker" worker-path
+        "target" "pset"
+        "kernel" "bench-kernel"
+        "out-dir" "perf/out"
+        "heldout-n" 2
+        "repeats" 5
+        "profile-repeats" 3
+        "min-speedup-pct" 20
+        "screen-n" 1
+        "screen-slack-ms" 50
+        "genes" strategy-genes
+        "intend" expert-intend
+        "call" (lambda (courses) (bench-kernel courses))
+        "regions-fn" regions
+        "inputs" (lambda (n) (perf-courses n))
+        "oracle" golden-digest
+        "check-inputs" (lambda () (list (perf-courses 1) (perf-courses 2)))
+        "count-defines" #t
+        "catalog" catalog))
+
+(define result (perf:autotune spec))
+(display "done\n")
+(exit (if (and (hash? result) (= (hash-ref result "intend-met" 0) 1)) 0 1))
