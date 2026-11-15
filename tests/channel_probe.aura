@@ -1,0 +1,48 @@
+; Jobs and replies cross a fiber channel as lists of atoms.
+; A hash sent the same way comes back empty on nightlies that still
+; have https://github.com/cybrid-systems/aura/issues/5294, which is
+; why core/main.aura does not send one. This probe checks the list
+; the server actually uses. scripts/channel-hash-probe.aura reports
+; whether that upstream drop is still there.
+(define (reply-ok? m i)
+  (and (pair? m)
+       (string=? (car m) "motif")
+       (= (list-ref m 1) i)
+       (= (list-ref m 2) 1)
+       (string=? (list-ref m 3) "paper")
+       (string=? (list-ref m 4) "")))
+
+(define (job-ok? m i)
+  (and (pair? m)
+       (= (car m) i)
+       (string=? (car (cdr m)) "ask")))
+
+; One message in flight, the way a worker and the tick trade a job.
+; A burst into one channel can come back empty on this nightly; the
+; server does not queue forty of them.
+(define (count-replies n)
+  (let loop ((i 0) (ok 0))
+    (if (>= i n)
+      ok
+      (let ((ch (channel:create 1)))
+        (fiber:spawn (lambda ()
+                       (channel:send ch (list "motif" i 1 "paper" ""))))
+        (fiber:yield)
+        (loop (+ i 1) (+ ok (if (reply-ok? (channel:recv ch) i) 1 0)))))))
+
+(define (count-jobs n)
+  (let loop ((i 0) (ok 0))
+    (if (>= i n)
+      ok
+      (let ((ch (channel:create 1)))
+        (fiber:spawn (lambda ()
+                       (channel:send ch (list i "ask"))))
+        (fiber:yield)
+        (loop (+ i 1) (+ ok (if (job-ok? (channel:recv ch) i) 1 0)))))))
+
+(display "list-reply ")
+(display (count-replies 40))
+(newline)
+(display "list-job ")
+(display (count-jobs 40))
+(newline)

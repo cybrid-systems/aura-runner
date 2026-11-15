@@ -62,14 +62,55 @@
             (loop (cdr ys) acc start x)
             (loop (cdr ys) (cons start acc) x x)))))))
 
+(define (insert-point p xs)
+  (if (or (null? xs) (<= (car p) (car (car xs))))
+    (cons p xs)
+    (cons (car xs) (insert-point p (cdr xs)))))
+
+(define (sort-points xs)
+  (let loop ((ys xs) (acc (list)))
+    (if (null? ys)
+      acc
+      (loop (cdr ys) (insert-point (car ys) acc)))))
+
+(define (verb-points pieces)
+  (let loop ((ps pieces) (acc (list)))
+    (if (null? ps)
+      acc
+      (let ((q (car ps)))
+        (loop (cdr ps)
+              (if (verb? (piece-k q))
+                (cons (cons (piece-x q) (piece-k q)) acc)
+                acc))))))
+
+; Actions within half a metre are one moment. The pair kept is the
+; first origin, and its kind, so a block can give its inset back.
+(define (cluster-points xs)
+  (let loop ((ys xs) (acc (list)) (start #f) (prev #f))
+    (if (null? ys)
+      (reverse (if start (cons start acc) acc))
+      (let ((p (car ys)))
+        (if (not start)
+          (loop (cdr ys) acc p p)
+          (if (<= (- (car p) (car prev)) 0.5)
+            (loop (cdr ys) acc start p)
+            (loop (cdr ys) (cons start acc) p p)))))))
+
+; A block is drawn BLOCK-INSET past the ground it sits on and does not
+; advance the track, so the rest before the next move is that much
+; longer than the two origins. A hurdle or a gate does advance.
+(define (move-gap a b)
+  (let ((dx (- (car b) (car a))))
+    (if (= (cdr a) 7.0) (+ dx BLOCK-INSET) dx)))
+
 (define (stacked? pieces pace)
-  (let ((ms (cluster-gaps (sort-nums (verb-xs pieces)))))
+  (let ((ms (cluster-points (sort-points (verb-points pieces)))))
     (let loop ((xs ms) (prev #f))
       (if (null? xs)
         #f
         (if (not prev)
           (loop (cdr xs) (car xs))
-          (if (< (/ (- (car xs) prev) pace) REST-S)
+          (if (< (/ (move-gap prev (car xs)) pace) REST-S)
             #t
             (loop (cdr xs) (car xs))))))))
 

@@ -21,12 +21,13 @@
 (define PALS-SYS
   "You change one friendly companion in a children's 3D endless runner called Lumen Run. No markdown. Restyle a friend who is already here by keeping the same name, or add one new gentle friend. Form: (pal KIND NAME R G B MOTION). KIND is kitten, car, bunny, bird, butterfly, frog, duck, puppy, fox, turtle, bee, or a new gentle word of 3 to 12 letters. NAME is 2 to 12 letters. R G B are 0.25 to 1 and the colour stays bright. MOTION is hop, pace, float, follow, or side. No violence, fear, weapons, or scary words. Always restyle the runner in that same answer with (hero KIND R G B), alone or as one clause inside (pals ...). Pick a KIND different from the runner's current look. KIND is keeper, kitten, car, bunny, bird, butterfly, frog, or duck. keeper is the light-keeper. R G B stay bright, from 0.25 to 1. A hero clause changes the runner only and does not add a friend. First write one short bright English sentence with no parentheses, then the s-expression. That sentence is what the child reads. Example: (pal bird lark 0.95 0.86 0.35 float)")
 
-(define g-now 32.0)
-(define jump-now 11.2)
-(define slide-now 0.48)
-(define speed-now 8.0)
-(define coyote-now 0.12)
-(define forgive-now 0.12)
+(define opening-feel (feel-for 0))
+(define g-now (feel-g opening-feel))
+(define jump-now (feel-jump opening-feel))
+(define slide-now (feel-slide opening-feel))
+(define speed-now (feel-speed opening-feel))
+(define coyote-now FEEL-COYOTE)
+(define forgive-now FEEL-FORGIVE)
 (define hue-now 0.0)
 (define motif-now "")
 (define motif-pieces (list))
@@ -68,10 +69,10 @@
 (define pace 0)
 (define owed (list))
 (define feel-cue "")
-(define published-g 32.0)
-(define published-jump 11.2)
-(define published-slide 0.48)
-(define published-speed 8.0)
+(define published-g g-now)
+(define published-jump jump-now)
+(define published-slide slide-now)
+(define published-speed speed-now)
 (define acc 0.0)
 (define last-ms 0)
 (define audit (list))
@@ -249,14 +250,8 @@
 
 ; Gravity, jump and slide ease with the band so a faster path stays
 ; reachable. The opening is already a run. Each notch is faster, and
-; the top stays a pace a short recovery can still land.
-(define (feel-for b)
-  (cond
-    ((= b 0) (list 32.0 11.2 0.48 8.0))
-    ((= b 1) (list 31.4 11.5 0.50 10.0))
-    ((= b 2) (list 30.8 11.8 0.52 12.0))
-    ((= b 3) (list 30.2 12.1 0.54 13.0))
-    (else (list 29.6 12.4 0.56 14.0))))
+; the top stays a pace a short recovery can still land. The numbers
+; live in feel-for, which play-review reads too.
 
 (define (arm-row name)
   (list (cons "arm" name) (cons "n" 0) (cons "keeps" 0) (cons "mean" 0.0)))
@@ -428,15 +423,15 @@
   (if (string=? why "tutorial")
     why
     (let ((f (feel-for band)))
-    (let ((ng (car f))
-          (nj (car (cdr f)))
-          (nsl (car (cdr (cdr f))))
-          (nv (car (cdr (cdr (cdr f))))))
+    (let ((ng (feel-g f))
+          (nj (feel-jump f))
+          (nsl (feel-slide f))
+          (nv (feel-speed f)))
       (if (not (= ng g-now))
         (begin
           (set! g-now ng)
           (if (= (string-length feel-cue) 0)
-            (set! feel-cue (if (< ng 32.0) "Lighter steps" "A bit heavier"))
+            (set! feel-cue (if (< ng (feel-g opening-feel)) "Lighter steps" "A bit heavier"))
             #f))
         #f)
       (if (not (= nj jump-now))
@@ -582,9 +577,9 @@
   (set! acc 0.0)
   (set! last-ms 0)
   (set! cleared (list))
-  (set! g-now 32.0)
-  (set! jump-now 11.2)
-  (set! slide-now 0.48)
+  (set! g-now (feel-g opening-feel))
+  (set! jump-now (feel-jump opening-feel))
+  (set! slide-now (feel-slide opening-feel))
   (set! hue-now 0.0)
   (set! motif-now "")
   (set! motif-pieces (list))
@@ -595,7 +590,7 @@
   (set! pals-next 5000.0)
   (set! dream-phase 0)
   (set! hold-phase 0)
-  (if (not speed-lock) (set! speed-now 8.0) #f)
+  (if (not speed-lock) (set! speed-now (feel-speed opening-feel)) #f)
   (if tuned
     (begin (sync-rules!) (set! tuned #f))
     #f)
@@ -937,10 +932,10 @@
     (string-append base " " hint)
     base))
 
-; Geometry and the spare-time walk. A full autopilot is about a second,
-; and doing it inside the reply tick is the hitch. The slice below
-; spends that budget later. A margin under a quarter-second is refused
-; here, because that walk is cheap.
+; Geometry and the spare-time walk. A full autopilot is a few seconds
+; of wall time, and doing it inside the reply tick is the hitch. The
+; slice below spends twelve steps a tick, not the whole stretch. A
+; margin under a quarter-second is refused here, because that walk is cheap.
 (define (reject-form! form)
   ; open-trial while another fiber is inside http-post wedges that call
   ; on this pin, so a hung garden never reaches its timeout.
@@ -1573,7 +1568,7 @@
       (set! scene-asked-at (exact->inexact (monotonic-ms)))
       (set! scene-busy #t)
       (set! scene-next (+ run-ms 12000.0))
-      (channel:send scene-req (hash "kind" "scene" "token" tok "user" (llm-prompt "scene")))
+      (channel:send scene-req (list tok (llm-prompt "scene")))
       (sync-llm-busy!))))
 
 (define (pals-gap-ms)
@@ -1592,7 +1587,7 @@
       (set! pals-next (+ run-ms (pals-gap-ms)))
       (let ((user (llm-prompt "pals")))
         (set! pals-hint "")
-        (channel:send pals-req (hash "kind" "pals" "token" tok "user" user)))
+        (channel:send pals-req (list tok user)))
       (sync-llm-busy!))))
 
 (define (ask-motif!)
@@ -1606,7 +1601,7 @@
       (set! motif-next (+ run-ms (motif-gap-ms)))
       (let ((user (llm-prompt "motif")))
         (set! hint-now "")
-        (channel:send motif-req (hash "kind" "motif" "token" tok "user" user)))
+        (channel:send motif-req (list tok user)))
       (sync-llm-busy!))))
 
 ; channel:try-recv on an empty channel is #f (#5161). Each kind has its
@@ -1660,15 +1655,15 @@
           #f))
       (if (or scene-busy motif-busy pals-busy) (expire-llm!) #f)
       (if (and scene-busy (not stall-waiting))
-        (let ((scene-msg (channel:try-recv scene-res)))
+        (let ((scene-msg (reply-hash (channel:try-recv scene-res))))
           (if (hash? scene-msg) (take-scene! c scene-msg) #f))
         #f)
       (if motif-busy
-        (let ((motif-msg (channel:try-recv motif-res)))
+        (let ((motif-msg (reply-hash (channel:try-recv motif-res))))
           (if (hash? motif-msg) (take-motif! c motif-msg) #f))
         #f)
       (if pals-busy
-        (let ((pals-msg (channel:try-recv pals-res)))
+        (let ((pals-msg (reply-hash (channel:try-recv pals-res))))
           (if (hash? pals-msg) (take-pals! c pals-msg) #f))
         #f)
       (sync-llm-busy!)
@@ -2040,13 +2035,38 @@
 ; The token is a number copied before the chat call. Reading it back off
 ; the job hash after that await comes out 0, the tick drops the reply,
 ; and the arm stays busy so the phrase never lands.
+; A hash sent across a fiber channel comes back empty on nightlies
+; that still have cybrid-systems/aura#5294. Jobs and replies are lists
+; of atoms. The tick builds the hash after the receive.
+(define (reply-field msg i)
+  (let ((v (list-ref-or msg i "")))
+    (if (string? v) v "")))
+
+(define (reply-hash msg)
+  (cond
+    ((not msg) #f)
+    ((hash? msg) msg)
+    ((and (pair? msg) (string? (car msg)))
+     (hash "kind" (car msg)
+           "token" (let ((n (list-ref-or msg 1 0)))
+                     (if (number? n) n 0))
+           "ans" (hash "ok" (= (let ((n (list-ref-or msg 2 0)))
+                                 (if (number? n) n 0))
+                               1)
+                       "content" (reply-field msg 3)
+                       "error" (reply-field msg 4))))
+    (else #f)))
+
 (define (deliver! res kind tok ans)
-  (channel:send res
-                (hash "kind" kind
-                      "token" tok
-                      "ans" (if (hash? ans)
-                              ans
-                              (hash "ok" #f "error" "bad" "content" "")))))
+  (let ((body (if (hash? ans) ans (hash "ok" #f "error" "bad" "content" ""))))
+    (channel:send res
+                  (list kind
+                        tok
+                        (if (hash-ref body "ok") 1 0)
+                        (let ((content (hash-ref body "content" "")))
+                          (if (string? content) content ""))
+                        (let ((err (hash-ref body "error" "")))
+                          (if (string? err) err ""))))))
 
 ; One chat POST at a time. A second call used to run beside the first,
 ; and a trial opened on the tick then wedged the first POST so its
@@ -2064,8 +2084,16 @@
 (define (llm-worker req res sys kind)
   (let loop ()
     (let ((job (channel:recv req)))
-      (let ((tok (if (hash? job) (hash-ref job "token" 0) 0))
-            (user (if (hash? job) (hash-ref job "user" "") "")))
+      ; (token user). A hash used to arrive empty, token 0 and no prompt.
+      (let ((tok (cond
+                   ((and (pair? job) (number? (car job))) (car job))
+                   ((hash? job) (hash-ref job "token" 0))
+                   (else 0)))
+            (user (cond
+                    ((and (pair? job) (pair? (cdr job)) (string? (car (cdr job))))
+                     (car (cdr job)))
+                    ((hash? job) (hash-ref job "user" ""))
+                    (else ""))))
         (cond
           ((string=? kind "scene") (set! scene-working #t))
           ((string=? kind "pals") (set! pals-working #t))

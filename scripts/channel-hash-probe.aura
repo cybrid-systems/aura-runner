@@ -1,0 +1,47 @@
+; Report whether a fiber channel still empties a hash.
+; Exit 1 when any of 20 roundtrips lose a field, and print the aura
+; version plus https://github.com/cybrid-systems/aura/issues/5294.
+; The server does not send hashes. tests/channel_probe.aura guards
+; the list it sends instead, so this file stays out of aura test.
+(require "std/process" all:)
+
+(define (once i)
+  (let ((ch (channel:create 1)))
+    (fiber:spawn (lambda ()
+                   (channel:send ch (hash "kind" "motif" "token" i "ans" "hi"))))
+    (fiber:yield)
+    (let ((m (channel:recv ch)))
+      (and (hash? m)
+           (string=? (hash-ref m "kind" "") "motif")
+           (= (hash-ref m "token" -1) i)
+           (string=? (hash-ref m "ans" "") "hi")))))
+
+(define (dropped n)
+  (let loop ((i 0) (bad 0))
+    (if (>= i n)
+      bad
+      (loop (+ i 1) (+ bad (if (once i) 0 1))))))
+
+(let ((bad (dropped 20)))
+  (display "hash-drop ")
+  (display bad)
+  (newline)
+  (if (> bad 0)
+    (begin
+      (display "aura#5294 hash roundtrip dropped ")
+      (display bad)
+      (display " of 20")
+      (newline)
+      ; A bare `aura -V` prints whichever binary is on PATH.
+      (let ((path (aura-executable-path)))
+        (let ((v (if (and (string? path) (> (string-length path) 0))
+                   (try (command-output (string-append path " -V")) (catch (e) ""))
+                   "")))
+          (if (and (string? v) (> (string-length v) 0))
+            (display v)
+            (display "aura -V unavailable"))))
+      (newline)
+      (display "https://github.com/cybrid-systems/aura/issues/5294")
+      (newline)
+      (error "channel hash dropped"))
+    #t))

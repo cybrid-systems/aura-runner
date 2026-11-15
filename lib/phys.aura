@@ -42,14 +42,16 @@
 (define DRAG-SCALE 0.45)
 (define BUMP-COST 15.0)
 
+; The player stays a 15-field list, so the golden trace is unchanged.
+; list-ref and a scratch vector keep a step from walking that spine
+; once per field. The vector dies inside pset.
 (define (pxs p i)
-  (if (= i 0) (car p) (pxs (cdr p) (- i 1))))
+  (list-ref p i))
 
 (define (pset p i v)
-  (let loop ((xs p) (k 0) (acc (list)))
-    (if (null? xs)
-      (reverse acc)
-      (loop (cdr xs) (+ k 1) (cons (if (= k i) v (car xs)) acc)))))
+  (let ((vec (list->vector p)))
+    (vector-set! vec i v)
+    (vector->list vec)))
 
 (define (player-x p) (car p))
 (define (player-y p) (car (cdr p)))
@@ -375,6 +377,14 @@
                     p7)))
       (collide landed pieces rules))))
 
+; Spans sit inside the authored box, give or take a few centimetres.
+; A metre of slack makes this skip exact: a piece this far away cannot
+; overlap the body, and it is still copied into the result.
+(define (collide-far? q left right)
+  (let ((px (piece-x q)))
+    (or (> px (+ right 1.0))
+        (< (+ (+ px (piece-w q)) 1.0) left))))
+
 (define (collide p pieces rules)
   (let* ((forgive (hash-ref rules "forgive"))
          (ph (hash-ref rules "ph"))
@@ -390,8 +400,10 @@
     (let loop ((ps pieces) (acc (list)) (player p) (event "ok") (dead #f))
       (if (or (null? ps) dead)
         (list player (append (reverse acc) ps) (if dead "dead" event))
-        (let* ((q (car ps))
-               (k (piece-k q))
+        (let ((q (car ps)))
+          (if (collide-far? q left right)
+            (loop (cdr ps) (cons q acc) player event #f)
+            (let* ((k (piece-k q))
                (qlane (piece-lane q))
                (px (piece-x q))
                (wide (piece-w q))
@@ -431,7 +443,7 @@
                    (pset (pset (pset player 2 (* jump 1.28)) 3 0.0) 14 0.0)
                    "spring"
                    #f))
-            (else (loop (cdr ps) (cons q acc) player event #f))))))))
+            (else (loop (cdr ps) (cons q acc) player event #f))))))))))
 
 ; Pickup points live on the player. Distance is only the server's
 ; running total; the picture scores the pickups themselves.
