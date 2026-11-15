@@ -1190,8 +1190,8 @@ export function createRenderer(canvas) {
       }
     }
 
-    function paintLane(q, lat, rgb) {
-      const reach = Math.max(14, speed * 1.3);
+    function paintLane(q, lat, rgb, reachOverride) {
+      const reach = reachOverride || Math.max(14, speed * 1.3);
       const ahead = q[1] - pz;
       if (ahead < reach && q[1] + (q[2] || 0) > pz - 1) {
         laneStripe(Math.max(pz - 0.3, q[1] - reach), q[1] + 0.2, lat, rgb);
@@ -1227,6 +1227,82 @@ export function createRenderer(canvas) {
       push(here.x, cy + rad + 0.08, here.z, 0.05, 0.16, 0.05, 0, [0.35, 0.22, 0.12], 0.5, 0.05, yaw);
       const spark = reduced || Math.sin((st.time || 0) * 16 + q[1]) > 0 ? 0.95 : 0.25;
       push(here.x, cy + rad + 0.18, here.z, 0.08, 0.08, 0.08, 1, [1, 0.95, 0.55], 0.1, spark, yaw);
+    }
+
+    // Kind 10 runs the lane toward the hero. The warm stripe is the
+    // lane it is hunting. A jump or another lane misses it.
+    function drawRival(q, here) {
+      const look = Math.round(q.length > 6 ? q[6] : 0);
+      const lane = q.length > 5 && q[5] >= 0 ? q[5] : 1;
+      const face = here.psi + Math.PI;
+      const lat = laneX(lane);
+      const along = q[1] + (q[2] || 0) * 0.5;
+      // Toward the hero. Road forward is (sin ψ, cos ψ).
+      const toX = -Math.sin(here.psi);
+      const toZ = -Math.cos(here.psi);
+      const at = (ahead, y) => [here.x + toX * ahead, y, here.z + toZ * ahead];
+      paintLane(q, lat, [1, 0.38, 0.22], 22);
+      if (look === 1) {
+        const wing = reduced ? 0.16 : 0.1 + Math.abs(Math.sin((st.time || 0) * 9)) * 0.14;
+        const body = at(0, 0.42);
+        const head = at(0.22, 0.68);
+        const beak = at(0.4, 0.66);
+        push(body[0], body[1], body[2], 0.48, 0.4, 0.52, 1, [0.16, 0.22, 0.48], 0.32, 0.08, face);
+        push(head[0], head[1], head[2], 0.32, 0.28, 0.3, 1, [0.93, 0.9, 0.82], 0.25, 0.12, face);
+        push(beak[0], beak[1], beak[2], 0.14, 0.1, 0.18, 0, [0.95, 0.55, 0.22], 0.3, 0.16, face);
+        const left = onRoad(along, lat - 0.42);
+        const right = onRoad(along, lat + 0.42);
+        push(left.x, 0.52, left.z, 0.5, wing, 0.22, 0, [0.22, 0.32, 0.62], 0.3, 0.08, face);
+        push(right.x, 0.52, right.z, 0.5, wing, 0.22, 0, [0.22, 0.32, 0.62], 0.3, 0.08, face);
+        const eyeL = at(0.28, 0.72);
+        const eyeR = at(0.28, 0.72);
+        const side = onRoad(along, lat + 0.08);
+        const side0 = onRoad(along, lat - 0.08);
+        push(side0.x + toX * 0.22, eyeL[1], side0.z + toZ * 0.22, 0.07, 0.07, 0.05, 1, [0.2, 0.14, 0.1], 0.2, 0.25, face);
+        push(side.x + toX * 0.22, eyeR[1], side.z + toZ * 0.22, 0.07, 0.07, 0.05, 1, [0.2, 0.14, 0.1], 0.2, 0.25, face);
+      } else if (look === 2) {
+        const shell = at(0, 0.32);
+        const back = at(-0.08, 0.48);
+        const head = at(0.28, 0.3);
+        push(shell[0], shell[1], shell[2], 0.72, 0.34, 0.8, 1, [0.36, 0.62, 0.32], 0.4, 0.06, face);
+        push(back[0], back[1], back[2], 0.8, 0.16, 0.52, 1, [0.22, 0.46, 0.2], 0.45, 0.05, face);
+        push(head[0], head[1], head[2], 0.22, 0.16, 0.22, 1, [0.5, 0.74, 0.4], 0.35, 0.08, face);
+        const side = onRoad(along, lat + 0.08);
+        const side0 = onRoad(along, lat - 0.08);
+        push(side0.x + toX * 0.32, 0.36, side0.z + toZ * 0.32, 0.07, 0.07, 0.05, 1, [0.2, 0.14, 0.1], 0.2, 0.2, face);
+        push(side.x + toX * 0.32, 0.36, side.z + toZ * 0.32, 0.07, 0.07, 0.05, 1, [0.2, 0.14, 0.1], 0.2, 0.2, face);
+      } else {
+        const body = at(0, 0.32);
+        const head = at(0.22, 0.58);
+        const earL = onRoad(along, lat - 0.1);
+        const earR = onRoad(along, lat + 0.1);
+        push(body[0], body[1], body[2], 0.36, 0.3, 0.58, 1, [0.95, 0.46, 0.18], 0.32, 0.08, face);
+        push(head[0], head[1], head[2], 0.28, 0.24, 0.28, 1, [0.95, 0.46, 0.18], 0.28, 0.1, face);
+        push(earL.x + toX * 0.2, 0.82, earL.z + toZ * 0.2, 0.08, 0.18, 0.06, 0, [0.72, 0.32, 0.12], 0.35, 0.05, face);
+        push(earR.x + toX * 0.2, 0.82, earR.z + toZ * 0.2, 0.08, 0.18, 0.06, 0, [0.72, 0.32, 0.12], 0.35, 0.05, face);
+        push(at(0.36, 0.52)[0], 0.52, at(0.36, 0.52)[2], 0.1, 0.08, 0.12, 0, [0.22, 0.14, 0.1], 0.3, 0.05, face);
+        const side = onRoad(along, lat + 0.07);
+        const side0 = onRoad(along, lat - 0.07);
+        push(side0.x + toX * 0.3, 0.64, side0.z + toZ * 0.3, 0.07, 0.07, 0.05, 1, [0.2, 0.14, 0.1], 0.2, 0.25, face);
+        push(side.x + toX * 0.3, 0.64, side.z + toZ * 0.3, 0.07, 0.07, 0.05, 1, [0.2, 0.14, 0.1], 0.2, 0.25, face);
+      }
+      const mark = at(0.1, 0.98);
+      push(mark[0], mark[1], mark[2], 0.16, 0.08, 0.08, 0, [0.9, 0.18, 0.14], 0.3, 0.55, face);
+    }
+
+    // The level ends at this arc. Two posts and a ribbon, only while
+    // the line is in view. It is not a piece, so a pattern stays fair.
+    function drawFinish(goal) {
+      if (!(goal > 24)) return;
+      if (goal < pz - 6 || goal > pz + 46) return;
+      const left = onRoad(goal, -2.35);
+      const right = onRoad(goal, 2.35);
+      const mid = onRoad(goal, 0);
+      push(left.x, 1.15, left.z, 0.18, 2.3, 0.18, 0, [0.98, 0.95, 0.88], 0.35, 0.1, left.psi);
+      push(right.x, 1.15, right.z, 0.18, 2.3, 0.18, 0, [0.98, 0.95, 0.88], 0.35, 0.1, right.psi);
+      push(mid.x, 2.22, mid.z, 4.9, 0.16, 0.12, 0, [0.93, 0.34, 0.38], 0.25, 0.4, mid.psi);
+      push(mid.x, 2.08, mid.z, 4.5, 0.08, 0.08, 0, [1, 0.84, 0.38], 0.22, 0.35, mid.psi);
+      push(mid.x, 2.52, mid.z, 0.36, 0.28, 0.06, 0, [1, 0.84, 0.38], 0.25, 0.45, mid.psi);
     }
 
     function drawBlock(q, zc, lane, sc, glow) {
@@ -1327,8 +1403,12 @@ export function createRenderer(canvas) {
         }
       } else if (k === 9) {
         drawPopper(q, here);
+      } else if (k === 10) {
+        drawRival(q, here);
       }
     }
+
+    drawFinish(st.goal);
 
     if (st.event === "coin") {
       const kind = typeof st.loot === "string" ? st.loot : "coin";

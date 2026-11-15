@@ -362,19 +362,39 @@
             (hash-put! policy "arms" (append rows (list (arm-row nxt))))
             #f))))))
 
-; One notch per cleared stretch, and also every eight seconds, so a
-; chat cannot park the run on the opening pace. Four is the top.
-(define (pace-step n)
-  (cond
-    ((>= n 4) 4)
-    ((>= n 3) 3)
-    ((>= n 2) 2)
-    ((>= n 1) 1)
-    (else 0)))
+; The felt band is how the last levels went, not the clock. A clean
+; finish steps up. Two bumps step down. One bump holds the pace.
+; Four is still the top of the feel table.
+(define form 0)
+(define level-n 1)
+(define level-x0 0.0)
+(define level-x1 128.0)
+(define level-bumps 0)
+(define rival-for 0)
 
 (define (pace-wanted)
-  (let ((by-time (pace-step (/ run-ms 8000.0))))
-    (pace-step (if (> clears by-time) clears by-time))))
+  form)
+
+(define (begin-level!)
+  (set! level-x0 (player-x player))
+  (set! level-bumps 0)
+  (set! level-x1 (+ level-x0 (level-span speed-now))))
+
+(define (finish-level!)
+  (set! form (form-next form level-bumps))
+  (set! level-n (+ level-n 1))
+  (set! level-bumps 0)
+  (advance-pace!)
+  (begin-level!)
+  (note! "KEEP" "level" "run" "Level clear"))
+
+(define (watch-level! ev)
+  (if (string=? ev "bump")
+    (set! level-bumps (+ level-bumps 1))
+    #f)
+  (if (>= (player-x player) level-x1)
+    (finish-level!)
+    #f))
 
 (define (flush-owed!)
   (let loop ((xs (reverse owed)))
@@ -398,8 +418,7 @@
           (open-next-arm!)
           "pace")))))
 
-; A long opening buffer used to hide the climb until the next stretch
-; was laid. The clock raises the pace on the tick that earns it.
+; A finish moves the pace. The clock does not.
 (define (advance-pace!)
   (if (env-on? "LUMEN_SKIP_ARM")
     #f
@@ -476,6 +495,25 @@
 (define (shift-onto pieces x0)
   (shift-pieces pieces x0))
 
+(define (rival-piece at)
+  (let ((lane (exact->inexact (modulo (+ level-n 1) 3)))
+        (look (exact->inexact (modulo level-n 3)))
+        (spd (+ 2.1 (* (exact->inexact form) 0.35))))
+    (piece 10.0 at 0.72 0.95 0.0 lane look spd lane 0.2)))
+
+; One rival per level, about halfway to the finish, so the opening
+; lesson is clear before anyone comes down the lane.
+(define (rival-for-chunk x0 x1)
+  (if (= rival-for level-n)
+    #f
+    (let ((at (+ level-x0 (* (- level-x1 level-x0) 0.42))))
+      (if (and (>= at (+ x0 2.0)) (<= at (- x1 3.0)))
+        (begin
+          (set! rival-for level-n)
+          (note! "KEEP" "rival" "run" "A rival is on the path")
+          (rival-piece at))
+        #f))))
+
 (define (any-gate? ps)
   (let loop ((xs ps))
     (if (null? xs)
@@ -491,7 +529,10 @@
          (x0 next-x)
          (x1 (+ next-x span))
          (toss (popper-for id x0 span))
-         (with (if toss (append placed (list toss)) placed)))
+         (rival (rival-for-chunk x0 x1))
+         (with (append placed
+                       (if toss (list toss) (list))
+                       (if rival (list rival) (list)))))
     (set! chunks (append chunks (list (hash "id" id "x0" x0 "x1" x1
                                             "band" b "origin" origin "hue" h
                                             "margin" margin
@@ -572,6 +613,10 @@
   (set! band 0)
   (set! clears 0)
   (set! pace 0)
+  (set! form 0)
+  (set! level-n 1)
+  (set! level-bumps 0)
+  (set! rival-for 0)
   (set! owed (list))
   (set! feel-cue "")
   (set! acc 0.0)
@@ -595,6 +640,7 @@
     (begin (sync-rules!) (set! tuned #f))
     #f)
   (remember-published!)
+  (begin-level!)
   (ensure-ahead!))
 
 (define (parse-seed v)
@@ -650,6 +696,7 @@
         "fog" fog-now
         "bend" bend-now "loot" loot-now
         "worth" (loot-worth loot-now)
+        "level" level-n "goal" level-x1 "level0" level-x0
         "motif" motif-now "scene" scene-now
         "pals" pals-rows "hero" (hero-public) "provider" llm-provider
         "model" (active-model) "providers" (ready-providers)))
@@ -672,6 +719,9 @@
         "speed" speed-now
         "worth" (loot-worth loot-now)
         "pace" pace
+        "level" level-n
+        "goal" level-x1
+        "level0" level-x0
         "slide-dur" slide-now
         "rev" rule-rev
         "run" (floor run-ms)
@@ -789,7 +839,9 @@
       #f)
     (set! run-ms (+ run-ms (* PHYS-DT 1000.0)))
     (mark-cleared!)
-    (car (cdr (cdr r)))))
+    (let ((ev (car (cdr (cdr r)))))
+      (watch-level! ev)
+      ev)))
 
 (define (prune-world ps x)
   (let loop ((ys ps) (acc (list)))

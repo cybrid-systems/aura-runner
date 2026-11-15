@@ -171,6 +171,41 @@ function overlap(ax1, ay1, ax2, ay2, bx1, by1, bx2, by2) {
 
 // Kind 8 stores a visual code at [6] and a speed at [7]. It flies toward
 // the runner, so x decreases. Missing speed stays put.
+const RIVAL_REACH = 0.62;
+const RIVAL_HALF = 0.28;
+const RIVAL_COMMIT = 7.5;
+const RIVAL_COOL = 0.42;
+
+// Kind 10 runs toward the hero. Look, speed, aim lane, and cool sit at
+// [6] [7] [8] [9]. Far away it steps toward the hero's lane. Close in, it commits.
+function stepRivals(pieces, p, dt) {
+  const px = p[0];
+  const want = p[9];
+  for (let i = 0; i < pieces.length; i++) {
+    const q = pieces[i];
+    if (q[0] !== 10) continue;
+    const spd = q.length > 7 ? q[7] : 2.2;
+    const lane = q.length > 5 ? q[5] : 1;
+    const aim = q.length > 8 ? q[8] : lane;
+    let cool = Math.max(0, (q.length > 9 ? q[9] : 0) - dt);
+    q[1] -= spd * dt;
+    const ahead = q[1] - px;
+    if (ahead < RIVAL_COMMIT) {
+      q[9] = cool;
+      continue;
+    }
+    if (cool > 0) {
+      q[9] = cool;
+      continue;
+    }
+    const aim1 = want;
+    const next = lane === aim1 ? lane : lane < aim1 ? lane + 1 : lane - 1;
+    q[5] = next;
+    q[8] = aim1;
+    q[9] = next === lane ? 0 : RIVAL_COOL;
+  }
+}
+
 function nudgeFlyers(pieces, dt) {
   for (let i = 0; i < pieces.length; i++) {
     const q = pieces[i];
@@ -240,6 +275,7 @@ function stepPoppers(pieces, p, dt) {
 export function step(p, pieces, rules, dt) {
   if (p[5] <= 0) return "dead";
   nudgeFlyers(pieces, dt);
+  stepRivals(pieces, p, dt);
   stepPoppers(pieces, p, dt);
   const g = rules.g;
   const jump = rules.jump;
@@ -317,6 +353,7 @@ function hitSpan(q) {
     return [mid - half, mid + half];
   }
   if (k === 8) return [mid - FLY_HALF, mid + FLY_HALF];
+  if (k === 10) return [mid - RIVAL_HALF, mid + RIVAL_HALF];
   if (k === 7) {
     const half = Math.min(w * 0.5, POT_HALF);
     return [mid - half, mid + half];
@@ -348,11 +385,11 @@ function collide(p, pieces, rules) {
     const x2 = span[1];
     const y1 = q[4];
     const y2 = k === 7 ? Math.min(y1 + q[3], POT_TOP) : y1 + q[3];
-    const side = k === 7 || k === 8
-      ? meetsSide(p[10], pieceLane(q), k === 7 ? POT_REACH : FLY_REACH)
+    const side = k === 7 || k === 8 || k === 10
+      ? meetsSide(p[10], pieceLane(q), k === 7 ? POT_REACH : RIVAL_REACH)
       : hitsLane(q, lane);
     const hit = side && overlap(left, bottom, right, top, x1, y1, x2, y2);
-    if (hit && (k === 3 || k === 4 || k === 7 || k === 8 || k === 9)) {
+    if (hit && (k === 3 || k === 4 || k === 7 || k === 8 || k === 9 || k === 10)) {
       if (rules.strict) {
         p[5] = 0;
         return "dead";

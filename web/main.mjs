@@ -8,6 +8,8 @@ const canvas = document.getElementById("view");
 const scoreEl = document.getElementById("score");
 const gradeEl = document.getElementById("grade");
 const paceEl = document.getElementById("pace");
+const goalEl = document.getElementById("goal");
+const goalFill = document.getElementById("goal-fill");
 const replayEl = document.getElementById("replay");
 const statsEl = document.getElementById("stats");
 const motionBtn = document.getElementById("motion");
@@ -66,6 +68,9 @@ let pals = [
 let hero = { kind: "keeper", plan: "keeper", r: 0.95, g: 0.72, b: 0.45 };
 let bend = 0.38;
 let loot = "coin";
+let levelN = 1;
+let levelGoal = 0;
+let levelStart = 0;
 const LOOTS = new Set(["coin", "star", "gem", "blossom", "apple"]);
 let provider = "";
 let modelName = "";
@@ -206,6 +211,7 @@ function applyRules(msg) {
   applyPals(msg);
   applyHero(msg);
   applyProvider(msg);
+  applyLevel(msg);
 }
 
 function lerpScene(dt) {
@@ -331,7 +337,11 @@ function resetLocal() {
   comboEl.classList.remove("hot");
   if (gainEl) gainEl.hidden = true;
   if (gradeEl) gradeEl.textContent = gradeLabel(1);
-  if (paceEl) paceEl.textContent = "Speed 8";
+  if (paceEl) paceEl.textContent = "Level 1 · Speed 8";
+  levelN = 1;
+  levelGoal = 0;
+  levelStart = 0;
+  if (goalFill) goalFill.style.width = "0%";
   paintMeter();
   nearSeen.clear();
   stumble = 0;
@@ -350,6 +360,13 @@ function reconcile(st) {
     if (lead < -12 || lead > 12) player[0] = st.x;
   }
   if (typeof st.hue === "number") hue = st.hue;
+  applyLevel(st);
+}
+
+function applyLevel(msg) {
+  if (typeof msg.level === "number") levelN = msg.level;
+  if (typeof msg.goal === "number") levelGoal = msg.goal;
+  if (typeof msg.level0 === "number") levelStart = msg.level0;
 }
 
 function connect() {
@@ -435,6 +452,22 @@ function pumpNet(now) {
 
 window.__lumenPump = () => pumpNet(performance.now());
 
+// Headless Chrome pauses animation frames. A few calls of the live frame
+// keep the picture moving while a test is the only thing reading the page.
+window.__lumenFrames = (n) => {
+  const count = Math.max(0, Math.min(8, n | 0));
+  let t = lastNow || performance.now();
+  stepping = true;
+  try {
+    for (let i = 0; i < count; i++) {
+      t += 1000 / 60;
+      frame(t);
+    }
+  } finally {
+    stepping = false;
+  }
+};
+
 function restart() {
   resetLocal();
   if (connected && ws.readyState === 1) {
@@ -474,16 +507,37 @@ function publishProbe() {
   root.dataset.grade = gradeLabel(grade).split(" ")[0];
   root.dataset.bank = String(gradeBank);
   root.dataset.speed = String(rules.speed);
+  root.dataset.level = String(levelN);
+  root.dataset.goal = Number.isFinite(levelGoal) ? levelGoal.toFixed(1) : "";
   root.dataset.bend = bend.toFixed(2);
   root.dataset.mark = markEl && !markEl.hidden ? markEl.textContent : "";
   root.dataset.chat = saidRows.join(" | ");
   root.dataset.said = saidEl && !saidEl.hidden ? saidEl.textContent : "";
   root.dataset.flyers = String(pieces.reduce((n, q) => n + (q[0] === 8 ? 1 : 0), 0));
   root.dataset.poppers = String(pieces.reduce((n, q) => n + (q[0] === 9 ? 1 : 0), 0));
+  root.dataset.rivals = String(pieces.reduce((n, q) => n + (q[0] === 10 ? 1 : 0), 0));
+  root.dataset.x = Number.isFinite(player[0]) ? player[0].toFixed(1) : "";
+  let rivalAhead = "";
+  let rivalLook = "";
+  let rivalDist = 1e9;
+  for (let i = 0; i < pieces.length; i++) {
+    const q = pieces[i];
+    if (q[0] !== 10) continue;
+    const d = q[1] - player[0];
+    if (d > -6 && d < rivalDist) {
+      rivalDist = d;
+      rivalAhead = q[1].toFixed(1);
+      rivalLook = String(Math.round(q.length > 6 ? q[6] : 0));
+    }
+  }
+  root.dataset.rivalx = rivalAhead;
+  root.dataset.rivallook = rivalLook;
 }
 
+let stepping = false;
+
 function frame(now) {
-  requestAnimationFrame(frame);
+  if (!stepping) requestAnimationFrame(frame);
   const dt = Math.min(0.05, (now - lastNow) / 1000);
   lastNow = now;
   frames[frameN % frames.length] = dt * 1000;
@@ -577,6 +631,7 @@ function frame(now) {
         event: spark, alive: true, speed: rules.speed, g: rules.g,
         near: nearSpark, reject: rejectSpark,
         scene: sceneView, stumble: stumble / 1500, pals, hero, bend, loot,
+        goal: levelGoal,
       });
     } catch (err) {
       console.error(err);
@@ -622,7 +677,10 @@ function frame(now) {
   }
   if (paceEl) {
     const paceN = Math.round(rules.speed);
-    const paceLabel = "Speed " + paceN;
+    const paceLabel = "Level " + levelN + " · Speed " + paceN;
+    const span = levelGoal - levelStart;
+    const along = span > 1 ? Math.max(0, Math.min(1, (player[0] - levelStart) / span)) : 0;
+    if (goalFill) goalFill.style.width = (along * 100).toFixed(1) + "%";
     if (booted && paceN > Math.round(feltSpeed)) {
       showCue("Faster!");
       audio.rise();

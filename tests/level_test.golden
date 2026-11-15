@@ -1,0 +1,14 @@
+span8 128000.0
+span14 220000.0
+span1 96000.0
+up 1
+down 1
+cap 4
+hold 0
+far-x 29960.0
+far-lane 1000.0
+near-lane 0.0
+near-x 13960.0
+bump 1
+miss 1
+over 1

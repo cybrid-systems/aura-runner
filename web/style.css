@@ -76,6 +76,24 @@ html, body {
   font-size: 16px;
   letter-spacing: 0.04em;
 }
+#goal {
+  position: fixed;
+  top: max(190px, calc(env(safe-area-inset-top) + 178px));
+  left: max(18px, env(safe-area-inset-left));
+  width: 148px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(92, 52, 20, 0.28);
+  overflow: hidden;
+  pointer-events: none;
+}
+#goal-fill {
+  display: block;
+  height: 100%;
+  width: 0%;
+  border-radius: inherit;
+  background: #f27b6a;
+}
 #meter {
   position: fixed;
   top: max(148px, calc(env(safe-area-inset-top) + 136px));
@@ -102,7 +120,7 @@ html, body {
 }
 #combo {
   position: fixed;
-  top: max(190px, calc(env(safe-area-inset-top) + 178px));
+  top: max(208px, calc(env(safe-area-inset-top) + 196px));
   left: max(18px, env(safe-area-inset-left));
   margin: 0;
   padding: 4px 12px;

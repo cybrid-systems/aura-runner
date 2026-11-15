@@ -25,6 +25,9 @@
 ;   toward the runner, then bursts on that one lane.
 ;   lane -1 means every lane. kinds: 1 ground, 2 gap, 3 hurdle, 4 gate,
 ;   5 coin, 6 spring, 7 block (a crate you change lanes to avoid).
+;   Kind 10 is a rival. It runs toward the hero on one lane, steps
+;   toward the hero's lane while it is still far, then commits. A jump
+;   or a different lane misses it. A slide does not.
 
 (define PHYS-DT (/ 1.0 60.0))
 (define LANE-W 1.8)
@@ -131,6 +134,41 @@
 ; Keep every field after x, so a flyer's look and speed survive a shift.
 (define (shift-one q dx)
   (cons (car q) (cons (+ (car (cdr q)) dx) (cdr (cdr q)))))
+
+(define RIVAL-REACH 0.62)
+(define RIVAL-HALF 0.28)
+(define RIVAL-COMMIT 7.5)
+(define RIVAL-COOL 0.42)
+
+; Look is field 6, approach speed field 7, aim lane field 8, cool field 9.
+(define (step-one-rival q p dt)
+  (let* ((spd (piece-nth q 7 2.2))
+         (x (- (piece-x q) (* spd dt)))
+         (lane (piece-lane q))
+         (aim (piece-nth q 8 lane))
+         (cool (max 0.0 (- (piece-nth q 9 0.0) dt)))
+         (ahead (- x (player-x p)))
+         (look (piece-nth q 6 0.0)))
+    (if (< ahead RIVAL-COMMIT)
+      (piece 10.0 x (piece-w q) (piece-h q) (piece-y q) lane look spd aim cool)
+      (if (> cool 0.0)
+        (piece 10.0 x (piece-w q) (piece-h q) (piece-y q) lane look spd aim cool)
+        (let* ((aim1 (player-lane p))
+               (next (cond
+                       ((= lane aim1) lane)
+                       ((< lane aim1) (+ lane 1.0))
+                       (else (- lane 1.0))))
+               (cool2 (if (= next lane) 0.0 RIVAL-COOL)))
+          (piece 10.0 x (piece-w q) (piece-h q) (piece-y q) next look spd aim1 cool2))))))
+
+(define (step-rivals pieces p dt)
+  (let loop ((ps pieces) (acc (list)))
+    (if (null? ps)
+      (reverse acc)
+      (let ((q (car ps)))
+        (if (= (piece-k q) 10.0)
+          (loop (cdr ps) (cons (step-one-rival q p dt) acc))
+          (loop (cdr ps) (cons q acc)))))))
 
 (define (nudge-flyers pieces dt)
   (let loop ((ps pieces) (acc (list)))
@@ -313,7 +351,7 @@
 (define (step p pieces rules dt)
   (if (<= (pxs p 5) 0.0)
     (list p pieces "dead")
-    (let ((pieces (step-poppers (nudge-flyers pieces dt) p dt)))
+    (let ((pieces (step-poppers (step-rivals (nudge-flyers pieces dt) p dt) p dt)))
     (let* ((g (hash-ref rules "g"))
            (jump (hash-ref rules "jump"))
            (speed (run-speed (hash-ref rules "speed") p))
@@ -410,9 +448,10 @@
                (y1 (piece-y q))
                (span (cond
                        ((= k 4.0) (gate-span px wide))
-                       ((= k 8.0)
-                        (let ((mid (+ px (* wide 0.5))))
-                          (cons (- mid FLY-HALF) (+ mid FLY-HALF))))
+                       ((or (= k 8.0) (= k 10.0))
+                        (let ((mid (+ px (* wide 0.5)))
+                              (half (if (= k 10.0) RIVAL-HALF FLY-HALF)))
+                          (cons (- mid half) (+ mid half))))
                        ((= k 7.0)
                         (let* ((mid (+ px (* wide 0.5)))
                                (half (min (* wide 0.5) POT-HALF)))
@@ -421,12 +460,13 @@
                (x1 (car span))
                (x2 (cdr span))
                (y2 (if (= k 7.0) (min (+ y1 (piece-h q)) POT-TOP) (+ y1 (piece-h q))))
-               (side (if (or (= k 7.0) (= k 8.0))
-                       (meets-side? (player-lx p) qlane (if (= k 7.0) POT-REACH FLY-REACH))
+               (side (if (or (= k 7.0) (= k 8.0) (= k 10.0))
+                       (meets-side? (player-lx p) qlane
+                                    (if (= k 7.0) POT-REACH RIVAL-REACH))
                        (hits-lane? q lane)))
                (hit (and side (rects-overlap? left bottom right top x1 y1 x2 y2))))
           (cond
-            ((and hit (or (= k 3.0) (= k 4.0) (= k 7.0) (= k 8.0) (= k 9.0)))
+            ((and hit (or (= k 3.0) (= k 4.0) (= k 7.0) (= k 8.0) (= k 9.0) (= k 10.0)))
              (if (strict? rules)
                (loop (cdr ps) (cons q acc) (pset player 5 0.0) "dead" #t)
                (if (> (player-grace player) 0.0)
@@ -449,3 +489,19 @@
 ; running total; the picture scores the pickups themselves.
 (define (score-now p)
   (+ (player-score p) (max 0.0 (- (player-x p) 1.2))))
+
+; A level is about sixteen seconds at the pace it opened on. The ends
+; stay inside a short course and a long one.
+(define (level-span pace)
+  (let ((v (if (and (number? pace) (> pace 0.1)) (exact->inexact pace) 8.0)))
+    (min 220.0 (max 96.0 (* v 16.0)))))
+
+; A clean level steps the pace up. Two bumps step it down. One holds.
+; Four is the top of the feel table. Zero is the opening pace.
+(define (form-next form bumps)
+  (let ((f (if (and (number? form) (>= form 0)) form 0))
+        (n (if (and (number? bumps) (> bumps 0)) bumps 0)))
+    (cond
+      ((<= n 0) (min 4 (+ f 1)))
+      ((>= n 2) (max 0 (- f 1)))
+      (else f))))
