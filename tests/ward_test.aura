@@ -1,0 +1,29 @@
+; The ward takes one solid bump, ignores a gap, and stays down while
+; it is still counting.
+(require "lib/phys")
+
+(define (bit v)
+  (if (equal? v #t) 1 0))
+
+(define (mm x)
+  (let ((v (* x 1000.0)))
+    (if (>= v 0.0)
+      (floor (+ v 0.5))
+      (- 0.0 (floor (+ (- 0.0 v) 0.5))))))
+
+(define (show name row)
+  (display name)
+  (display " ")
+  (display (bit (car row)))
+  (display " ")
+  (display (mm (car (cdr row))))
+  (display " ")
+  (display (bit (car (cdr (cdr row)))))
+  (newline))
+
+(show "absorb" (ward-step #t 0.0 "bump" (/ 1.0 60.0)))
+(show "oops" (ward-step #t 0.0 "oops" (/ 1.0 60.0)))
+(show "down" (ward-step #f 5.0 "bump" 0.5))
+(show "back" (ward-step #f 0.01 "ok" 0.02))
+
+(void)

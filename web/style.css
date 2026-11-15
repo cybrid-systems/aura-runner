@@ -94,6 +94,33 @@ html, body {
   border-radius: inherit;
   background: #f27b6a;
 }
+#ward {
+  position: fixed;
+  top: max(186px, calc(env(safe-area-inset-top) + 174px));
+  left: max(176px, calc(env(safe-area-inset-left) + 158px));
+  margin: 0;
+  color: var(--cream);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-shadow: 0 2px 0 rgba(92, 52, 20, 0.28);
+  pointer-events: none;
+}
+#ward.down { opacity: 0.4; }
+#record {
+  position: fixed;
+  top: max(236px, calc(env(safe-area-inset-top) + 224px));
+  left: max(18px, env(safe-area-inset-left));
+  margin: 0;
+  color: var(--cream);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-shadow: 0 2px 0 rgba(92, 52, 20, 0.28);
+  pointer-events: none;
+}
+#record[hidden] { display: none; }
 #meter {
   position: fixed;
   top: max(148px, calc(env(safe-area-inset-top) + 136px));
@@ -309,7 +336,23 @@ html, body {
   cursor: pointer;
 }
 #model[hidden] { display: none; }
-#motion:focus-visible, #mute:focus-visible, #badge:focus-visible, #model:focus-visible {
+#again {
+  position: fixed;
+  left: 50%;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  height: 44px;
+  margin: 0;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 999px;
+  transform: translateX(-50%);
+  background: rgba(255, 246, 232, 0.94);
+  color: var(--ink);
+  font: 800 15px/1 ui-rounded, "Segoe UI", system-ui, sans-serif;
+  box-shadow: 0 8px 22px rgba(92, 52, 20, 0.16);
+  cursor: pointer;
+}
+#motion:focus-visible, #mute:focus-visible, #badge:focus-visible, #model:focus-visible, #again:focus-visible {
   outline: 3px solid white;
   outline-offset: 3px;
 }

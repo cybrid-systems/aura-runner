@@ -371,6 +371,9 @@
 (define level-x1 128.0)
 (define level-bumps 0)
 (define rival-for 0)
+; The ward is not a player field. Fairness and the 15-field list stay put.
+(define ward-ready #t)
+(define ward-left 0.0)
 
 (define (pace-wanted)
   form)
@@ -617,6 +620,8 @@
   (set! level-n 1)
   (set! level-bumps 0)
   (set! rival-for 0)
+  (set! ward-ready #t)
+  (set! ward-left 0.0)
   (set! owed (list))
   (set! feel-cue "")
   (set! acc 0.0)
@@ -697,6 +702,7 @@
         "bend" bend-now "loot" loot-now
         "worth" (loot-worth loot-now)
         "level" level-n "goal" level-x1 "level0" level-x0
+        "pace" pace "points" (floor (player-score player))
         "motif" motif-now "scene" scene-now
         "pals" pals-rows "hero" (hero-public) "provider" llm-provider
         "model" (active-model) "providers" (ready-providers)))
@@ -830,18 +836,29 @@
       (if (= (car ys) id) #t (loop (cdr ys))))))
 
 (define (one-step!)
-  (let ((r (step player world (rules-hash) PHYS-DT)))
-    (set! player (car r))
-    (set! world (prune-world (car (cdr r)) (player-x player)))
-    (set! chunks (prune-chunks chunks (player-x player)))
-    (if (> (length cleared) 32)
-      (set! cleared (take-n cleared 32))
-      #f)
-    (set! run-ms (+ run-ms (* PHYS-DT 1000.0)))
-    (mark-cleared!)
-    (let ((ev (car (cdr (cdr r)))))
-      (watch-level! ev)
-      ev)))
+  ; Score from before the step. pay-bump floors at zero, so adding the
+  ; cost back would inflate a total under 15. Drag from that bump goes too.
+  (let ((before (player-score player)))
+    (let ((r (step player world (rules-hash) PHYS-DT)))
+      (set! player (car r))
+      (set! world (prune-world (car (cdr r)) (player-x player)))
+      (set! chunks (prune-chunks chunks (player-x player)))
+      (if (> (length cleared) 32)
+        (set! cleared (take-n cleared 32))
+        #f)
+      (set! run-ms (+ run-ms (* PHYS-DT 1000.0)))
+      (let* ((ev0 (car (cdr (cdr r))))
+             (ward (ward-step ward-ready ward-left ev0 PHYS-DT))
+             (held (car (cdr (cdr ward)))))
+        (set! ward-ready (car ward))
+        (set! ward-left (car (cdr ward)))
+        (if held
+          (set! player (pset (pset player 6 before) 12 0.0))
+          #f)
+        (mark-cleared!)
+        (let ((ev (if held "ok" ev0)))
+          (watch-level! ev)
+          ev)))))
 
 (define (prune-world ps x)
   (let loop ((ys ps) (acc (list)))
@@ -1745,12 +1762,75 @@
             (ask-pals!)
             #f))))))
 
+; Exact 0..4. pace and the feel table compare with =, so an inexact
+; 2.0 would miss every row and fall through to the top band.
+(define (form-exact n)
+  (cond
+    ((not (number? n)) 0)
+    ((< n 0.5) 0)
+    ((< n 1.5) 1)
+    ((< n 2.5) 2)
+    ((< n 3.5) 3)
+    (else 4)))
+
+(define (level-exact n)
+  (if (not (number? n))
+    1
+    (let loop ((k 1))
+      (if (or (>= k 40) (< n (+ k 0.5)))
+        k
+        (loop (+ k 1))))))
+
+(define (points-clamp n)
+  (cond
+    ((not (number? n)) 0.0)
+    ((<= n 0.0) 0.0)
+    ((>= n 500000.0) 500000.0)
+    (else (exact->inexact n))))
+
+; A saved run rebuilds the road at that form. A blank record stays on
+; the road reset-run! just laid. Restart never calls this.
+(define (resume-run! msg)
+  (let ((row (hash-ref msg "resume" #f)))
+    (if (not (hash? row))
+      #f
+      (let ((lv (level-exact (hash-ref row "level" 1)))
+            (fm (form-exact (hash-ref row "form" 0)))
+            (pts (points-clamp (hash-ref row "points" 0))))
+        (if (and (= lv 1) (= fm 0) (<= pts 0.0))
+          #f
+          (begin
+            (set! world (list))
+            (set! chunks (list))
+            (set! next-id 0)
+            (set! next-x 0.0)
+            (set! sent-id 0)
+            (set! rival-for 0)
+            (set! level-bumps 0)
+            (set! form fm)
+            (set! level-n lv)
+            (set! pace fm)
+            (set! band fm)
+            (set! player (pset player 6 pts))
+            (let ((f (feel-for band)))
+              (set! g-now (feel-g f))
+              (set! jump-now (feel-jump f))
+              (set! slide-now (feel-slide f))
+              (if (not speed-lock) (set! speed-now (feel-speed f)) #f))
+            ; Numbers already match, so this publishes them and does not
+            ; toast a speed change the runner already had.
+            (set! feel-cue "")
+            (apply-feel! "pace")
+            (begin-level!)
+            (ensure-ahead!)))))))
+
 (define (on-hello c msg)
   (let ((parsed (parse-seed (hash-ref msg "seed" #f))))
     (set! seed (if parsed parsed (exact->inexact (fresh-seed))))
     (set! speed-lock #f)
     (set! speed-now 8.0)
     (reset-run!)
+    (resume-run! msg)
     (send c (welcome-msg))
     (send-all-chunks c)
     (send c (state-msg "ok"))

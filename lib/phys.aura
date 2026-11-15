@@ -505,3 +505,21 @@
       ((<= n 0) (min 4 (+ f 1)))
       ((>= n 2) (max 0 (- f 1)))
       (else f))))
+
+; One automatic ward. It sits outside step, so a fair run and the
+; physics golden never see it. Nine seconds, then it is ready again.
+(define WARD-WAIT 9.0)
+
+; A ready ward takes one solid bump. A gap recovery is not a ward.
+; Returns (ready left held). held is #t only when this call spent it.
+; A bump on the step the wait hits zero was not ready, so it counts.
+(define (ward-step ready left ev dt)
+  (let ((on (equal? ready #t))
+        (wait (if (and (number? left) (> left 0.0)) left 0.0))
+        (t (if (and (number? dt) (> dt 0.0)) dt 0.0)))
+    (if (and on (string? ev) (string=? ev "bump"))
+      (list #f WARD-WAIT #t)
+      (if on
+        (list #t 0.0 #f)
+        (let ((left2 (max 0.0 (- wait t))))
+          (list (<= left2 0.0) left2 #f))))))
