@@ -1191,7 +1191,8 @@
     (set! hold-sim (lref r 3))
     ; Sealing opens a trial. Doing that while a chat call is in flight
     ; wedges http-post, so the slice result waits one tick.
-    (if (and (lref r 0) (not (llm-posting?)) (not (chat-open?)) (seal-hold! (if (lref r 4) #t #f)))
+    (if (and (lref r 0) (not (llm-posting?)) (not (chat-open?))
+             (seal-hold! (if (lref r 4) #t #f)))
       (set! hold-phase 0)
       #f)))
 
@@ -1450,8 +1451,12 @@
     #f)
   (sync-llm-busy!))
 
+; The job hash can lose its token across the chat call. A missing token
+; is 0 and still belongs to the one open ask. A real older token does
+; not: the watchdog may already have started the next ask.
 (define (accept-reply! tok accept)
-  (and (number? tok) (number? accept) (>= accept 0) (= tok accept)))
+  (and (number? tok) (number? accept) (>= accept 0)
+       (or (= tok accept) (<= tok 0))))
 
 (define (take-scene! c msg)
   (if (not (accept-reply! (hash-ref msg "token" -1) scene-accept))
@@ -1642,20 +1647,28 @@
           (if (hash? pals-msg) (take-pals! c pals-msg) #f))
         #f)
       (sync-llm-busy!)
-      (if (and (not scene-busy) (not scene-working) (>= run-ms scene-next))
-        (ask-scene!)
-        #f)
-      (if (and (not motif-busy) (not motif-working) (>= run-ms motif-next))
-        (ask-motif!)
-        #f)
-      ; The watchdog test parks one garden call and still expects
-      ; obstacle phrases. A companion call beside both of those wedges
-      ; llm:chat on this pin, so that test leaves the roster alone.
-      (if (and (not pals-busy) (not pals-working)
-               (not (env-on? "LUMEN_STALL_SCENE"))
-               (>= run-ms pals-next))
-        (ask-pals!)
-        #f))))
+      ; A reply that arrived during another chat is waiting. Asking again
+      ; keeps some arm busy, and the waiting phrase is then never scored.
+      (if (or (pair? wait-motif) (pair? wait-scene) (pair? wait-pals))
+        #f
+        (begin
+          (if (and (not scene-busy) (not scene-working) (>= run-ms scene-next))
+            (ask-scene!)
+            #f)
+          ; A held phrase seals only while no chat is in flight. Another
+          ; obstacle ask would keep this arm busy and the sentence would wait.
+          (if (and (= hold-phase 0)
+                   (not motif-busy) (not motif-working) (>= run-ms motif-next))
+            (ask-motif!)
+            #f)
+          ; The watchdog test parks one garden call and still expects
+          ; obstacle phrases. A companion call beside both of those wedges
+          ; llm:chat on this pin, so that test leaves the roster alone.
+          (if (and (not pals-busy) (not pals-working)
+                   (not (env-on? "LUMEN_STALL_SCENE"))
+                   (>= run-ms pals-next))
+            (ask-pals!)
+            #f))))))
 
 (define (on-hello c msg)
   (let ((parsed (parse-seed (hash-ref msg "seed" #f))))
@@ -1994,10 +2007,13 @@
 ; take the obstacle worker with it. LUMEN_STALL_SCENE parks the first
 ; garden job until `unstall`, which is how the watchdog test imitates a
 ; call that ignores LLM_TIMEOUT.
-(define (deliver! res job ans)
+; The token is a number copied before the chat call. Reading it back off
+; the job hash after that await comes out 0, the tick drops the reply,
+; and the arm stays busy so the phrase never lands.
+(define (deliver! res kind tok ans)
   (channel:send res
-                (hash "kind" (hash-ref job "kind" "")
-                      "token" (hash-ref job "token" 0)
+                (hash "kind" kind
+                      "token" tok
                       "ans" (if (hash? ans)
                               ans
                               (hash "ok" #f "error" "bad" "content" "")))))
@@ -2018,25 +2034,28 @@
 (define (llm-worker req res sys kind)
   (let loop ()
     (let ((job (channel:recv req)))
-      (cond
-        ((string=? kind "scene") (set! scene-working #t))
-        ((string=? kind "pals") (set! pals-working #t))
-        (else (set! motif-working #t)))
-      (if (and stall-scene?
-               (= scene-stalled 0)
-               (string=? kind "scene"))
-        (begin
-          (set! scene-stalled 1)
-          (set! stall-waiting #t)
-          (channel:recv stall-ch)
-          (set! stall-waiting #f))
-        #f)
-      (deliver! res job (call-llm! sys (if (hash? job) (hash-ref job "user" "") "")))
-      (cond
-        ((string=? kind "scene") (set! scene-working #f))
-        ((string=? kind "pals") (set! pals-working #f))
-        (else (set! motif-working #f)))
-      (loop))))
+      (let ((tok (if (hash? job) (hash-ref job "token" 0) 0))
+            (user (if (hash? job) (hash-ref job "user" "") "")))
+        (cond
+          ((string=? kind "scene") (set! scene-working #t))
+          ((string=? kind "pals") (set! pals-working #t))
+          (else (set! motif-working #t)))
+        (if (and stall-scene?
+                 (= scene-stalled 0)
+                 (string=? kind "scene"))
+          (begin
+            (set! scene-stalled 1)
+            (set! stall-waiting #t)
+            (channel:recv stall-ch)
+            (set! stall-waiting #f))
+          #f)
+        (let ((ans (call-llm! sys user)))
+          (deliver! res kind tok ans))
+        (cond
+          ((string=? kind "scene") (set! scene-working #f))
+          ((string=? kind "pals") (set! pals-working #f))
+          (else (set! motif-working #f)))
+        (loop)))))
 
 (define (port-number)
   (let ((raw (try (getenv "AURA_RUNNER_PORT") (catch (e) ""))))

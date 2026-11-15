@@ -223,7 +223,10 @@ async function drive() {
   } finally {
     if (sock) sock.destroy();
     core.child.kill("SIGTERM");
-    await new Promise((r) => core.child.on("exit", r));
+    await new Promise((r) => {
+      if (core.child.exitCode !== null || core.child.signalCode !== null) r();
+      else core.child.once("exit", () => r());
+    });
     await new Promise((r) => mock.server.close(r));
   }
 }
@@ -289,6 +292,7 @@ async function screenshots() {
       "--disable-dev-shm-usage",
       "--disable-background-timer-throttling",
       "--disable-renderer-backgrounding",
+      "--disable-backgrounding-occluded-windows",
       "--disable-gpu",
       "--use-gl=angle",
       "--use-angle=swiftshader",
@@ -333,6 +337,7 @@ async function screenshots() {
     while (Date.now() < deadline) {
       const value = await cdp.call("Runtime.evaluate", {
         expression: `(() => {
+          if (window.__lumenPump) window.__lumenPump();
           const root = document.documentElement;
           return {
             sky: root.dataset.sky || "",
@@ -357,7 +362,7 @@ async function screenshots() {
       }
       if (body.includes(MOTIF_SAY)) sawBodySay = true;
       if ((sky.startsWith("0.9") || sky.startsWith("0.8")) && chat.includes(MOTIF_SAY) && sawBodySay && heroNow && heroNow !== "keeper") break;
-      await new Promise((r) => setTimeout(r, 250));
+      await new Promise((r) => setTimeout(r, 40));
     }
     if (!chat.includes(MOTIF_SAY) || !sawBodySay) {
       throw new Error("chat missing the model sentence " + chat + " sky " + sky + " mock " + JSON.stringify(mock.hits) + " page " + JSON.stringify(cdp.logs) + "\n" + core.log().slice(-1500));
@@ -365,7 +370,15 @@ async function screenshots() {
     if (!heroNow || heroNow === "keeper") {
       throw new Error("runner stayed the light-keeper hero " + heroNow + " pals " + roster + " mock " + JSON.stringify(mock.hits));
     }
-    await new Promise((r) => setTimeout(r, 1200));
+    // A paused animation frame never paints the rose that the probe already
+    // recorded. Ask for a few frames, then shoot.
+    for (let i = 0; i < 8; i++) {
+      await cdp.call("Runtime.evaluate", {
+        expression: "new Promise((resolve) => { const t = setTimeout(() => resolve(0), 200); requestAnimationFrame(() => { clearTimeout(t); resolve(1); }); })",
+        awaitPromise: true,
+      });
+    }
+    await new Promise((r) => setTimeout(r, 300));
     await capture(cdp, late);
     const before = await shotColor(early);
     const after = await shotColor(late);
@@ -380,7 +393,10 @@ async function screenshots() {
     if (chrome) chrome.kill("SIGTERM");
     if (bridge) bridge.kill("SIGTERM");
     core.child.kill("SIGTERM");
-    await new Promise((r) => core.child.on("exit", r));
+    await new Promise((r) => {
+      if (core.child.exitCode !== null || core.child.signalCode !== null) r();
+      else core.child.once("exit", () => r());
+    });
     await new Promise((r) => mock.server.close(r));
   }
 }
