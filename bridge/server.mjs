@@ -10,6 +10,10 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const web = path.join(root, "web");
 const webPort = Number(process.env.AURA_RUNNER_WEB || 8080);
 const auraPort = Number(process.env.AURA_RUNNER_PORT || 8765);
+// The recording stays outside the repo. A missing file is a 404, and the
+// page falls back to the short synthesized line.
+const musicFile = process.env.LUMEN_MUSIC
+  || "/home/dev/code/symphony/symphony_no_29_in_a_major_k_201.mp4";
 const mime = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -18,6 +22,64 @@ const mime = {
   ".json": "application/json",
   ".svg": "image/svg+xml",
 };
+
+function sendBytes(req, res, file, type) {
+  let stat;
+  try {
+    stat = fs.statSync(file);
+  } catch {
+    res.writeHead(404);
+    res.end();
+    return;
+  }
+  const size = stat.size;
+  const range = req.headers.range;
+  let start = 0;
+  let end = size - 1;
+  let status = 200;
+  if (range) {
+    const m = /^bytes=(\d*)-(\d*)$/.exec(range);
+    if (!m || (m[1] === "" && m[2] === "")) {
+      res.writeHead(416, { "content-range": `bytes */${size}` });
+      res.end();
+      return;
+    }
+    if (m[1] === "") {
+      const n = Number(m[2]);
+      start = Math.max(0, size - n);
+    } else {
+      start = Number(m[1]);
+      end = m[2] === "" ? size - 1 : Number(m[2]);
+    }
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start >= size || start > end) {
+      res.writeHead(416, { "content-range": `bytes */${size}` });
+      res.end();
+      return;
+    }
+    end = Math.min(end, size - 1);
+    status = 206;
+  }
+  const headers = {
+    "content-type": type,
+    "accept-ranges": "bytes",
+    "content-length": String(end - start + 1),
+    "cache-control": "no-cache",
+  };
+  if (status === 206) headers["content-range"] = `bytes ${start}-${end}/${size}`;
+  res.writeHead(status, headers);
+  if (req.method === "HEAD") {
+    res.end();
+    return;
+  }
+  const stream = fs.createReadStream(file, { start, end });
+  const stop = () => stream.destroy();
+  res.on("close", stop);
+  stream.on("error", () => {
+    stop();
+    if (!res.writableEnded) res.end();
+  });
+  stream.pipe(res);
+}
 
 function sendFile(res, file) {
   const ext = path.extname(file);
@@ -107,6 +169,10 @@ function attachSocket(ws) {
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://127.0.0.1");
   let rel = decodeURIComponent(url.pathname);
+  if (rel === "/symphony.mp4") {
+    sendBytes(req, res, musicFile, "video/mp4");
+    return;
+  }
   if (rel === "/") rel = "/index.html";
   const file = path.join(web, path.normalize(rel));
   if (!file.startsWith(web)) {

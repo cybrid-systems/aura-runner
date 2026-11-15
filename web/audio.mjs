@@ -1,11 +1,20 @@
-// Small synthesized cues. Nothing loads over the network, and the first
-// gesture unlocks the audio context.
+// Small synthesized cues, plus Symphony No. 29 when the bridge can see the
+// recording. The first gesture unlocks the audio context and starts the piece.
 
 export function createAudio() {
   let ctx = null;
   let muted = false;
   let master = null;
+  let musicGain = null;
+  let song = null;
+  let songState = "wait";
   let nextBeat = 0;
+
+  function mark(state, time) {
+    const root = document.documentElement;
+    root.dataset.music = state;
+    if (typeof time === "number") root.dataset.musicTime = time.toFixed(2);
+  }
 
   function ensure() {
     if (ctx) return ctx;
@@ -15,12 +24,46 @@ export function createAudio() {
     master = ctx.createGain();
     master.gain.value = 0.18;
     master.connect(ctx.destination);
+    musicGain = ctx.createGain();
+    musicGain.gain.value = muted ? 0 : 0.35;
+    musicGain.connect(ctx.destination);
     return ctx;
   }
 
-  function unlock() {
+  function ensureSong() {
+    if (song || songState === "soft" || !ctx) return;
+    const el = new Audio("/symphony.mp4");
+    el.loop = true;
+    el.preload = "metadata";
+    try {
+      ctx.createMediaElementSource(el).connect(musicGain);
+    } catch {
+      songState = "soft";
+      mark("soft");
+      return;
+    }
+    el.addEventListener("error", () => {
+      song = null;
+      songState = "soft";
+      mark("soft");
+    });
+    song = el;
+  }
+
+  function startSong() {
     const c = ensure();
-    if (c && c.state === "suspended") c.resume();
+    if (!c || muted) return;
+    if (c.state === "suspended") c.resume();
+    ensureSong();
+    if (!song || !song.paused) return;
+    song.play().then(() => {
+      songState = "play";
+      mark("play", song.currentTime);
+    }).catch(() => {});
+  }
+
+  function unlock() {
+    startSong();
   }
 
   function tone(freq, dur, type, gain) {
@@ -72,17 +115,31 @@ export function createAudio() {
   function pop() { tone(180, 0.09, "sine", 0.4); tone(520, 0.12, "triangle", 0.28); }
 
   function music(reduced) {
-    if (muted || !ctx || reduced) return;
+    if (!ctx || muted) return;
+    if (song) {
+      if (song.paused && ctx.state === "running") startSong();
+      if (!song.paused) mark("play", song.currentTime);
+      return;
+    }
+    if (songState !== "soft" || reduced) return;
     if (ctx.currentTime < nextBeat) return;
     const scale = [262, 294, 330, 392, 440];
     const f = scale[Math.floor(ctx.currentTime * 2) % scale.length];
     tone(f / 2, 0.35, "sine", 0.12);
     nextBeat = ctx.currentTime + 0.5;
+    mark("soft");
   }
 
   function setMuted(v) {
     muted = v;
     if (master) master.gain.value = v ? 0 : 0.18;
+    if (musicGain) musicGain.gain.value = v ? 0 : 0.35;
+    if (v) {
+      if (song && !song.paused) song.pause();
+      mark("mute", song ? song.currentTime : 0);
+      return;
+    }
+    startSong();
   }
 
   return { unlock, jump, slide, coin, pickup, cheer, rise, nice, spring, die, keep, land, near, pop, music, setMuted, get muted() { return muted; } };
