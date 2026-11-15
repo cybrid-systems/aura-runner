@@ -1755,8 +1755,10 @@
     (if rules-dirty
       (begin (send c (rules-msg)) (set! rules-dirty #f))
       #f)
-    (send c (state-msg ev))
-    (flush-notes! c)))
+    ; Decisions go out before state. The rebind check stops at state, so a
+    ; note sent after it can sit unread when the deadline lands on that tick.
+    (flush-notes! c)
+    (send c (state-msg ev))))
 
 (define (on-rebind c msg)
   (let ((name (hash-ref msg "name" ""))
