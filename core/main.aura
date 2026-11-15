@@ -165,6 +165,13 @@
 (define hold-loot "")
 (define hold-bend -1.0)
 (define hold-say "")
+; Layout and rules from the tick that accepted the phrase. A later pace
+; step must not turn that verdict over, and a set! inside the trial does
+; not come back to this fiber on the CI nightly.
+(define hold-rules #f)
+(define hold-geom 0.0)
+(define hold-budget 0.0)
+(define hold-margin 0.0)
 (define tuned #f)
 
 (define (publish-named! name value)
@@ -984,6 +991,10 @@
           (release-slot!))))))
 
 (define (queue-hold! form laid say)
+  (set! hold-rules (rules-hash))
+  (set! hold-geom (hash-ref laid "geometry" 0.0))
+  (set! hold-budget (hash-ref laid "budget" 0.0))
+  (set! hold-margin (hash-ref laid "margin" 0.0))
   (set! hold-phase 1)
   (set! hold-form form)
   (set! hold-pieces (hash-ref laid "pieces"))
@@ -1111,90 +1122,90 @@
         (span hold-span)
         (loot hold-loot)
         (bend hold-bend)
-        (say hold-say))
-    (let ((found #f))
-      (let* ((cand (evo:candidate form (hash "id" (string-append "h" (int-str next-id))
-                                            "target" "motif-form")))
-             (trial (open-trial cand
-                               (hash "timeout-ms" 1500
-                                     "apply" (lambda (c) #t)
-                                     "evaluate"
-                                     (lambda (c)
-                                       (set! found (layout-form form (rules-hash)))
-                                       (hash "status" "ok"
-                                             "objectives"
-                                             (hash "fair" (if (and cleared? found
-                                                                   (<= (hash-ref found "geometry" 1.0) 0.0)
-                                                                   (<= (hash-ref found "budget" 1.0) 0.0)
-                                                                   (margin-ok? found))
-                                                            1.0 0.0))
-                                             "constraints"
-                                             (hash "budget" (if found (hash-ref found "budget" 1.0) 1.0)
-                                                   "geometry" (if found (hash-ref found "geometry" 1.0) 1.0)
-                                                   "reachable" (if (and cleared? (margin-ok? found)) 0.0 1.0)
-                                                   "safe" 0.0)
-                                             "behavior" (hash "band" (exact->inexact band))))))))
-        (if (trial-busy? trial)
-          #f
-          (begin
-        (remember-hint! form)
-        (if (or (not found) (not cleared?)
-                (> (hash-ref found "geometry" 1.0) 0.0)
-                (> (hash-ref found "budget" 1.0) 0.0)
-                (not (margin-ok? found))
-                (not trial) (not (evo:trial-ok? trial)) (not (evo:feasible? trial)))
-          (note! "ROLLBACK" "reachable" "motif" "That shape drifted away"
-                 (if (hash? found) (hash-ref found "margin" 0.0) 0.0))
-          (let ((prev-form motif-now)
-                (prev-hue hue-now)
-                (prev-loot loot-now)
-                (prev-bend bend-now))
-            (set! motif-now form)
-            (if (and (string? loot) (> (string-length loot) 0)) (set! loot-now loot) #f)
-            (if (and (number? bend) (>= bend 0.12)) (set! bend-now bend) #f)
-            (set! hue-now (exact->inexact (modulo (+ (floor prev-hue) 1) 6)))
-            (let ((ev (hash "status" "ok"
-                            "objectives" (hash "fair" 1.0)
-                            "constraints" (hash "budget" 0.0 "geometry" 0.0 "reachable" 0.0 "safe" 0.0)
-                            "behavior" (hash "band" (exact->inexact band))))
-                  (search (phrase-search "motif-form"))
-                  (mark (let ((fly (flyer-mark pieces))
-                              (look (look-mark pieces)))
-                          (cond
-                            ((not (string=? loot-now prev-loot)) loot-now)
-                            ((> (abs (- bend-now prev-bend)) 0.02) "bend")
-                            ((> (string-length fly) 0) fly)
-                            ((> (string-length look) 0) look)
-                            (else "shape"))))
-                  (line (if (> (string-length say) 0) say "A new shape bloomed")))
-              (try-tell-commit! search cand ev)
-              (if (binding-landed? "motif-form" (motif-body form) form)
-                (begin
-                  (set! motif-pieces pieces)
-                  (set! motif-span span)
-                  (set! rules-dirty #t)
-                  (set! rule-rev (+ rule-rev 1))
-                  (note! "KEEP" "fair" "motif" line mark "What should come down the path?"
-                         (hash-ref found "margin" 9.0)))
-                (begin
-                  (set! motif-now prev-form)
-                  (set! hue-now prev-hue)
-                  (set! loot-now prev-loot)
-                  (set! bend-now prev-bend)
-                  (note! "ROLLBACK" "commit" "motif" "That shape drifted away"))))))
-            (release-slot!)))))))
+        (say hold-say)
+        (geom hold-geom)
+        (budget hold-budget)
+        (margin hold-margin))
+    (let* ((fair (and cleared?
+                      (<= geom 0.0)
+                      (<= budget 0.0)
+                      (>= margin SPARE-S)))
+           (cand (evo:candidate form (hash "id" (string-append "h" (int-str next-id))
+                                             "target" "motif-form")))
+           (trial (open-trial cand
+                             (hash "timeout-ms" 1500
+                                   "apply" (lambda (c) #t)
+                                   "evaluate"
+                                   (lambda (c)
+                                     (hash "status" "ok"
+                                           "objectives" (hash "fair" (if fair 1.0 0.0))
+                                           "constraints"
+                                           (hash "budget" budget
+                                                 "geometry" geom
+                                                 "reachable" (if fair 0.0 1.0)
+                                                 "safe" 0.0)
+                                           "behavior" (hash "band" (exact->inexact band))))))))
+      (if (trial-busy? trial)
+        #f
+        (begin
+          (remember-hint! form)
+          (if (or (not fair)
+                  (not trial) (not (evo:trial-ok? trial)) (not (evo:feasible? trial)))
+            (note! "ROLLBACK" "reachable" "motif" "That shape drifted away" margin)
+            (let ((prev-form motif-now)
+                  (prev-hue hue-now)
+                  (prev-loot loot-now)
+                  (prev-bend bend-now))
+              (set! motif-now form)
+              (if (and (string? loot) (> (string-length loot) 0)) (set! loot-now loot) #f)
+              (if (and (number? bend) (>= bend 0.12)) (set! bend-now bend) #f)
+              (set! hue-now (exact->inexact (modulo (+ (floor prev-hue) 1) 6)))
+              (let ((ev (hash "status" "ok"
+                              "objectives" (hash "fair" 1.0)
+                              "constraints" (hash "budget" 0.0 "geometry" 0.0 "reachable" 0.0 "safe" 0.0)
+                              "behavior" (hash "band" (exact->inexact band))))
+                    (search (phrase-search "motif-form"))
+                    (mark (let ((fly (flyer-mark pieces))
+                                (look (look-mark pieces)))
+                            (cond
+                              ((not (string=? loot-now prev-loot)) loot-now)
+                              ((> (abs (- bend-now prev-bend)) 0.02) "bend")
+                              ((> (string-length fly) 0) fly)
+                              ((> (string-length look) 0) look)
+                              (else "shape"))))
+                    (line (if (> (string-length say) 0) say "A new shape bloomed")))
+                (try-tell-commit! search cand ev)
+                (if (binding-landed? "motif-form" (motif-body form) form)
+                  (begin
+                    (set! motif-pieces pieces)
+                    (set! motif-span span)
+                    (set! rules-dirty #t)
+                    (set! rule-rev (+ rule-rev 1))
+                    (note! "KEEP" "fair" "motif" line mark "What should come down the path?"
+                           margin))
+                  (begin
+                    (set! motif-now prev-form)
+                    (set! hue-now prev-hue)
+                    (set! loot-now prev-loot)
+                    (set! bend-now prev-bend)
+                    (note! "ROLLBACK" "commit" "motif" "That shape drifted away"))))))
+          (release-slot!)
+          #t)))))
 
 (define (step-hold!)
-  (let ((r (autopilot-slice hold-pieces (rules-hash) hold-body hold-sim hold-i 12)))
-    (set! hold-i (lref r 1))
-    (set! hold-body (lref r 2))
-    (set! hold-sim (lref r 3))
-    ; Sealing opens a trial. Doing that while a chat call is in flight
-    ; wedges http-post, so the slice result waits one tick.
-    (if (and (lref r 0) (not (llm-posting?)) (not (chat-open?))
-             (seal-hold! (if (lref r 4) #t #f)))
-      (set! hold-phase 0)
-      #f)))
+  (let ((rules (if (hash? hold-rules) hold-rules (rules-hash))))
+    (let ((r (autopilot-slice hold-pieces rules hold-body hold-sim hold-i 12)))
+      (set! hold-i (lref r 1))
+      (set! hold-body (lref r 2))
+      (set! hold-sim (lref r 3))
+      ; Sealing opens a trial. chat-open? is the http-post still inside
+      ; this interpreter. A busy flag also stays set while that arm is
+      ; only waiting for the slot, and waiting on it holds the sentence
+      ; past the browser check.
+      (if (and (lref r 0) (not (chat-open?))
+               (seal-hold! (if (lref r 4) #t #f)))
+        (set! hold-phase 0)
+        #f))))
 
 (define (maybe-hold!)
   (if (= hold-phase 1) (step-hold!) #f))
