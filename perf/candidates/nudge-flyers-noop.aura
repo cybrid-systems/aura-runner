@@ -1,0 +1,12 @@
+; The piece list is rebuilt every frame, even when the stretch has no
+; flyer in it. Nothing moved means the same list comes back, so the
+; rebuild is skipped and the allocation goes away.
+
+(define (nudge-flyers pieces dt)
+  (let loop ((ps pieces) (acc (list)) (moved #f))
+    (if (null? ps)
+      (if moved (reverse acc) pieces)
+      (let ((q (car ps)))
+        (if (= (piece-k q) 8.0)
+          (loop (cdr ps) (cons (shift-one q (* (- 0.0 (piece-nth q 7 0.0)) dt)) acc) #t)
+          (loop (cdr ps) (cons q acc) moved))))))

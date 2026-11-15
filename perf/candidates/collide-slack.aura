@@ -1,0 +1,9 @@
+; The body cannot reach a piece that is more than a few centimetres away
+; from its box, so the metre of slack is more than the geometry needs.
+; A quarter of a metre still leaves the spans alone, and more of the
+; stretch is skipped per frame.
+
+(define (collide-far? q left right)
+  (let ((px (piece-x q)))
+    (or (> px (+ right 0.25))
+        (< (+ (+ px (piece-w q)) 0.25) left))))

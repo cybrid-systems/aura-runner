@@ -1,8 +1,0 @@
-; pset through a vector. The player is a 15 field list; the old pset
-; consed a whole new list and reversed it, once per field write.
-; Same fields, same order, same values.
-
-(define (pset p i v)
-  (let ((vec (list->vector p)))
-    (vector-set! vec i v)
-    (vector->list vec)))

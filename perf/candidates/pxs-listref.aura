@@ -1,5 +1,0 @@
-; pxs through the native list-ref. The old pxs walked the list with a
-; recursive car/cdr chain, one cell per field.
-
-(define (pxs p i)
-  (list-ref p i))
