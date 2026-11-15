@@ -1,0 +1,53 @@
+; Play every seeded stretch at its feel pace and print one note.
+; Offline only. aura test does not run this file, and it does not
+; call the network.
+(require "lib/review")
+(require "lib/gen")
+
+(define (feel-rules band)
+  (cond
+    ((= band 0) (rules-of 32.0 11.2 8.0 0.48 0.12 0.12))
+    ((= band 1) (rules-of 31.4 11.5 10.0 0.50 0.12 0.12))
+    ((= band 2) (rules-of 30.8 11.8 12.0 0.52 0.12 0.12))
+    ((= band 3) (rules-of 30.2 12.1 13.0 0.54 0.12 0.12))
+    (else (rules-of 29.6 12.4 14.0 0.56 0.12 0.12))))
+
+(define (show-row band i specs rules)
+  (let ((text (string-append "(seq" (specs-src specs) ")")))
+    (let ((r (review-play text rules)))
+      (display "band ")
+      (display band)
+      (display " row ")
+      (display i)
+      (display " ok ")
+      (display (if (hash-ref r "ok") 1 0))
+      (display " spare ")
+      (display (hash-ref r "spare" 0.0))
+      (display " ")
+      (let ((h (hash-ref r "hint" "")))
+        (if (and (string? h) (> (string-length h) 0))
+          (display h)
+          (display "clear")))
+      (newline)
+      (if (hash-ref r "ok") 1 0))))
+
+(define (walk-band band)
+  (let ((rules (feel-rules band)))
+    (let loop ((xs (pattern-table band)) (i 0) (good 0) (n 0))
+      (if (null? xs)
+        (list good n)
+        (loop (cdr xs)
+              (+ i 1)
+              (+ good (show-row band i (car xs) rules))
+              (+ n 1))))))
+
+(let loop ((band 0) (good 0) (n 0))
+  (if (> band 4)
+    (begin
+      (display "played ")
+      (display good)
+      (display " ")
+      (display n)
+      (newline))
+    (let ((row (walk-band band)))
+      (loop (+ band 1) (+ good (car row)) (+ n (car (cdr row)))))))

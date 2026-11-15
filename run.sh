@@ -71,6 +71,9 @@ if [[ "$(printf '%s\n' "$AURA_BIN" | wc -l)" -ne 1 || ! -x "$AURA_BIN" ]]; then
   exit 1
 fi
 
+# A trial leaves the parent read-only unless the sandbox is off, and a
+# kept phrase has to rebind.
+export AURA_SANDBOX="${AURA_SANDBOX:-off}"
 export AURA_EVO_LOG="$ROOT/out/evo.jsonl"
 export AURA_RUNNER_PORT="$AURA_PORT"
 export AURA_RUNNER_WEB="$WEB_PORT"

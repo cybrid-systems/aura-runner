@@ -48,7 +48,7 @@ The files are one token each and are not printed:
 
 MiniMax uses `https://api.minimaxi.com/v1` and `MiniMax-M3.1-Flash`. `https://api.minimax.io` returns 401 for a China key, so the probe does not call it. An `LLM_API_KEY` already in the environment is left as it is, which is how the mock tests point at a local server.
 
-The model is asked for an obstacle phrase, a garden phrase, and one friend. Each reply starts with one short sentence, then an allowlisted s-expression. The line by the model name shows that sentence. A friend phrase also restyles the runner. Aura checks the form before it can appear. A rejected phrase is rolled back and the run continues. The calls run on fibers, so the run does not wait on them.
+The model is asked for an obstacle phrase, a garden phrase, and one friend. Each reply starts with one short sentence, then an allowlisted s-expression. The line by the model name shows that sentence. A friend phrase also restyles the runner. Aura checks the form before it can appear. A rejected phrase is rolled back and the run continues. The calls run on fibers, so the run does not wait on them. A developer can play every seeded stretch with `aura --quiet --preset dev scripts/play-review.aura`, and a kept or turned-away phrase leaves a short note on the next model ask.
 
 ## What you feel
 
@@ -72,6 +72,8 @@ A kept phrase is published with `(mutate :rebind)`. `set-code` runs only when a 
 - `core/main.aura` — TCP newline-JSON server, simulation, proposals
 - `lib/phys.aura` — fixed-step lanes, jump, slide (twin: `web/sim.mjs`)
 - `lib/gen.aura` — seeded chunks and the constraint gate
+- `lib/review.aura` — ergonomic notes for a stretch
+- `scripts/play-review.aura` — plays the seeded stretches and prints those notes
 - `lib/scene.aura` — garden phrase
 - `lib/pals.aura` — companions and the runner's look
 - `web/` — WebGL2 view
@@ -83,7 +85,7 @@ A kept phrase is published with `(mutate :rebind)`. `set-code` runs only when a 
 ```bash
 source scripts/aura-path.sh
 export PATH="$(dirname "$(install_aura "$PWD")"):$PATH"   # or skip this if aura nightly is already on PATH
-aura test
+AURA_SANDBOX=off aura test
 node scripts/check-sim.mjs
 node scripts/check-lanes.mjs
 node scripts/smoke.mjs

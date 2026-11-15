@@ -12,6 +12,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Aura core tests
+        env:
+          AURA_SANDBOX: "off"
         run: aura test
 
   frontend:
@@ -48,6 +50,8 @@ jobs:
 
   smoke:
     runs-on: ubuntu-latest
+    env:
+      AURA_SANDBOX: "off"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
