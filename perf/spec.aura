@@ -79,6 +79,24 @@
                       (let loop ((i 0))
                         (if (>= i 600) 0
                             (begin (collide p course PERF-RULES) (loop (+ i 1)))))))
+      (hash "name" "step-poppers" "calls" 600
+            "stack" (list "bench-kernel" "step-poppers")
+            "thunk" (lambda ()
+                      (let loop ((i 0))
+                        (if (>= i 600) 0
+                            (begin (step-poppers course p PHYS-DT) (loop (+ i 1)))))))
+      (hash "name" "nudge-flyers" "calls" 600
+            "stack" (list "bench-kernel" "nudge-flyers")
+            "thunk" (lambda ()
+                      (let loop ((i 0))
+                        (if (>= i 600) 0
+                            (begin (nudge-flyers course PHYS-DT) (loop (+ i 1)))))))
+      (hash "name" "over-gap?" "calls" 600
+            "stack" (list "bench-kernel" "over-gap?")
+            "thunk" (lambda ()
+                      (let loop ((i 0))
+                        (if (>= i 600) 0
+                            (begin (over-gap? 5.0 1.0 course) (loop (+ i 1)))))))
       (hash "name" "pset" "calls" 7800
             "stack" (list "bench-kernel" "pset")
             "thunk" (lambda ()
@@ -101,18 +119,18 @@
 
 (define catalog
   (list
-    (candidate "pset-vector"
-               "perf/candidates/pset-vector.aura"
-               "pset"
-               "the player is a 15 field list; pset consed a whole new one per field write")
-    (candidate "collide-window"
-               "perf/candidates/collide-window.aura"
-               "collide"
-               "collide tests every piece of the stretch; the body can only reach the ones next to it")
-    (candidate "pxs-listref"
-               "perf/candidates/pxs-listref.aura"
-               "pxs"
-               "pxs walked the player list cell by cell; list-ref is native")
+    (candidate "nudge-flyers-noop"
+               "perf/candidates/nudge-flyers-noop.aura"
+               "nudge-flyers"
+               "the piece list is rebuilt every frame; a stretch without a flyer does not need it")
+    (candidate "step-poppers-noop"
+               "perf/candidates/step-poppers-noop.aura"
+               "step-poppers"
+               "the piece list is rebuilt every frame; a stretch without a popper does not need it")
+    (candidate "collide-slack"
+               "perf/candidates/collide-slack.aura"
+               "collide-far?"
+               "the metre of slack around the body is more than the geometry needs")
     (candidate "wrong-scale"
                "perf/candidates/wrong-scale.aura"
                "pset"
@@ -131,25 +149,25 @@
           "ratio" 2
           "actionable-ms" 1
           "per-round" 2
-          "order" (list "pset-vector" "collide-window"
-                        "pxs-listref" "wrong-scale"))
+          "order" (list "nudge-flyers-noop" "step-poppers-noop"
+                        "collide-slack" "wrong-scale"))
     (hash "id" "gene-ratio-8"
           "ratio" 8
           "actionable-ms" 1
           "per-round" 1
-          "order" (list "pset-vector" "collide-window"
-                        "pxs-listref" "wrong-scale"))
+          "order" (list "nudge-flyers-noop" "step-poppers-noop"
+                        "collide-slack" "wrong-scale"))
     (hash "id" "gene-high-threshold"
           "ratio" 2
           "actionable-ms" 1000000
           "per-round" 1
-          "order" (list "pset-vector"))
+          "order" (list "nudge-flyers-noop"))
     (hash "id" "gene-drop-checksum"
           "ratio" 2
           "actionable-ms" 1
           "per-round" 1
           "checksum" #f
-          "order" (list "wrong-scale" "pset-vector"))))
+          "order" (list "wrong-scale" "nudge-flyers-noop"))))
 
 ; ── the run ──────────────────────────────────────────────────────────
 (define worker-path
