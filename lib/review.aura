@@ -1,0 +1,312 @@
+; Ergonomic notes for a stretch. Advisory only: nothing here is added to
+; constraint-hash, so a phrase the fairness gate already accepts still
+; plays. Spare stays out of the evo constraints. A positive spare would
+; look like a violation to evo:feasible?.
+; The server tick calls review-text, which is a walk. review-play runs
+; the autopilot and is for the offline script only.
+(require "std/evo-core" all:)
+(require "lib/gen")
+(require "std/string" all:)
+
+(define HINT-GEOM "Keep the jump low and wide, and the slide bar easy to pass under.")
+(define HINT-BUDGET "Keep the stretch to sixteen moves.")
+(define HINT-SPARE "Leave a quarter-second after the move comes into view.")
+(define HINT-STACK "Give each move its own beat.")
+(define HINT-COIN "Lay coins on the open lane beside the block.")
+(define HINT-TOY "Give the flying toy a beat of its own.")
+(define HINT-JUMP "Leave a full beat of ground before a jump.")
+(define HINT-LINE "A short line of coins on the open lane marks the way through.")
+(define HINT-PLAY "The run could not finish this stretch.")
+(define HINT-SHAPE "Keep each move inside the gentle ranges.")
+
+; Parent binding. A child fiber's set! of this stays in that fiber.
+(define race-mark 1)
+
+(define (abs-n n)
+  (if (< n 0.0) (- 0.0 n) n))
+
+(define (verb? k)
+  (or (= k 2.0) (= k 3.0) (= k 4.0) (= k 7.0)))
+
+(define (jump? k)
+  (or (= k 2.0) (= k 3.0)))
+
+(define (verb-xs pieces)
+  (let loop ((ps pieces) (acc (list)))
+    (if (null? ps)
+      acc
+      (let ((q (car ps)))
+        (loop (cdr ps) (if (verb? (piece-k q)) (cons (piece-x q) acc) acc))))))
+
+(define (insert-num n xs)
+  (if (or (null? xs) (<= n (car xs)))
+    (cons n xs)
+    (cons (car xs) (insert-num n (cdr xs)))))
+
+(define (sort-nums xs)
+  (let loop ((ys xs) (acc (list)))
+    (if (null? ys)
+      acc
+      (loop (cdr ys) (insert-num (car ys) acc)))))
+
+; Actions within half a metre are one moment. A paired crate is one
+; lane change, not two beats.
+(define (cluster-gaps xs)
+  (let loop ((ys xs) (acc (list)) (start #f) (prev #f))
+    (if (null? ys)
+      (reverse (if start (cons start acc) acc))
+      (let ((x (car ys)))
+        (if (not start)
+          (loop (cdr ys) acc x x)
+          (if (<= (- x prev) 0.5)
+            (loop (cdr ys) acc start x)
+            (loop (cdr ys) (cons start acc) x x)))))))
+
+(define (stacked? pieces pace)
+  (let ((ms (cluster-gaps (sort-nums (verb-xs pieces)))))
+    (let loop ((xs ms) (prev #f))
+      (if (null? xs)
+        #f
+        (if (not prev)
+          (loop (cdr xs) (car xs))
+          (if (< (/ (- (car xs) prev) pace) REST-S)
+            #t
+            (loop (cdr xs) (car xs))))))))
+
+(define (jump-between? pieces start end)
+  (let loop ((ps pieces))
+    (if (null? ps)
+      #f
+      (let ((q (car ps)))
+        (if (and (jump? (piece-k q))
+                 (>= (piece-x q) (- start 0.001))
+                 (< (piece-x q) end))
+          #t
+          (loop (cdr ps)))))))
+
+; A rest before a jump is advice. It does not turn the stretch away,
+; because the shipped bands and the prompt example use that rest.
+(define (short-before-jump? pieces pace)
+  (let ((ms (cluster-gaps (sort-nums (verb-xs pieces)))))
+    (let loop ((xs ms) (prev 0.0))
+      (if (null? xs)
+        #f
+        (let ((here (car xs))
+              (end (if (pair? (cdr xs)) (car (cdr xs)) 100000.0)))
+          (if (and (jump-between? pieces here end)
+                   (< (/ (- here prev) pace) (- BEAT-S 0.05)))
+            #t
+            (loop (cdr xs) here)))))))
+
+(define (coin-window pace)
+  (let ((w (* pace REST-S)))
+    (if (> w 4.0) w 4.0)))
+
+; Lane -1 is the shared pickup, not a coin sitting in a blocked lane.
+(define (same-lane? a b)
+  (and (>= a 0.0) (>= b 0.0) (= a b)))
+
+(define (coin-blocked? pieces pace)
+  (let ((window (coin-window pace)))
+    (let loopb ((bs pieces))
+      (if (null? bs)
+        #f
+        (let ((b (car bs)))
+          (if (not (= (piece-k b) 7.0))
+            (loopb (cdr bs))
+            (or (let loopc ((cs pieces))
+                  (if (null? cs)
+                    #f
+                    (let ((c (car cs)))
+                      (if (and (= (piece-k c) 5.0)
+                               (same-lane? (piece-lane c) (piece-lane b))
+                               (<= (abs-n (- (piece-x c) (piece-x b))) window))
+                        #t
+                        (loopc (cdr cs))))))
+                (loopb (cdr bs)))))))))
+
+(define (near-beat? a b pace)
+  (< (abs-n (- a b)) (* pace (- BEAT-S 0.05))))
+
+(define (toy-on-gate? pieces pace)
+  (let loopg ((gs pieces))
+    (if (null? gs)
+      #f
+      (let ((g (car gs)))
+        (if (not (= (piece-k g) 4.0))
+          (loopg (cdr gs))
+          (or (let loopf ((fs pieces))
+                (if (null? fs)
+                  #f
+                  (let ((f (car fs)))
+                    (if (and (= (piece-k f) 8.0)
+                             (near-beat? (piece-x f) (piece-x g) pace))
+                      #t
+                      (loopf (cdr fs))))))
+              (loopg (cdr gs))))))))
+
+(define (lonely-coin? pieces)
+  (= (count-kind pieces 5.0) 1))
+
+(define (review-stretch pieces rules)
+  (let* ((pace (pace-of rules))
+         (geom (geom-violation pieces rules))
+         (budget (budget-violation pieces))
+         (spare (spare-time pieces rules))
+         (hard (cond
+                 ((> geom 0.0) HINT-GEOM)
+                 ((> budget 0.0) HINT-BUDGET)
+                 ((< spare SPARE-S) HINT-SPARE)
+                 ((stacked? pieces pace) HINT-STACK)
+                 ((coin-blocked? pieces pace) HINT-COIN)
+                 ((toy-on-gate? pieces pace) HINT-TOY)
+                 (else "")))
+         (soft (cond
+                 ((> (string-length hard) 0) "")
+                 ((short-before-jump? pieces pace) HINT-JUMP)
+                 ((lonely-coin? pieces) HINT-LINE)
+                 (else ""))))
+    (hash "ok" (= (string-length hard) 0)
+          "hint" (if (> (string-length hard) 0) hard soft)
+          "spare" spare
+          "geometry" geom
+          "budget" budget)))
+
+(define (review-text text rules)
+  (let ((body (if (string? text) (form-text text) "")))
+    (let ((laid (layout-form body rules)))
+      (if (not (hash? laid))
+        (hash "ok" #f "hint" HINT-SHAPE "spare" 0.0 "geometry" 1.0 "budget" 0.0)
+        (review-stretch (hash-ref laid "pieces" (list)) rules)))))
+
+(define (review-play text rules)
+  (let ((r (review-text text rules)))
+    (if (or (not (hash? r)) (not (hash-ref r "ok")))
+      r
+      (let ((laid (layout-form (form-text text) rules)))
+        (if (and (hash? laid)
+                 (autopilot-clear? (hash-ref laid "pieces" (list)) rules))
+          r
+          (hash "ok" #f
+                "hint" HINT-PLAY
+                "spare" (hash-ref r "spare" 0.0)
+                "geometry" (hash-ref r "geometry" 0.0)
+                "budget" (hash-ref r "budget" 0.0)))))))
+
+; One isolated trial. The spare is behavior, never a constraint.
+(define (review-trial text rules)
+  (let ((found #f))
+    (let* ((cand (evo:candidate text (hash "id" "review" "target" "motif-form")))
+           (trial (evo:trial cand
+                             (hash "timeout-ms" 4000
+                                   "apply" (lambda (c) #t)
+                                   "evaluate"
+                                   (lambda (c)
+                                     (set! found (review-text text rules))
+                                     (hash "status" "ok"
+                                           "objectives"
+                                           (hash "fair" (if (and (hash? found) (hash-ref found "ok")) 1.0 0.0))
+                                           "constraints"
+                                           (hash "geometry" (if (hash? found) (hash-ref found "geometry" 0.0) 1.0)
+                                                 "reachable" (if (and (hash? found) (hash-ref found "ok")) 0.0 1.0)
+                                                 "budget" 0.0
+                                                 "safe" 0.0)
+                                           "behavior"
+                                           (hash "spare" (if (hash? found) (hash-ref found "spare" 0.0) 0.0))))))))
+      (if (hash? found)
+        found
+        (hash "ok" #f "hint" "" "spare" 0.0 "geometry" 1.0 "budget" 0.0 "trial" trial)))))
+
+(define (review-better? row best)
+  (let ((a (car (cdr row)))
+        (b (car (cdr best))))
+    (let ((ao (if (hash-ref a "ok") 1 0))
+          (bo (if (hash-ref b "ok") 1 0)))
+      (cond
+        ((> ao bo) #t)
+        ((< ao bo) #f)
+        ((> (hash-ref a "spare" 0.0) (hash-ref b "spare" 0.0)) #t)
+        ((< (hash-ref a "spare" 0.0) (hash-ref b "spare" 0.0)) #f)
+        (else (< (car row) (car best)))))))
+
+(define (pick-winner rows best)
+  (if (null? rows)
+    best
+    (let ((row (car rows)))
+      (if (not best)
+        (pick-winner (cdr rows) row)
+        (if (review-better? row best)
+          (pick-winner (cdr rows) row)
+          (pick-winner (cdr rows) best))))))
+
+(define (insert-row row rows)
+  (if (or (null? rows) (< (car row) (car (car rows))))
+    (cons row rows)
+    (cons (car rows) (insert-row row (cdr rows)))))
+
+(define (sort-race-rows rows)
+  (let loop ((xs rows) (acc (list)))
+    (if (null? xs)
+      acc
+      (loop (cdr xs) (insert-row (car xs) acc)))))
+
+(define (review-race-seq texts rules)
+  (let loop ((xs texts) (i 0) (rows (list)))
+    (if (null? xs)
+      (let ((sorted (sort-race-rows rows)))
+        (let ((best (pick-winner sorted #f)))
+          (hash "winner" (if best (car best) -1)
+                "mark" race-mark
+                "fibers" 0
+                "rows" sorted)))
+      (loop (cdr xs)
+            (+ i 1)
+            (cons (list i (review-trial (car xs) rules)) rows)))))
+
+; workspace:switch is process-global, so the trials take one token and
+; run one at a time. A plain set! in a fiber writes through to the parent.
+; The overlay is the per-fiber copy: the child sets race-mark, rolls the
+; copy back, and the parent binding stays. The trial itself stays outside
+; the overlay so its result hash is not rolled away.
+(define (race-child text idx slot out rules)
+  (channel:recv slot)
+  (mutate :overlay-begin)
+  (set! race-mark 0)
+  (mutate :overlay-rollback)
+  (let ((r (try (review-trial text rules)
+                (catch (e)
+                  (hash "ok" #f "hint" "" "spare" 0.0 "geometry" 1.0 "budget" 0.0)))))
+    (channel:send out (list idx r))
+    (channel:send slot #t)))
+
+(define (spawn-race xs i slot out rules)
+  (if (null? xs)
+    i
+    (begin
+      (let ((text (car xs)) (idx i))
+        (fiber:spawn (lambda () (race-child text idx slot out rules))))
+      (spawn-race (cdr xs) (+ i 1) slot out rules))))
+
+(define (gather-n out n acc)
+  (if (<= n 0)
+    acc
+    (gather-n out (- n 1) (cons (channel:recv out) acc))))
+
+(define (review-race texts rules)
+  (set! race-mark 1)
+  (if (not (pair? texts))
+    (hash "winner" -1 "mark" race-mark "fibers" 0 "rows" (list))
+    (let ((probe (try (fiber:spawn (lambda () #t)) (catch (e) 0))))
+      (if (not (and (integer? probe) (> probe 0)))
+        (review-race-seq texts rules)
+        (let ((slot (channel:create 1))
+              (out (channel:create 8)))
+          (channel:send slot #t)
+          (let ((n (spawn-race texts 0 slot out rules)))
+            (try (fiber:yield) (catch (e) #f))
+            (let ((sorted (sort-race-rows (gather-n out n (list)))))
+              (let ((best (pick-winner sorted #f)))
+                (hash "winner" (if best (car best) -1)
+                      "mark" race-mark
+                      "fibers" 1
+                      "rows" sorted)))))))))

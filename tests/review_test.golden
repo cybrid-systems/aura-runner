@@ -1,0 +1,21 @@
+open 1
+open-hint clear
+gap 0
+gap-hint Keep the jump low and wide, and the slide bar easy to pass under.
+stacked 0
+stacked-hint Give each move its own beat.
+blocked 0
+blocked-hint Lay coins on the open lane beside the block.
+toy 0
+toy-hint Give the flying toy a beat of its own.
+soft 1
+soft-hint Leave a full beat of ground before a jump.
+lonely 1
+lonely-hint A short line of coins on the open lane marks the way through.
+example 1 fair
+race-row 0 1
+race-row 1 0
+race 0
+mark 1
+fibers 1
+play 1

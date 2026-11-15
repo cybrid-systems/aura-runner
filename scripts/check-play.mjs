@@ -122,6 +122,7 @@ function startAura(extra) {
     env: cleanEnv({
       ...process.env,
       AURA_RUNNER_PORT: String(port),
+      AURA_SANDBOX: process.env.AURA_SANDBOX || "off",
       LLM_API_KEY: "",
       ...extra,
     }),
