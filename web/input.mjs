@@ -1,4 +1,4 @@
-// Tap / Space / swipe up: jump. Swipe down / Down: slide.
+// Tap / swipe up / W: jump. Space is push-to-talk. Swipe down / Down: slide.
 // Swipe sideways / arrows: change lane. Gamepad uses the same edges.
 
 export function createInput(el) {
@@ -20,8 +20,7 @@ export function createInput(el) {
     const tag = e.target && e.target.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA") return;
     const code = e.code || "";
-    const k = e.key || "";
-    if (code === "Space" || code === "ArrowUp" || code === "KeyW" || k === " ") { jump(); e.preventDefault(); }
+    if (code === "ArrowUp" || code === "KeyW") { jump(); e.preventDefault(); }
     else if (code === "ArrowDown" || code === "KeyS") { slide(); e.preventDefault(); }
     else if (code === "ArrowLeft" || code === "KeyA") { lane(-1); e.preventDefault(); }
     else if (code === "ArrowRight" || code === "KeyD") { lane(1); e.preventDefault(); }
