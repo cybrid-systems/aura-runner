@@ -14,7 +14,8 @@ The first run downloads Aura nightly for this machine (Linux x86_64 or arm64) in
 
 | Key | Action |
 | --- | --- |
-| ↑, Space, or a tap | jump |
+| ↑, W, or a tap | jump |
+| hold Space, then let go | say what to change |
 | ↓ | slide |
 | ← → | change lane |
 | R, or Restart | start this run over |
@@ -23,7 +24,7 @@ Left, A, a left swipe and a left stick all move the runner toward the left of th
 
 The badge (`LUMEN-42`) is the seed. Open `http://127.0.0.1:8080/?seed=42` for the same course. Tap the badge for the last few garden notes. `?stats=1` shows frame time. `?bench=1` writes a JSON summary into the page after 180 frames.
 
-Hold Space and say what should come down the path. Let go and those words go out. The game receives the words, not the sound. Without a model, a known bright line still tries, and any other line waits on the shelf. A gloomy line is turned away before it is asked.
+Hold Space and say what you want to see. Let go and those words go out. The game receives the words, not the sound. A bright line changes the picture at once: a pink, blue, gold, or violet sky, flowers, a star, a gate, or a small friend. Any other bright line still picks a new garden, and steps to another one if that garden is already on screen. A gloomy line is turned away and the picture stays.
 
 Cards sit above that badge. Clearing level 1, level 2, and level 3 adds 轻轻的, 再跳一下, and 吸过来. A star pickup adds the last one early. 用这几张 tries the set on a slice of the run and does not change the feel until it is kept. A set that cannot be cleared, or a gravity outside 18 to 40, is turned away and the previous cards stay. A shared link is `?seed=` plus `cards=light.1,double.1,magnet.1`.
 
@@ -71,7 +72,7 @@ Hitting a hurdle, a gate, or a pot does not end the run. The runner slows for a 
 | --- | --- |
 | The run opens at 8 m/s and climbs as stretches clear, and also every eight seconds, up to 14 m/s. A chat does not hold that climb. Pickups score points: coin 25, blossom 40, apple 55, star 80, gem 120. A quick row multiplies them, up to five. The number floats up off the runner, and a star or a gem is brighter and louder than a coin. Three in a row make that number bigger. A thin bar under the rating fills toward the next name, and that name is called out when it lands. A faster pace says Faster. Sliding under a bar, or leaving the lane as a popper bursts, adds a small Nice. A solid hit lowers the rating one step | `apply-feel!`, `loot-worth` in `core/main.aura`, `web/score.mjs`, `web/main.mjs` |
 | Ground between moves is a beat of about 1.3 seconds, laid longer as the pace climbs, so the same phrase takes the same time. The camera looks about one beat ahead. The opening teaches a slide, then a lane change, then a jump, and the coins sit on the lane that clears the change. A phrase that leaves under a quarter-second to spare once it enters the camera view is turned away. A fair obstacle phrase blooms in ahead. Pickups can become a star, gem, blossom or apple. The road can bend harder. Every stretch also sends one gentle toy toward the runner: a paper plane, bubble, lantern, leaf, or ball, along one lane. A phrase can send one too. A long stretch also tosses one round popper onto a single lane. It bounces toward the runner, then bursts. Another lane avoids it, and a high jump can clear the burst. A hurdle can be a bar, a log, a fence, a flower row, or drums. A gate can be a bar, a ribbon, a vine, lights, or a scarf. A block can be a pot, a stump, a mushroom, a crate, or a bush. Passing them stays the same. The corner word names what changed | `consider-form!`, `lib/gen.aura`, `web/render.mjs` |
-| Sky, grass, flowers and light ease into a new garden | `consider-scene!`, `lib/scene.aura` |
+| Sky, grass, flowers and light ease into a new garden. A spoken line does this at once, from the words, without waiting for a model | `consider-scene!`, `lib/scene.aura`, `lib/wish.aura` |
 | The kitten stays, and several little cars run beside the path. Each car keeps its colour and changes body as it rolls: a buggy, a van, a racer, a taxi, and a wagon. Two more cars roll in on their own. A phrase can still add or restyle a friend, including a fox, a turtle, or a bee. That phrase also restyles the runner. A look the model names is kept. If it leaves the look out, or repeats it, the runner takes the next gentle kind: kitten, car, bunny, bird, butterfly, frog, duck, then around again. The model can still name the light-keeper. At most six friends. A kept obstacle phrase is used on every other stretch, and a phrase that leaves the look out still changes shape along the road | `consider-pals!`, `maybe-guests!`, `lib/pals.aura`, `web/render.mjs` |
 | The model button swaps DeepSeek and MiniMax | `scripts/probe-llm.sh`, `on-provider` |
 | The same seed is the same course | `pattern-chunk` |

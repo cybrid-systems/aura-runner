@@ -1,7 +1,7 @@
 ; A child's wish is one short sentence. It is never executed as code.
-; Preset buttons name an offline phrase that already passes the gate.
-; Anything else waits for the model, or stays on the shelf when there
-; is no model. Audio never arrives here.
+; A known line uses a phrase that already passes the gate. Any other
+; bright line still changes the picture: a named garden, or the next
+; bright garden when that one is already on screen. Audio never arrives.
 (require "std/string" all:)
 (require "lib/gen")
 (require "lib/scene")
@@ -99,6 +99,8 @@
        (if zh "没听清，再按一次" "I didn't catch that. Press once more."))
       ((string=? why "offline")
        (if zh "这一句先留着" "I'll keep that sentence. The garden stays familiar."))
+      ((string=? why "soon")
+       (if zh "马上就换一幅画面" "The picture is about to change."))
       ((or (string=? why "timeout") (string=? why "llm"))
        (if zh "想了较久，先跑着，过一会儿再试" "That took a while. Keep running, and try again in a bit."))
       ((string=? why "think")
@@ -111,6 +113,156 @@
   (string-append
     "The child wished: " text
     ". Turn that wish into one short bright English sentence and then the s-expression. Do not copy gloomy words. Do not add markdown."))
+
+(define (garden-row form say r g b)
+  (hash "arm" "scene" "form" form "say" say "r" r "g" g "b" b))
+
+; Six bright gardens. Channels stay inside the scene gate.
+(define wish-gardens
+  (list
+    (garden-row
+      "(garden (sky 0.98 0.62 0.72) (ground 0.36 0.70 0.34) (flower blossom 0.70) (light 0.90))"
+      "The sky turned rosy" 0.98 0.62 0.72)
+    (garden-row
+      "(garden (sky 0.55 0.78 0.98) (ground 0.32 0.68 0.30) (flower daisy 0.60) (light 0.85))"
+      "A blue sky opened" 0.55 0.78 0.98)
+    (garden-row
+      "(garden (sky 0.98 0.86 0.55) (ground 0.40 0.72 0.28) (flower buttercup 0.80) (light 0.95))"
+      "The sky turned golden" 0.98 0.86 0.55)
+    (garden-row
+      "(garden (sky 0.72 0.92 0.78) (ground 0.28 0.66 0.32) (flower tulip 0.75) (light 0.80))"
+      "Tulips opened up" 0.72 0.92 0.78)
+    (garden-row
+      "(garden (sky 0.78 0.70 0.96) (ground 0.34 0.70 0.36) (flower blossom 0.55) (light 0.88))"
+      "The sky turned violet" 0.78 0.70 0.96)
+    (garden-row
+      "(garden (sky 0.94 0.96 0.98) (ground 0.38 0.74 0.40) (flower daisy 0.85) (light 0.92))"
+      "Clouds opened over the grass" 0.94 0.96 0.98)))
+
+(define (wish-abs x)
+  (if (< x 0) (- 0 x) x))
+
+(define (wish-near? a b)
+  (and (number? a) (number? b) (< (wish-abs (- a b)) 0.08)))
+
+(define (wish-at i)
+  (list-ref wish-gardens (modulo i (length wish-gardens))))
+
+(define (wish-sum text)
+  (let ((n (string-length text)))
+    (let loop ((i 0) (s 0))
+      (if (>= i n)
+        s
+        (loop (+ i 1) (+ s (string-ref text i)))))))
+
+; Colour words pick a garden. Anything else still picks one, from the
+; letters, so two sentences do not have to share a sky.
+(define (wish-hint text)
+  (let ((low (string-downcase text)))
+    (cond
+      ((or (string-contains? text "粉") (string-contains? low "pink")
+           (string-contains? text "玫瑰") (string-contains? low "rose"))
+       0)
+      ((or (string-contains? text "蓝") (string-contains? low "blue")
+           (string-contains? text "海"))
+       1)
+      ((or (string-contains? text "金") (string-contains? text "黄")
+           (string-contains? low "gold") (string-contains? text "阳光"))
+       2)
+      ((or (string-contains? text "紫") (string-contains? low "purple")
+           (string-contains? low "violet"))
+       4)
+      ((or (string-contains? text "云") (string-contains? text "白")
+           (string-contains? low "cloud"))
+       5)
+      ((or (string-contains? text "花") (string-contains? text "绿")
+           (string-contains? text "草") (string-contains? low "flower")
+           (string-contains? low "green") (string-contains? low "tulip"))
+       3)
+      (else #f))))
+
+(define (wish-garden text r g b)
+  (if (not (and (string? text) (> (string-length text) 0)))
+    #f
+    (let ((n (length wish-gardens)))
+      (let ((hit (wish-hint text)))
+        (let ((i (if (number? hit) hit (modulo (wish-sum text) n))))
+          (let ((row (wish-at i)))
+            ; A named colour stays, even when the sky is already close.
+            ; An unnamed line steps on if that garden is the one on screen.
+            (if (and (not (number? hit))
+                     (wish-near? (hash-ref row "r") r)
+                     (wish-near? (hash-ref row "b") b))
+              (wish-at (+ i 1))
+              row)))))))
+
+(define (wish-pad text)
+  (string-append " " (string-downcase text) " "))
+
+; A named friend, a star, or a gate. The form is one of the phrases
+; that already pass the gate. The child's words are not copied into it.
+(define (wish-named text)
+  (let ((pad (wish-pad text)))
+    (cond
+      ((or (string-contains? text "兔") (string-contains? pad " bunny ")
+           (string-contains? pad " rabbit "))
+       (preset-row text "pals" PRESET-BUNNY "A bunny hopped in"))
+      ((or (string-contains? text "猫") (string-contains? pad " kitten ")
+           (string-contains? pad " kitty "))
+       (preset-row text "pals" "(pal kitten mist 0.95 0.72 0.45 hop)" "A kitten came to play"))
+      ((or (string-contains? text "狗") (string-contains? pad " puppy ")
+           (string-contains? pad " dog "))
+       (preset-row text "pals" "(pal puppy pip 0.60 0.80 0.40 hop)" "A puppy bounded in"))
+      ((or (string-contains? text "鸟") (string-contains? pad " bird "))
+       (preset-row text "pals" "(pal bird lark 0.95 0.86 0.35 float)" "A bird flew along"))
+      ((or (string-contains? text "星星") (string-contains? text "颗星")
+           (string-contains? text "星空") (string-contains? pad " star ")
+           (string-contains? pad " stars "))
+       (preset-row text "motif" PRESET-STAR "A golden star came down the path"))
+      ((or (string-contains? text "花门") (string-contains? text "滑铲")
+           (string-contains? pad " gate ") (string-contains? pad " slide "))
+       (preset-row text "motif" PRESET-GATE "A flower gate is waiting"))
+      (else #f))))
+
+(define (wish-hear say lang)
+  (if (not (string=? lang "zh"))
+    say
+    (cond
+      ((string=? say "The sky turned rosy") "天空变成暖粉色")
+      ((string=? say "The sky turned pink") "天空变成粉色")
+      ((string=? say "A blue sky opened") "天空变成蓝色")
+      ((string=? say "The sky turned golden") "天空变成金色")
+      ((string=? say "Tulips opened up") "路上开出了郁金香")
+      ((string=? say "The sky turned violet") "天空变成紫色")
+      ((string=? say "Clouds opened over the grass") "云朵亮了起来")
+      ((string=? say "A bunny hopped in") "一只小兔子跑来了")
+      ((string=? say "A kitten came to play") "一只小猫来玩了")
+      ((string=? say "A puppy bounded in") "一只小狗跑来了")
+      ((string=? say "A bird flew along") "一只小鸟飞来了")
+      ((string=? say "A golden star came down the path") "一颗金色的星星落下来了")
+      ((string=? say "A flower gate is waiting") "前面有一扇花门")
+      (else say))))
+
+(define (wish-with-lang row lang)
+  (if (or (not row) (not (string=? lang "zh")))
+    row
+    (hash "arm" (hash-ref row "arm")
+          "form" (hash-ref row "form")
+          "say" (wish-hear (hash-ref row "say" "") lang)
+          "r" (hash-ref row "r" 0.0)
+          "g" (hash-ref row "g" 0.0)
+          "b" (hash-ref row "b" 0.0))))
+
+; Exact lines keep their road, sky, or friend. Every other bright
+; sentence still returns a picture. r g b are the sky on screen now.
+(define (wish-answer text r g b)
+  (let ((exact (if (string? text) (wish-preset text) #f)))
+    (if exact
+      exact
+      (let ((named (if (string? text) (wish-named text) #f)))
+        (if named
+          named
+          (wish-garden text r g b))))))
 
 (define (preset-fair? text rules)
   (let ((row (wish-preset text)))

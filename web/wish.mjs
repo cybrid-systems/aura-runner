@@ -53,7 +53,6 @@ export function installWish({ send }) {
     }
     hook.sent += 1;
     document.documentElement.dataset.wish = "sent";
-    show(clean);
   }
 
   function ensureRec() {
