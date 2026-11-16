@@ -23,6 +23,8 @@ Left, A, a left swipe and a left stick all move the runner toward the left of th
 
 The badge (`LUMEN-42`) is the seed. Open `http://127.0.0.1:8080/?seed=42` for the same course. Tap the badge for the last few garden notes. `?stats=1` shows frame time. `?bench=1` writes a JSON summary into the page after 180 frames.
 
+Cards sit above that badge. Clearing level 1, level 2, and level 3 adds 轻轻的, 再跳一下, and 吸过来. A star pickup adds the last one early. 用这几张 tries the set on a slice of the run and does not change the feel until it is kept. A set that cannot be cleared, or a gravity outside 18 to 40, is turned away and the previous cards stay. A shared link is `?seed=` plus `cards=light.1,double.1,magnet.1`.
+
 A kept change from the model shows as a short word in the bottom-right (`shape`, `bend`, `star`, `sky`, `friend`, or the runner's new look). The latest sentence sits on the line above that word. The run does not stop for it. A stumble still uses the line at the top: "Oops! Keep going", or "Back on the path" after a gap.
 
 Already have an Aura nightly binary and want to skip the download:

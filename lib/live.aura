@@ -13,7 +13,7 @@
 (define default-scene
   "(garden (sky 0.55 0.72 0.95) (ground 0.42 0.68 0.38) (flower daisy 0.45) (light 0.82))")
 
-(define (hot-source g jump slide speed coyote forgive hue motif scene pals)
+(define (hot-source g jump slide speed coyote forgive hue motif scene pals air magnet)
   (string-append
     "(define (rule-gravity) " (num-src g) ")\n"
     "(define (rule-jump-v) " (num-src jump) ")\n"
@@ -22,6 +22,8 @@
     "(define (rule-coyote-s) " (num-src coyote) ")\n"
     "(define (rule-forgive) " (num-src forgive) ")\n"
     "(define (rule-hue) " (num-src hue) ")\n"
+    "(define (rule-double-jump) " (num-src air) ")\n"
+    "(define (rule-magnet) " (num-src magnet) ")\n"
     "(define (motif-form) \"" motif "\")\n"
     "(define (scene-form) \"" (if (and (string? scene) (> (string-length scene) 0)) scene default-scene) "\")\n"
     "(define (pals-form) \"" (if (and (string? pals) (> (string-length pals) 0)) pals default-pals) "\")\n"

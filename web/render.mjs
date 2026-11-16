@@ -1481,6 +1481,14 @@ export function createRenderer(canvas) {
     if (alive) {
       const shadow = spot(0, 0);
       push(shadow.x, 0.02, shadow.z, sliding ? 0.95 : 0.62, 0.025, sliding ? 0.9 : 0.5, 0, [0.18, 0.12, 0.08], 1, 0);
+      if ((st.g || 32) < 26) {
+        const glow = [0.78, 0.92, 1];
+        const bob = reduced ? 0 : Math.sin((st.time || 0) * 3) * 0.02;
+        const footL = spot(0.02, leanLat - 0.16);
+        const footR = spot(0.02, leanLat + 0.16);
+        push(footL.x, 0.05 + bob, footL.z, 0.18, 0.04, 0.18, 1, glow, 0.25, reduced ? 0.2 : 0.45);
+        push(footR.x, 0.05 + bob, footR.z, 0.18, 0.04, 0.18, 1, glow, 0.25, reduced ? 0.2 : 0.45);
+      }
       if (dressed) {
         const at = spot(sliding ? 0.12 : 0, leanLat);
         drawBody(heroPlan, at.x, py + (sliding ? -0.22 : 0), at.z, palRgb(hero), st.time || 0, reduced);

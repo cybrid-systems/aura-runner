@@ -140,6 +140,63 @@ const popOpen = opened && opened.lane === 1 && opened.x > 36 && opened.x < 38 ? 
 const popSkip = !popperFor(5, 0, 40) && !popperFor(1, 0, 8) ? 1 : 0;
 const popLanes = laneA && laneB && laneA.lane !== laneB.lane ? 1 : 0;
 
+const airRules = rulesOf(32, 11.2, 5, 0.48, 0.12, 0.12);
+airRules.worth = 25;
+airRules.air = 1;
+airRules.magnet = 0;
+const aground = [[1, 0, 80, 0.45, 0]];
+const aj = makePlayer(1);
+pressJump(aj);
+step(aj, aground, airRules, DT);
+const airBank = aj[1] > 0 && aj[15] === 1 ? 1 : 0;
+for (let i = 0; i < 12; i++) step(aj, aground, airRules, DT);
+const airUp = aj[1] > 0.3 && aj[15] === 1 && aj[7] <= 0 ? 1 : 0;
+pressJump(aj);
+step(aj, aground, airRules, DT);
+const airSecond = aj[1] > 0.3 && aj[15] === 0 && aj[14] > 0 ? 1 : 0;
+const thrustAfter = aj[14];
+pressJump(aj);
+step(aj, aground, airRules, DT);
+const airThird = aj[1] > 0.2 && aj[15] === 0 && aj[14] < thrustAfter ? 1 : 0;
+
+function magPack(radius) {
+  const p = makePlayer(1);
+  const ps = [
+    [5, 2.2, 0.42, 0.42, 0.4, 0],
+    [3, 2.2, 0.7, 0.55, 0, 0],
+    [10, 2.2, 0.72, 0.95, 0, 0, 0, 2.2, 0, 0.2],
+    [2, 30, 1.2, 1.2, -1.2],
+  ];
+  const magRules = rulesOf(32, 11.2, 5, 0.48, 0.12, 0.12);
+  magRules.worth = 25;
+  magRules.air = 0;
+  magRules.magnet = radius;
+  step(p, ps, magRules, DT);
+  return ps;
+}
+function kindX(ps, k) {
+  const q = ps.find((row) => row[0] === k);
+  return q ? q[1] : -1;
+}
+function kindLane(ps, k) {
+  const q = ps.find((row) => row[0] === k);
+  return q && q.length > 5 ? q[5] : -1;
+}
+const magOn = magPack(2.4);
+const magOff = magPack(0);
+const magPull = kindX(magOn, 5) < 2.2 && kindLane(magOn, 5) === 1 ? 1 : 0;
+const magStill = kindX(magOn, 3) === kindX(magOff, 3)
+  && kindX(magOn, 10) === kindX(magOff, 10)
+  && kindX(magOn, 2) === kindX(magOff, 2)
+  && kindX(magOff, 5) === 2.2 ? 1 : 0;
+const held = magPack(2.4);
+const x1 = kindX(held, 5);
+const offRules = rulesOf(32, 11.2, 5, 0.48, 0.12, 0.12);
+offRules.air = 0;
+offRules.magnet = 0;
+step(makePlayer(1), held, offRules, DT);
+const magStopped = kindX(held, 5) === x1 ? 1 : 0;
+
 const pit = [[1, 0, 4, 0.45, 0], [2, 4, 5, 1.2, -1.2], [1, 9, 20, 0.45, 0]];
 const pp = makePlayer(1);
 let pitGrace = 0;
@@ -183,6 +240,13 @@ const got = [
   `pop-open ${popOpen}`,
   `pop-skip ${popSkip}`,
   `pop-lanes ${popLanes}`,
+  `air-bank ${airBank}`,
+  `air-up ${airUp}`,
+  `air-second ${airSecond}`,
+  `air-third ${airThird}`,
+  `mag-pull ${magPull}`,
+  `mag-still ${magStill}`,
+  `mag-off ${magStopped}`,
 ];
 // apex/air are analytic and already in the golden; compare the sim lines.
 const simGolden = golden.filter((l) => !l.startsWith("apex ") && !l.startsWith("air "));
