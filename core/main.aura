@@ -12,6 +12,7 @@
 (require "lib/pals")
 (require "lib/review")
 (require "lib/cards")
+(require "lib/wish")
 
 (define SYS
   "You design one obstacle phrase for a children's 3D endless runner called Lumen Run. The runner has three lanes (0 left, 1 centre, 2 right), jumps, and slides. No markdown. Allowed pieces: (seq (ground W) (gap W) (hurdle H W) (gate BOTTOM W) (coin Y) (spring W) (block LANE DEPTH) (coin-lane LANE Y)). Every parameter is a number; never write the words BOTTOM, W, H, LANE, DEPTH or other placeholders. Ranges in meters: spring W 0.45-1.6, hurdle W 0.35-2.2 and H 0.15-0.9, gate W 0.35-2.0 and BOTTOM 0.58-0.85, coin Y 0.4-2.4, coin-lane LANE 0, 1 or 2 and Y 0.4-2.4, ground W 0.8-18, gap W 0.4-2.0, block LANE 0, 1 or 2 and DEPTH 0.5-2.2. Optional (loot KIND) restyles every pickup. KIND is coin, star, gem, blossom, or apple. Optional (bend AMP) turns the road. AMP is 0.12 to 0.65. Start and end with ground. Leave at least one lane open beside every block. No violence, fear, weapons, or scary words. Bright garden, friendly shapes. First write one short bright English sentence with no parentheses, then the s-expression. That sentence is what the child reads. A ground of 10.4 is one beat, about 1.3 seconds, and a ground of 4.8 is a short rest. Leave a full beat of ground before a jump. Optional (flyer KIND LANE Y) sends one gentle toy flying toward the runner along one lane. KIND is plane, bubble, lantern, leaf, or ball. LANE is 0, 1 or 2. Y is 0.55 to 0.85. At most two flyers, and never on every lane at once. Optional last word on a hurdle, a gate, or a block picks its look. A hurdle is bar, log, fence, bloom, or drum. A gate is bar, ribbon, vine, lights, or scarf. A block is pot, stump, mushroom, crate, or bush. A low wide shape is a jump, a bar with room underneath is a slide, and one tall shape in a single lane is a lane change. Recolor a shape freely. One beat holds one move. Example: (seq (ground 6) (block 0 1) (hurdle 0.4 0.7) (ground 5) (gate 0.72 0.8) (ground 5) (gap 1.1) (ground 5))")
@@ -125,6 +126,21 @@
 (define llm-reply #f)
 (define pending (list))
 (define llm-on #f)
+; A child's wish holds the chat slot until that reply is scored. Automatic
+; asks wait. The 15s clock is only for this path; garden asks keep the
+; longer HTTP budget.
+(define wish-open #f)
+(define wish-queued #f)
+(define wish-flight #f)
+(define wish-wait #f)
+(define wish-think #f)
+(define wish-mine #f)
+(define wish-text "")
+(define wish-locale "zh")
+(define wish-kind "motif")
+(define wish-prompt "")
+(define wish-token -1)
+(define wish-sent-at 0.0)
 (define req-ch #f)
 (define res-ch #f)
 (define buf "")
@@ -626,6 +642,14 @@
   (set! motif-accept -1)
   (set! scene-accept -1)
   (set! pals-accept -1)
+  (set! wish-open #f)
+  (set! wish-queued #f)
+  (set! wish-flight #f)
+  (set! wish-wait #f)
+  (set! wish-think #f)
+  (set! wish-mine #f)
+  (set! wish-prompt "")
+  (set! wish-sent-at 0.0)
   (set! motif-asked-at -1.0)
   (set! scene-asked-at -1.0)
   (set! pals-asked-at -1.0)
@@ -1638,7 +1662,10 @@
                                       say next-hero changed?))))))))))))))
 
 (define (llm-prompt kind)
-  (cond
+  (if (and wish-flight (string=? kind wish-kind)
+           (string? wish-prompt) (> (string-length wish-prompt) 0))
+    wish-prompt
+    (cond
     ((string=? kind "scene")
      (string-append "Flowers now: " flower-now
                     ". Sky is " (num-src sky-r) " " (num-src sky-g) " " (num-src sky-b)
@@ -1654,7 +1681,7 @@
                     ". The road bends by " (num-src bend-now)
                     ". Jump speed is " (num-src speed-now)
                     " m/s. Invent a different rhythm from a straight row of hurdles. You may add (loot KIND), (bend AMP), and (flyer KIND LANE Y). A hurdle, gate, or block may end with a look word. Start with one short sentence.")
-                hint-now))))
+                hint-now)))))
 
 ; Game-side budget. The runtime's own HTTP cap is LLM_TIMEOUT; if that
 ; call never comes back, give up LLM_TIMEOUT+10 seconds later and drop
@@ -1711,26 +1738,29 @@
        (or (= tok accept) (<= tok 0))))
 
 (define (take-scene! c msg)
-  (if (not (accept-reply! (hash-ref msg "token" -1) scene-accept))
-    #f
-    (let ((ans (hash-ref msg "ans" #f)))
-      (set! scene-busy #f)
-      (set! scene-accept -1)
-      (if (and (hash? ans) (hash-ref ans "ok"))
-        (let ((raw (hash-ref ans "content" "")))
-          (let ((text (if (string? raw) raw "")))
-            (if (banned? text)
-              (note! "ROLLBACK" "banned" "scene" "The garden stayed")
-              (let ((form (extract-garden text)))
-                (if form
-                  (if (chat-open?)
-                    (set! wait-scene (list form (say-line text)))
-                    (consider-scene! form (say-line text)))
-                  (note! "ROLLBACK" "no-garden" "scene" "The garden stayed"))))))
-        (note! "ROLLBACK" (if (hash? ans) (hash-ref ans "error" "llm") "llm")
-               "scene" "The garden stayed"))
-      (send c (rules-msg))
-      (set! rules-dirty #f))))
+  (let ((tok (hash-ref msg "token" -1)))
+    (wish-begin! tok "scene")
+    (if (not (accept-reply! tok scene-accept))
+      (begin (set! wish-mine #f) #f)
+      (let ((ans (hash-ref msg "ans" #f)))
+        (set! scene-busy #f)
+        (set! scene-accept -1)
+        (if (and (hash? ans) (hash-ref ans "ok"))
+          (let ((raw (hash-ref ans "content" "")))
+            (let ((text (if (string? raw) raw "")))
+              (if (banned? text)
+                (note! "ROLLBACK" "banned" "scene" (wish-cue-or "The garden stayed" "banned"))
+                (let ((form (extract-garden text)))
+                  (if form
+                    (if (chat-open?)
+                      (set! wait-scene (list form (say-line text)))
+                      (consider-scene! form (say-line text)))
+                    (note! "ROLLBACK" "no-garden" "scene" (wish-cue-or "The garden stayed" "shape")))))))
+          (note! "ROLLBACK" (if (and (hash? ans) (not wish-mine)) (hash-ref ans "error" "llm") "llm")
+                 "scene" (wish-cue-or "The garden stayed" "llm")))
+        (set! wish-mine #f)
+        (send c (rules-msg))
+        (set! rules-dirty #f)))))
 
 ; A pal form and a hero form written next to each other are one phrase.
 ; Searching (pal before (hero used to drop the runner.
@@ -1745,48 +1775,54 @@
         (else hero)))))
 
 (define (take-pals! c msg)
-  (if (not (accept-reply! (hash-ref msg "token" -1) pals-accept))
-    #f
-    (let ((ans (hash-ref msg "ans" #f)))
-      (set! pals-busy #f)
-      (set! pals-accept -1)
-      (if (and (hash? ans) (hash-ref ans "ok"))
-        (let ((raw (hash-ref ans "content" "")))
-          (let ((text (if (string? raw) raw "")))
-            (if (banned? text)
-              (note! "ROLLBACK" "banned" "pals" "The friends stayed")
-              (let ((form (dress-form (extract-pals text) (runner-kind))))
-                (if form
-                  (if (chat-open?)
-                    (set! wait-pals (list form (say-line text)))
-                    (consider-pals! form (say-line text)))
-                  (note! "ROLLBACK" "no-pal" "pals" "The friends stayed"))))))
-        (note! "ROLLBACK" (if (hash? ans) (hash-ref ans "error" "llm") "llm")
-               "pals" "The friends stayed"))
-      (send c (rules-msg))
-      (set! rules-dirty #f))))
+  (let ((tok (hash-ref msg "token" -1)))
+    (wish-begin! tok "pals")
+    (if (not (accept-reply! tok pals-accept))
+      (begin (set! wish-mine #f) #f)
+      (let ((ans (hash-ref msg "ans" #f)))
+        (set! pals-busy #f)
+        (set! pals-accept -1)
+        (if (and (hash? ans) (hash-ref ans "ok"))
+          (let ((raw (hash-ref ans "content" "")))
+            (let ((text (if (string? raw) raw "")))
+              (if (banned? text)
+                (note! "ROLLBACK" "banned" "pals" (wish-cue-or "The friends stayed" "banned"))
+                (let ((form (dress-form (extract-pals text) (runner-kind))))
+                  (if form
+                    (if (chat-open?)
+                      (set! wait-pals (list form (say-line text)))
+                      (consider-pals! form (say-line text)))
+                    (note! "ROLLBACK" "no-pal" "pals" (wish-cue-or "The friends stayed" "shape")))))))
+          (note! "ROLLBACK" (if (and (hash? ans) (not wish-mine)) (hash-ref ans "error" "llm") "llm")
+                 "pals" (wish-cue-or "The friends stayed" "llm")))
+        (set! wish-mine #f)
+        (send c (rules-msg))
+        (set! rules-dirty #f)))))
 
 (define (take-motif! c msg)
-  (if (not (accept-reply! (hash-ref msg "token" -1) motif-accept))
-    #f
-    (let ((ans (hash-ref msg "ans" #f)))
-      (set! motif-busy #f)
-      (set! motif-accept -1)
-      (if (and (hash? ans) (hash-ref ans "ok"))
-        (let ((raw (hash-ref ans "content" "")))
-          (let ((text (if (string? raw) raw "")))
-            (if (banned? text)
-              (note! "ROLLBACK" "banned" "llm" "That shape drifted away")
-              (let ((form (extract-seq text)))
-                (if form
-                  (if (chat-open?)
-                    (set! wait-motif (list form (say-line text)))
-                    (consider-form! form (say-line text)))
-                  (note! "ROLLBACK" "no-seq" "llm" "That shape drifted away"))))))
-        (note! "ROLLBACK" (if (hash? ans) (hash-ref ans "error" "llm") "llm")
-               "llm" "That shape drifted away"))
-      (send c (rules-msg))
-      (set! rules-dirty #f))))
+  (let ((tok (hash-ref msg "token" -1)))
+    (wish-begin! tok "motif")
+    (if (not (accept-reply! tok motif-accept))
+      (begin (set! wish-mine #f) #f)
+      (let ((ans (hash-ref msg "ans" #f)))
+        (set! motif-busy #f)
+        (set! motif-accept -1)
+        (if (and (hash? ans) (hash-ref ans "ok"))
+          (let ((raw (hash-ref ans "content" "")))
+            (let ((text (if (string? raw) raw "")))
+              (if (banned? text)
+                (note! "ROLLBACK" "banned" "llm" (wish-cue-or "That shape drifted away" "banned"))
+                (let ((form (extract-seq text)))
+                  (if form
+                    (if (chat-open?)
+                      (set! wait-motif (list form (say-line text)))
+                      (consider-form! form (say-line text)))
+                    (note! "ROLLBACK" "no-seq" "llm" (wish-cue-or "That shape drifted away" "shape")))))))
+          (note! "ROLLBACK" (if (and (hash? ans) (not wish-mine)) (hash-ref ans "error" "llm") "llm")
+                 "llm" (wish-cue-or "That shape drifted away" "llm")))
+        (set! wish-mine #f)
+        (send c (rules-msg))
+        (set! rules-dirty #f)))))
 
 ; Send on the caller. The worker is the only receiver, and we do not
 ; enqueue a second job while it is still inside llm:chat, so this does
@@ -1863,6 +1899,128 @@
          (consider-pals! form say)))
       (else #f))))
 
+(define (wish-note! kind why)
+  (note! kind why "wish" (wish-line wish-locale why) "wish" "Say a bright little wish"))
+
+(define (wish-owns? tok)
+  (and wish-flight (number? tok) (= tok wish-token)))
+
+(define (wish-settled!)
+  (set! wish-flight #f)
+  (set! wish-queued #f)
+  (set! wish-open #f)
+  (set! wish-think #f)
+  (set! wish-prompt "")
+  (set! wish-sent-at 0.0))
+
+(define (wish-arm-free? kind)
+  (cond
+    ((string=? kind "scene") (and scene-req (not scene-busy) (not scene-working)))
+    ((string=? kind "pals") (and pals-req (not pals-busy) (not pals-working)))
+    (else (and motif-req (not motif-busy) (not motif-working)))))
+
+(define (wish-arm-busy? kind)
+  (cond
+    ((string=? kind "scene") scene-busy)
+    ((string=? kind "pals") pals-busy)
+    (else motif-busy)))
+
+; Eight seconds is a progress line. Fifteen seconds lets the run go on
+; and ignores a late reply. The worker may still be inside HTTP; wish-wait
+; keeps a second job off that channel until the late reply arrives.
+(define (maybe-wish!)
+  ; The UX timeout retires the token while the worker may still be inside
+  ; HTTP. Stop waiting once that call's own cap has passed.
+  (if (and wish-wait (> wish-sent-at 0.0)
+           (> (- (exact->inexact (monotonic-ms)) wish-sent-at)
+              (+ (watchdog-ms) 5000.0)))
+    (begin (set! wish-wait #f) (set! wish-sent-at 0.0))
+    #f)
+  (if wish-flight
+    (let ((ms (if (> wish-sent-at 0.0)
+                (- (exact->inexact (monotonic-ms)) wish-sent-at)
+                0.0)))
+      (cond
+        ((> ms 15000.0)
+         (let ((sent wish-sent-at))
+           (cond
+             ((string=? wish-kind "scene") (begin (set! scene-accept -1) (set! scene-busy #f)))
+             ((string=? wish-kind "pals") (begin (set! pals-accept -1) (set! pals-busy #f)))
+             (else (begin (set! motif-accept -1) (set! motif-busy #f))))
+           (wish-settled!)
+           ; Keep the send time so a lost reply cannot hold wish-wait
+           ; past the worker's own HTTP cap.
+           (set! wish-sent-at sent)
+           (set! wish-wait #t)
+           (wish-note! "ROLLBACK" "timeout")))
+        ((and (> ms 8000.0) (not wish-think))
+         (begin (set! wish-think #t) (wish-note! "SAY" "think")))
+        (else #f)))
+    #f)
+  (if (and wish-queued (not wish-flight) (not wish-wait) (wish-arm-free? wish-kind))
+    (begin
+      (set! wish-flight #t)
+      (set! wish-queued #f)
+      (set! wish-sent-at (exact->inexact (monotonic-ms)))
+      (set! wish-think #f)
+      (cond
+        ((string=? wish-kind "scene") (ask-scene!))
+        ((string=? wish-kind "pals") (ask-pals!))
+        (else (ask-motif!)))
+      (if (wish-arm-busy? wish-kind)
+        (set! wish-token (cond
+                           ((string=? wish-kind "scene") scene-accept)
+                           ((string=? wish-kind "pals") pals-accept)
+                           (else motif-accept)))
+        (begin
+          (set! wish-flight #f)
+          (set! wish-queued #t))))
+    #f))
+
+(define (wish-begin! tok kind)
+  (if (and wish-wait (string=? kind wish-kind))
+    (set! wish-wait #f)
+    #f)
+  (set! wish-mine (wish-owns? tok))
+  (if wish-mine (wish-settled!) #f))
+
+(define (wish-cue-or en why)
+  (if wish-mine (wish-line wish-locale why) en))
+
+(define (apply-offline! row)
+  (let ((arm (hash-ref row "arm"))
+        (form (hash-ref row "form"))
+        (say (hash-ref row "say")))
+    (cond
+      ((string=? arm "scene") (consider-scene! form say))
+      ((string=? arm "pals") (consider-pals! form say))
+      (else (consider-form! form say)))))
+
+(define (on-wish c msg)
+  (set! wish-locale (wish-lang (hash-ref msg "lang" "")))
+  (if (wish-has-audio? msg)
+    (wish-note! "ROLLBACK" "audio")
+    (let ((text (wish-clean (hash-ref msg "text" "")))
+          (source (wish-source (hash-ref msg "source" ""))))
+      (cond
+        ((string=? source "") (wish-note! "ROLLBACK" "hear"))
+        ((string=? text "") (wish-note! "ROLLBACK" "empty"))
+        ((banned? text) (wish-note! "ROLLBACK" "banned"))
+        ((not llm-on)
+         (let ((row (wish-preset text)))
+           (if row
+             (apply-offline! row)
+             (wish-note! "ROLLBACK" "offline"))))
+        (wish-open (wish-note! "SAY" "think"))
+        (else
+         (set! wish-open #t)
+         (set! wish-queued #t)
+         (set! wish-text text)
+         (set! wish-kind (wish-arm text))
+         (set! wish-prompt (wish-user text))
+         (set! wish-think #f)))))
+  (flush-notes! c))
+
 (define (poll-llm! c)
   (if (not llm-on)
     #f
@@ -1886,15 +2044,18 @@
           (try (fiber:yield) (catch (e) #f))
           #f))
       (if (or scene-busy motif-busy pals-busy) (expire-llm!) #f)
-      (if (and scene-busy (not stall-waiting))
+      ; wish-wait still owes one reply. Read it so the late token can
+      ; clear the wait. An idle arm is not polled; that retains a frame.
+      (if (or (and scene-busy (not stall-waiting))
+              (and wish-wait (string=? wish-kind "scene")))
         (let ((scene-msg (reply-hash (channel:try-recv scene-res))))
           (if (hash? scene-msg) (take-scene! c scene-msg) #f))
         #f)
-      (if motif-busy
+      (if (or motif-busy (and wish-wait (string=? wish-kind "motif")))
         (let ((motif-msg (reply-hash (channel:try-recv motif-res))))
           (if (hash? motif-msg) (take-motif! c motif-msg) #f))
         #f)
-      (if pals-busy
+      (if (or pals-busy (and wish-wait (string=? wish-kind "pals")))
         (let ((pals-msg (reply-hash (channel:try-recv pals-res))))
           (if (hash? pals-msg) (take-pals! c pals-msg) #f))
         #f)
@@ -1902,9 +2063,12 @@
       ; The take above may be the moment the slot freed. Score the waiting
       ; phrase on this tick, before another ask marks an arm busy again.
       (flush-deferred!)
-      ; A reply that arrived during another chat is waiting. Asking again
-      ; keeps some arm busy, and the waiting phrase is then never scored.
-      (if (or (pair? wait-motif) (pair? wait-scene) (pair? wait-pals))
+      ; The child's wish goes out before another automatic ask can take
+      ; the same slot. A wish already in flight, or a late reply still
+      ; owed by that worker, holds the automatic asks off.
+      (maybe-wish!)
+      (if (or (pair? wait-motif) (pair? wait-scene) (pair? wait-pals)
+              wish-queued wish-flight wish-wait)
         #f
         (begin
           (if (and (not scene-busy) (not scene-working) (>= run-ms scene-next))
@@ -2259,6 +2423,7 @@
       ((string=? op "rebind") (on-rebind c msg))
       ((string=? op "cards") (on-cards c msg))
       ((string=? op "propose") (on-propose c msg))
+      ((string=? op "wish") (on-wish c msg))
       ((string=? op "provider") (on-provider c msg))
       ((string=? op "audit") (on-audit c msg))
       ((string=? op "bye") #f)

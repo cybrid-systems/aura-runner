@@ -17,6 +17,8 @@ export function createInput(el) {
   function onKey(e) {
     if (e.repeat) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const tag = e.target && e.target.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA") return;
     const code = e.code || "";
     const k = e.key || "";
     if (code === "Space" || code === "ArrowUp" || code === "KeyW" || k === " ") { jump(); e.preventDefault(); }

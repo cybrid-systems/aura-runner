@@ -1,0 +1,129 @@
+; A child's wish is one short sentence. It is never executed as code.
+; Preset buttons name an offline phrase that already passes the gate.
+; Anything else waits for the model, or stays on the shelf when there
+; is no model. Audio never arrives here.
+(require "std/string" all:)
+(require "lib/gen")
+(require "lib/scene")
+(require "lib/pals")
+
+(define WISH-MAX 80)
+
+(define PRESET-STAR
+  "(seq (ground 10.4) (loot star) (coin-lane 1 1.1) (ground 10.4) (hurdle 0.4 1.2) (ground 10.4) (gate 0.72 1.2) (ground 4.8))")
+(define PRESET-GATE
+  "(seq (ground 10.4) (gate 0.72 1.4) (ground 10.4) (hurdle 0.4 1.0) (ground 10.4))")
+(define PRESET-SKY
+  "(garden (sky 0.98 0.62 0.72) (ground 0.36 0.70 0.34) (flower blossom 0.7) (light 0.9))")
+(define PRESET-BUNNY
+  "(pal bunny mallow 0.98 0.78 0.86 hop)")
+
+(define (wish-drop? c)
+  (or (= c 10) (= c 13) (= c 40) (= c 41) (= c 34) (= c 96)
+      (= c 92) (= c 123) (= c 125)))
+
+(define (wish-clean raw)
+  (if (not (string? raw))
+    ""
+    (let ((n (string-length raw)))
+      (let loop ((i 0) (b "") (seen #f))
+        (if (or (>= i n) (>= (string-length b) WISH-MAX))
+          (trim-edges b)
+          (let ((c (string-ref raw i)))
+            (if (wish-drop? c)
+              (loop (+ i 1) (if seen (string-append b " ") b) seen)
+              (loop (+ i 1) (string-append b (substring raw i (+ i 1))) #t))))))))
+
+(define (wish-lang raw)
+  (if (and (string? raw) (string-prefix? (string-downcase raw) "zh"))
+    "zh"
+    "en"))
+
+(define (wish-source raw)
+  (cond
+    ((and (string? raw) (string=? raw "voice")) "voice")
+    ((and (string? raw) (string=? raw "type")) "type")
+    ((and (string? raw) (string=? raw "preset")) "preset")
+    (else "")))
+
+(define (wish-has-audio? msg)
+  (and (hash? msg) (hash-ref msg "audio" #f) #t))
+
+(define (has-word? text words)
+  (let loop ((ws words))
+    (if (null? ws)
+      #f
+      (if (string-contains? text (car ws))
+        #t
+        (loop (cdr ws))))))
+
+; Pals first, then a road change, then the garden. A flower gate is a
+; road, not a new sky.
+(define (wish-arm text)
+  (let ((low (string-downcase text)))
+    (cond
+      ((or (has-word? text (list "兔子" "小猫" "朋友" "小狗" "小鸟"))
+           (has-word? low (list "bunny" "kitten" "puppy" "friend" "bird")))
+       "pals")
+      ((or (has-word? text (list "星星" "金币" "滑" "门" "跳"))
+           (has-word? low (list "star" "coin" "slide" "gate" "jump" "hurdle")))
+       "motif")
+      ((or (has-word? text (list "天空" "花园" "粉色" "颜色"))
+           (has-word? low (list "sky" "garden" "flower" "pink")))
+       "scene")
+      (else "motif"))))
+
+(define (preset-row text arm form say)
+  (if (string=? text "")
+    #f
+    (hash "arm" arm "form" form "say" say)))
+
+(define (wish-preset text)
+  (cond
+    ((or (string=? text "来一个金色的星星") (string=? text "A golden star on the path"))
+     (preset-row text "motif" PRESET-STAR "A golden star came down the path"))
+    ((or (string=? text "来一个要滑铲的花门") (string=? text "A flower gate to slide under"))
+     (preset-row text "motif" PRESET-GATE "A flower gate is waiting"))
+    ((or (string=? text "把天空染成粉色") (string=? text "Paint the sky pink"))
+     (preset-row text "scene" PRESET-SKY "The sky turned pink"))
+    ((or (string=? text "来一只小兔子") (string=? text "A little bunny hops along"))
+     (preset-row text "pals" PRESET-BUNNY "A bunny hopped in"))
+    (else #f)))
+
+(define (wish-line lang why)
+  (let ((zh (string=? lang "zh")))
+    (cond
+      ((string=? why "banned")
+       (if zh "这一句有点不合适，换个明媚的说法" "That one is a bit gloomy. Try a brighter way to say it."))
+      ((or (string=? why "empty") (string=? why "audio") (string=? why "hear"))
+       (if zh "没听清，再按一次" "I didn't catch that. Press once more."))
+      ((string=? why "offline")
+       (if zh "这一句先留着" "I'll keep that sentence. The garden stays familiar."))
+      ((or (string=? why "timeout") (string=? why "llm"))
+       (if zh "想了较久，先跑着，过一会儿再试" "That took a while. Keep running, and try again in a bit."))
+      ((string=? why "think")
+       (if zh "还在想…" "Still thinking…"))
+      (else
+       (if zh "这次没变成路，再试一句" "That shape drifted away")))))
+
+; The child sentence is data for the model, not a form to run.
+(define (wish-user text)
+  (string-append
+    "The child wished: " text
+    ". Turn that wish into one short bright English sentence and then the s-expression. Do not copy gloomy words. Do not add markdown."))
+
+(define (preset-fair? text rules)
+  (let ((row (wish-preset text)))
+    (if (not row)
+      #f
+      (let ((arm (hash-ref row "arm"))
+            (form (hash-ref row "form")))
+        (cond
+          ((string=? arm "scene") (hash-ref (check-scene form) "ok" #f))
+          ((string=? arm "pals") (hash-ref (check-pals form) "ok" #f))
+          (else
+           (let ((laid (layout-form form rules)))
+             (and (hash? laid)
+                  (<= (hash-ref laid "geometry" 1.0) 0.0)
+                  (<= (hash-ref laid "budget" 1.0) 0.0)
+                  (>= (hash-ref laid "margin" 0.0) 0.25)))))))))
