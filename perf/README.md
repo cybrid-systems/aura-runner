@@ -75,6 +75,39 @@ negative-skip step-poppers-noop class=flat-hot hot-node=collide
 budget-used 0
 ```
 
+## The run on aura v0.2.5
+
+Both targets were re-run on **aura v0.2.5** (`7167490e`, the release
+tarball) with the runtime probe passing (the named-let reentrancy of
+cybrid-systems/aura#5116 is fixed there).
+
+| target | report | verdict |
+|---|---|---|
+| the physics (`perf/spec.aura`) | `perf/out/report-physics-v025.txt` | `intend-met=1 KEEP=2 ROLLBACK=3 speedup-x=0.91` |
+| the autopilot (`perf/spec-autopilot.aura`) | `perf/out/report-autopilot-v025.txt` | `intend-met=0 KEEP=2 ROLLBACK=7` |
+
+The physics round keeps `collide-slack`: the site floor (20% on the
+define the candidate changes) is met — `collide` goes 344 ms → 269 ms —
+while the program as a whole moves less than the program floor. That is
+the site floor doing its job.
+
+The autopilot round keeps nothing: `hazard-window`, `lane-clear-once`
+and `gap-window` are all `no-speedup`, and `wrong-scale` is
+`no-speedup` too — the autopilot's digest is the runner's position and
+lane, so it does **not** cover the score and the checksum cannot see
+that candidate. The physics digest does cover it, and there the same
+candidate is rejected by the checksum. A checksum only sees what the
+target's own digest covers.
+
+From aura-perf `25b6460` on, the reference of a candidate is the null
+of the define **that candidate** rebinds, so the report names it:
+
+```
+null-candidate heldout-ms 1379 rebound=1 target=pset
+null-candidate target=step-poppers heldout-ms=1367 rebound=1
+candidate step-poppers-noop ROLLBACK reason=no-speedup heldout-ms=1466 ref-ms=1365 ref-target=step-poppers
+```
+
 ## A candidate cannot be judged yet
 
 A `mutate:rebind` inside an `evo:trial` loses the variadic parameter
