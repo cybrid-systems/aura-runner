@@ -13,5 +13,5 @@
 (define (rule-magnet) 0.0)
 (define (motif-form) "")
 (define (scene-form) "(garden (sky 0.55 0.72 0.95) (ground 0.42 0.68 0.38) (flower daisy 0.45) (light 0.82))")
-(define (pals-form) "(pals (pal kitten mochi 0.95 0.62 0.35 hop) (pal car beep 0.3 0.55 0.95 pace))")
+(define (pals-form) "(pals (pal kitten mochi 0.95 0.62 0.35 hop) (pal car beep 0.3 0.55 0.95 pace) (pal van nori 0.98 0.78 0.32 pace) (pal racer vroom 0.96 0.45 0.32 follow))")
 0

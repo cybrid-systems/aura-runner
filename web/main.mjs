@@ -69,6 +69,8 @@ const sceneView = {
 let pals = [
   { kind: "kitten", name: "mochi", r: 0.95, g: 0.62, b: 0.35, motion: "hop", plan: "kitten" },
   { kind: "car", name: "beep", r: 0.3, g: 0.55, b: 0.95, motion: "pace", plan: "car" },
+  { kind: "van", name: "nori", r: 0.98, g: 0.78, b: 0.32, motion: "pace", plan: "van" },
+  { kind: "racer", name: "vroom", r: 0.96, g: 0.45, b: 0.32, motion: "follow", plan: "racer" },
 ];
 let hero = { kind: "keeper", plan: "keeper", r: 0.95, g: 0.72, b: 0.45 };
 let bend = 0.38;

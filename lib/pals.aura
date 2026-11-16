@@ -8,7 +8,7 @@
 (require "lib/gen")
 
 (define default-pals
-  "(pals (pal kitten mochi 0.95 0.62 0.35 hop) (pal car beep 0.3 0.55 0.95 pace))")
+  "(pals (pal kitten mochi 0.95 0.62 0.35 hop) (pal car beep 0.3 0.55 0.95 pace) (pal van nori 0.98 0.78 0.32 pace) (pal racer vroom 0.96 0.45 0.32 follow))")
 
 (define (pal-viol ok?)
   (hash "budget" 0.0 "geometry" 0.0 "reachable" (if ok? 0.0 1.0) "safe" 0.0))
@@ -51,7 +51,10 @@
 (define (plan-of kind)
   (cond
     ((or (string=? kind "keeper")
-         (string=? kind "kitten") (string=? kind "car") (string=? kind "bunny")
+         (string=? kind "kitten") (string=? kind "car")
+         (string=? kind "van") (string=? kind "racer")
+         (string=? kind "taxi") (string=? kind "wagon")
+         (string=? kind "bunny")
          (string=? kind "bird") (string=? kind "butterfly") (string=? kind "frog")
          (string=? kind "duck") (string=? kind "puppy") (string=? kind "fox")
          (string=? kind "turtle") (string=? kind "bee") (string=? kind "friend"))
@@ -62,6 +65,10 @@
   (cond
     ((string=? kind "kitten") "A kitten came to play")
     ((string=? kind "car") "A little car rolled in")
+    ((string=? kind "van") "A van rolled in")
+    ((string=? kind "racer") "A racer rolled in")
+    ((string=? kind "taxi") "A taxi rolled in")
+    ((string=? kind "wagon") "A wagon rolled in")
     ((string=? kind "bunny") "A bunny hopped in")
     ((string=? kind "bird") "A bird flew along")
     ((string=? kind "butterfly") "A butterfly drifted by")

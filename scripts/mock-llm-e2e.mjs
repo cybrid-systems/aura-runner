@@ -153,7 +153,7 @@ async function drive() {
       throw new Error("welcome garden " + JSON.stringify(welcome));
     }
     const welcomeNames = (welcome.pals || []).map((row) => row.name).join(",");
-    if (welcomeNames !== "mochi,beep") {
+    if (welcomeNames !== "mochi,beep,nori,vroom") {
       throw new Error("welcome pals " + welcomeNames);
     }
     if (welcome.alive === false) throw new Error("welcome already ended");

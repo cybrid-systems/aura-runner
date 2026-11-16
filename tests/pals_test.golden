@@ -1,5 +1,9 @@
 default 1 fair A kitten came to play
 car 1 fair A little car rolled in
+van 1 fair A van rolled in
+racer 1 fair A racer rolled in
+taxi 1 fair A taxi rolled in
+wagon 1 fair A wagon rolled in
 bird 1 fair A bird flew along
 puppy 1 fair A puppy bounded in
 dark 0 color
