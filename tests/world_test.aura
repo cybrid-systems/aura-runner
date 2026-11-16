@@ -1,0 +1,159 @@
+; The worldline keeps a kept phrase, a turned-away phrase, and a deck
+; change. Rewind returns to the earlier one and leaves the later node.
+; A rollback cannot be installed. Audio, a bad gravity, and a bad card
+; are refused. The opening spawn sits on the ground.
+(require "lib/world")
+(require "lib/cards")
+(require "lib/gen")
+(require "lib/phys")
+
+(define (expect name ok)
+  (display name)
+  (display " ")
+  (display (if ok 1 0))
+  (newline)
+  (if ok #t (error (string-append "world: " name))))
+
+(define (snap motif deck g air)
+  (hash "seed" 42
+        "level" 2
+        "form" 0
+        "pace" 0
+        "band" 0
+        "g" g
+        "jump" 11.2
+        "slide" 0.48
+        "speed" 8.0
+        "air" air
+        "magnet" 0.0
+        "hue" 0
+        "coyote" 0.12
+        "forgive" 0.12
+        "motif" motif
+        "scene" "(garden (sky 0.55 0.72 0.95) (ground 0.42 0.68 0.38) (flower daisy 0.45) (light 0.82))"
+        "pals" "(pals (pal kitten mochi 0.95 0.62 0.35 hop) (pal car beep 0.3 0.55 0.95 pace))"
+        "loot" "coin"
+        "bend" 0.38
+        "deck" deck
+        "chase-speed" 2.1
+        "chase-cool" 0.42
+        "chase-at" 0.42
+        "chase-commit" 7.5
+        "sky" (list 0.55 0.72 0.95)
+        "ground" (list 0.42 0.68 0.38)
+        "flower" "daisy"
+        "density" 0.45
+        "light" 0.82
+        "fog" 0.22))
+
+(define phrase (snap "(seq (ground 8))" (list) 32.0 0.0))
+(define cards (snap "" (list "light" "double") 22.0 1.0))
+(define base (world-blank))
+(define a (world-add base "KEEP" "fair" "motif" "A new shape bloomed" phrase 100))
+(define b (world-add (hash-ref a "tree") "ROLLBACK" "geometry" "motif" "That shape drifted away" phrase 101))
+(define c (world-add (hash-ref b "tree") "KEEP" "fair" "cards" "Cards together" cards 102))
+(define tree (hash-ref c "tree"))
+(define node-a (world-find tree (hash-ref a "id")))
+(define node-b (world-find tree (hash-ref b "id")))
+(define node-c (world-find tree (hash-ref c "id")))
+
+(expect "three" (and node-a node-b node-c))
+(expect "keep-roll" (and (string=? (hash-ref node-a "kind" "") "KEEP")
+                         (string=? (hash-ref node-b "kind" "") "ROLLBACK")
+                         (string=? (hash-ref node-c "kind" "") "KEEP")
+                         (string=? (hash-ref node-c "arm" "") "cards")
+                         (string=? (hash-ref node-b "why" "") "geometry")))
+(expect "parents" (and (string=? (hash-ref node-b "parent" "") (hash-ref a "id"))
+                       (string=? (hash-ref node-c "parent" "") (hash-ref a "id"))
+                       (string=? (hash-ref tree "tip" "") (hash-ref c "id"))))
+(expect "cues" (and (string=? (hash-ref node-a "cue" "") "A new shape bloomed")
+                    (string=? (hash-ref node-b "cue" "") "That shape drifted away")
+                    (not (string=? (hash-ref a "id") (hash-ref c "id")))))
+
+(define again (world-add tree "KEEP" "fair" "motif" "A new shape bloomed" phrase 103))
+(expect "same-cue" (not (string=? (hash-ref a "id" "") (hash-ref again "id" ""))))
+
+(define back (world-rewind tree (hash-ref a "id")))
+(define back-tree (hash-ref back "tree"))
+(define back-snap (hash-ref back "snap" #f))
+(expect "rewind" (and (hash-ref back "ok" #f)
+                      (string=? (hash-ref back-tree "tip" "") (hash-ref a "id"))
+                      (world-find back-tree (hash-ref b "id"))
+                      (world-find back-tree (hash-ref c "id"))
+                      (= (length (hash-ref back-tree "nodes" (list)))
+                         (length (hash-ref tree "nodes" (list))))
+                      (string=? (hash-ref back-snap "motif" "") "(seq (ground 8))")
+                      (null? (hash-ref back-snap "deck" #f))
+                      (< (world-abs (- (hash-ref back-snap "g" 0) 32.0)) 0.05)))
+
+(define refused (world-rewind tree (hash-ref b "id")))
+(expect "rollback-stays" (and (not (hash-ref refused "ok" #f))
+                              (string=? (hash-ref refused "why" "") "rollback")
+                              (string=? (hash-ref (hash-ref refused "tree") "tip" "")
+                                       (hash-ref tree "tip" ""))))
+
+(define (fill t i)
+  (if (> i 30)
+    t
+    (fill (hash-ref (world-add t "KEEP" "level" "run" "Level clear" phrase (+ 200 i)) "tree")
+          (+ i 1))))
+
+(define full (fill base 1))
+(define full-tip (hash-ref full "tip" ""))
+(expect "cap" (and (<= (length (hash-ref full "nodes" (list))) WORLD-CAP)
+                   (world-find full full-tip)
+                   (> (length (hash-ref full "nodes" (list))) 0)))
+
+(define loud (world-clean phrase))
+(hash-set! loud "audio" "clip")
+(define weak (world-clean phrase))
+(hash-set! weak "g" 5.0)
+(define sword (world-clean phrase))
+(hash-set! sword "deck" (list "sword"))
+(define secret (world-clean phrase))
+(hash-set! secret "key" "sk-live")
+(define mismatch (world-clean cards))
+(hash-set! mismatch "g" 32.0)
+(expect "refuse" (and (not (world-snap-ok? loud))
+                      (not (world-snap-ok? weak))
+                      (not (world-snap-ok? sword))
+                      (not (world-snap-ok? secret))
+                      (not (world-snap-ok? mismatch))
+                      (world-snap-ok? phrase)
+                      (world-snap-ok? cards)))
+
+(define quiet (world-add base "KEEP" "fair" "motif" "Bloom" loud 9))
+(define quiet-node (world-find (hash-ref quiet "tree") (hash-ref quiet "id")))
+(expect "no-audio" (and (not (hash? (hash-ref quiet "snap" #f)))
+                        (not (string-contains? (json-encode quiet-node) "clip"))
+                        (not (string-contains? (json-encode (world-clean phrase)) "audio"))
+                        (not (string-contains? (json-encode (world-clean phrase)) "\"key\""))))
+
+(define empty-deck (hash-ref (json-parse "{\"deck\":[]}") "deck" #f))
+(define round (world-clean phrase))
+(hash-set! round "deck" empty-deck)
+(expect "empty-deck" (and (world-snap-ok? round) (null? (hash-ref (world-clean round) "deck" #f))))
+
+(define known (world-take tree (hash-ref b "id") "KEEP" phrase))
+(expect "known-rollback" (not (hash-ref known "ok" #f)))
+(define adopted (world-take base "w9-5" "KEEP" phrase))
+(expect "adopt" (and (hash-ref adopted "ok" #f)
+                     (string=? (hash-ref (hash-ref adopted "tree") "tip" "") "w9-5")
+                     (string=? (hash-ref (hash-ref adopted "snap" #f) "motif" "") "(seq (ground 8))")))
+(define bad-id (world-take base "nope" "KEEP" phrase))
+(expect "bad-id" (not (hash-ref bad-id "ok" #f)))
+(define big (world-add base "KEEP" "fair" "motif" "Bloom" phrase 123456789))
+(expect "id-plain" (and (string-prefix? (hash-ref big "id" "") "w1-123456789")
+                        (not (string-contains? (hash-ref big "id" "") "e"))
+                        (not (string-contains? (hash-ref big "id" "") "."))))
+
+(define road (layout-specs (car (pattern-table 0)) 0.0 8.0))
+(define ground (car (car road)))
+(define born (make-player 1.2))
+(expect "safe-start" (and (player-alive? born)
+                          (< (world-abs (player-y born)) 0.001)
+                          (< (world-abs (- (car ground) 1.0)) 0.01)
+                          (<= (car (cdr ground)) 1.2)
+                          (>= (+ (car (cdr ground)) (car (cdr (cdr ground)))) 2.0)))
+
+(void)
