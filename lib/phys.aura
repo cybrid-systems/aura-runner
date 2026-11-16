@@ -31,6 +31,8 @@
 ;   Kind 10 is a rival. It runs toward the hero on one lane, steps
 ;   toward the hero's lane while it is still far, then commits. A jump
 ;   or a different lane misses it. A slide does not.
+;   Field 10 is the pause between lane steps. Field 11 is the commit
+;   distance. Missing numbers keep RIVAL-COOL and RIVAL-COMMIT.
 
 (define PHYS-DT (/ 1.0 60.0))
 (define LANE-W 1.8)
@@ -145,25 +147,32 @@
 (define RIVAL-COOL 0.42)
 
 ; Look is field 6, approach speed field 7, aim lane field 8, cool field 9.
+; Field 10 is how long it waits after a step. Field 11 is when it locks.
+(define (rival-extra q i fallback)
+  (let ((v (piece-nth q i 0.0)))
+    (if (> v 0.0) v fallback)))
+
 (define (step-one-rival q p dt)
   (let* ((spd (piece-nth q 7 2.2))
+         (cool-max (rival-extra q 10 RIVAL-COOL))
+         (commit (rival-extra q 11 RIVAL-COMMIT))
          (x (- (piece-x q) (* spd dt)))
          (lane (piece-lane q))
          (aim (piece-nth q 8 lane))
          (cool (max 0.0 (- (piece-nth q 9 0.0) dt)))
          (ahead (- x (player-x p)))
          (look (piece-nth q 6 0.0)))
-    (if (< ahead RIVAL-COMMIT)
-      (piece 10.0 x (piece-w q) (piece-h q) (piece-y q) lane look spd aim cool)
+    (if (< ahead commit)
+      (piece 10.0 x (piece-w q) (piece-h q) (piece-y q) lane look spd aim cool cool-max commit)
       (if (> cool 0.0)
-        (piece 10.0 x (piece-w q) (piece-h q) (piece-y q) lane look spd aim cool)
+        (piece 10.0 x (piece-w q) (piece-h q) (piece-y q) lane look spd aim cool cool-max commit)
         (let* ((aim1 (player-lane p))
                (next (cond
                        ((= lane aim1) lane)
                        ((< lane aim1) (+ lane 1.0))
                        (else (- lane 1.0))))
-               (cool2 (if (= next lane) 0.0 RIVAL-COOL)))
-          (piece 10.0 x (piece-w q) (piece-h q) (piece-y q) next look spd aim1 cool2))))))
+               (cool2 (if (= next lane) 0.0 cool-max)))
+          (piece 10.0 x (piece-w q) (piece-h q) (piece-y q) next look spd aim1 cool2 cool-max commit))))))
 
 (define (step-rivals pieces p dt)
   (let loop ((ps pieces) (acc (list)))

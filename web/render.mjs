@@ -1281,7 +1281,8 @@ export function createRenderer(canvas) {
       const at = (ahead, y) => [here.x + toX * ahead, y, here.z + toZ * ahead];
       paintLane(q, lat, [1, 0.38, 0.22], 22);
       if (look === 1) {
-        const wing = reduced ? 0.16 : 0.1 + Math.abs(Math.sin((st.time || 0) * 9)) * 0.14;
+        const flap = q.length > 10 && q[10] > 0 && q[10] < 0.36 ? 12 : 9;
+        const wing = reduced ? 0.16 : 0.1 + Math.abs(Math.sin((st.time || 0) * flap)) * 0.14;
         const body = at(0, 0.42);
         const head = at(0.22, 0.68);
         const beak = at(0.4, 0.66);

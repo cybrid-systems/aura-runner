@@ -13,6 +13,7 @@
 (require "lib/review")
 (require "lib/cards")
 (require "lib/wish")
+(require "lib/chase")
 
 (define SYS
   "You design one obstacle phrase for a children's 3D endless runner called Lumen Run. The runner has three lanes (0 left, 1 centre, 2 right), jumps, and slides. No markdown. Allowed pieces: (seq (ground W) (gap W) (hurdle H W) (gate BOTTOM W) (coin Y) (spring W) (block LANE DEPTH) (coin-lane LANE Y)). Every parameter is a number; never write the words BOTTOM, W, H, LANE, DEPTH or other placeholders. Ranges in meters: spring W 0.45-1.6, hurdle W 0.35-2.2 and H 0.15-0.9, gate W 0.35-2.0 and BOTTOM 0.58-0.85, coin Y 0.4-2.4, coin-lane LANE 0, 1 or 2 and Y 0.4-2.4, ground W 0.8-18, gap W 0.4-2.0, block LANE 0, 1 or 2 and DEPTH 0.5-2.2. Optional (loot KIND) restyles every pickup. KIND is coin, star, gem, blossom, or apple. Optional (bend AMP) turns the road. AMP is 0.12 to 0.65. Start and end with ground. Leave at least one lane open beside every block. No violence, fear, weapons, or scary words. Bright garden, friendly shapes. First write one short bright English sentence with no parentheses, then the s-expression. That sentence is what the child reads. A ground of 10.4 is one beat, about 1.3 seconds, and a ground of 4.8 is a short rest. Leave a full beat of ground before a jump. Optional (flyer KIND LANE Y) sends one gentle toy flying toward the runner along one lane. KIND is plane, bubble, lantern, leaf, or ball. LANE is 0, 1 or 2. Y is 0.55 to 0.85. At most two flyers, and never on every lane at once. Optional last word on a hurdle, a gate, or a block picks its look. A hurdle is bar, log, fence, bloom, or drum. A gate is bar, ribbon, vine, lights, or scarf. A block is pot, stump, mushroom, crate, or bush. A low wide shape is a jump, a bar with room underneath is a slide, and one tall shape in a single lane is a lane change. Recolor a shape freely. One beat holds one move. Example: (seq (ground 6) (block 0 1) (hurdle 0.4 0.7) (ground 5) (gate 0.72 0.8) (ground 5) (gap 1.1) (ground 5))")
@@ -209,6 +210,17 @@
 (define card-geom 0.0)
 (define card-budget 0.0)
 (define card-margin 0.0)
+; The rival's pace. One knob at a time, after a level, on its own arm.
+; A miss puts the previous numbers back. It is not the band policy.
+(define chase (chase-blank))
+(define chase-recent (list))
+(define chase-phase 0)
+(define chase-plan #f)
+(define chase-road (list))
+(define chase-sim (list))
+(define chase-body #f)
+(define chase-i 0)
+(define chase-rules #f)
 (define tuned #f)
 
 (define (publish-named! name value)
@@ -420,12 +432,16 @@
   (set! level-x1 (+ level-x0 (level-span speed-now))))
 
 (define (finish-level!)
-  (set! form (form-next form level-bumps))
-  (set! level-n (+ level-n 1))
-  (set! level-bumps 0)
-  (advance-pace!)
-  (begin-level!)
-  (note! "KEEP" "level" "run" "Level clear"))
+  (let ((played form)
+        (bumps level-bumps))
+    (set! chase-recent (chase-remember chase-recent bumps))
+    (set! form (form-next played bumps))
+    (set! level-n (+ level-n 1))
+    (set! level-bumps 0)
+    (advance-pace!)
+    (begin-level!)
+    (note! "KEEP" "level" "run" "Level clear")
+    (queue-chase! played bumps (chase-sum chase-recent) speed-now)))
 
 (define (watch-level! ev)
   (if (string=? ev "bump")
@@ -538,16 +554,21 @@
 
 (define (rival-piece at)
   (let ((lane (exact->inexact (modulo (+ level-n 1) 3)))
-        (look (exact->inexact (modulo level-n 3)))
-        (spd (+ 2.1 (* (exact->inexact form) 0.35))))
-    (piece 10.0 at 0.72 0.95 0.0 lane look spd lane 0.2)))
+        (look (exact->inexact (chase-look level-n))))
+    (piece 10.0 at 0.72 0.95 0.0 lane look
+           (chase-get chase "speed" 2.1)
+           lane
+           0.2
+           (chase-get chase "cool" 0.42)
+           (chase-get chase "commit" 7.5))))
 
-; One rival per level, about halfway to the finish, so the opening
-; lesson is clear before anyone comes down the lane.
+; One rival per level. Level 1 waits until the opening lesson is behind
+; it. A later level uses the saved pace, still one lane.
 (define (rival-for-chunk x0 x1)
   (if (= rival-for level-n)
     #f
-    (let ((at (+ level-x0 (* (- level-x1 level-x0) 0.42))))
+    (let ((at (+ level-x0
+                 (chase-place chase (- level-x1 level-x0) level-n form))))
       (if (and (>= at (+ x0 2.0)) (<= at (- x1 3.0)))
         (begin
           (set! rival-for level-n)
@@ -668,6 +689,10 @@
   (set! level-n 1)
   (set! level-bumps 0)
   (set! rival-for 0)
+  (set! chase (chase-blank))
+  (set! chase-recent (list))
+  (set! chase-phase 0)
+  (set! chase-plan #f)
   (set! ward-ready #t)
   (set! ward-left 0.0)
   (set! owed (list))
@@ -1479,11 +1504,108 @@
     #f
     (step-cards!)))
 
+; The numbers on the note are the live set: the kept step, or the set
+; a failed trial left in place. The ask is what puts the sentence on
+; the line. The mark is only the corner word.
+(define (chase-note! kind why mood)
+  (let ((row (note! kind why "chaser"
+                    (chase-line kind mood)
+                    "chaser"
+                    "A friend is keeping up")))
+    (if (hash? row)
+      (begin
+        (hash-put! row "speed" (chase-get chase "speed" 2.1))
+        (hash-put! row "cool" (chase-get chase "cool" 0.42))
+        (hash-put! row "at" (chase-get chase "at" 0.42))
+        (hash-put! row "commit" (chase-get chase "commit" 7.5)))
+      #f)
+    row))
+
+; A step that the numbers already forbid does not take a slice. A legal
+; step walks the proving road twelve frames at a time, under the rules
+; the run is using now, including a kept deck.
+(define (queue-chase! played bumps recent pace-now)
+  (if (> chase-phase 0)
+    #f
+    (let ((step (chase-step chase played bumps recent pace-now)))
+      (if (not (hash-ref step "moved" #f))
+        #f
+        (let ((params (hash-ref step "params" chase)))
+          (let ((why (chase-static-why chase params pace-now)))
+            (if (not (string=? why ""))
+              (chase-note! "ROLLBACK" why "hold")
+              (begin
+                (set! chase-plan step)
+                (set! chase-rules (rules-hash))
+                (set! chase-road (chase-pieces params))
+                (set! chase-sim chase-road)
+                (set! chase-body (make-player 0.4))
+                (set! chase-i 0)
+                (set! chase-phase 1)))))))))
+
+(define (seal-chase! cleared?)
+  (let* ((plan chase-plan)
+         (params (if (hash? plan) (hash-ref plan "params" chase) chase))
+         (mood (if (hash? plan) (hash-ref plan "mood" "hold") "hold"))
+         (step-why (if (hash? plan) (hash-ref plan "why" "hold") "hold"))
+         (rules (if (hash? chase-rules) chase-rules (rules-hash)))
+         (pace-now (pace-of rules))
+         (static (chase-static-why chase params pace-now))
+         (why (if cleared? (if (string=? static "") "" static) "reachable"))
+         (fair (string=? why "")))
+    (let* ((label (if (string? step-why) step-why "pace"))
+           (cand (evo:candidate label (hash "id" (string-append "r" (int-str level-n))
+                                             "target" "rule-chase")))
+           (trial (open-trial cand
+                              (hash "timeout-ms" 1500
+                                    "apply" (lambda (c) #t)
+                                    "evaluate"
+                                    (lambda (c)
+                                      (hash "status" "ok"
+                                            "objectives" (hash "fair" (if fair 1.0 0.0))
+                                            "constraints"
+                                            (hash "budget" 0.0
+                                                  "geometry" 0.0
+                                                  "reachable" (if fair 0.0 1.0)
+                                                  "safe" 0.0)
+                                            "behavior"
+                                            (hash "band" (exact->inexact band)
+                                                  "speed" (exact->inexact (chase-get params "speed" 2.1)))))))))
+      (if (trial-busy? trial)
+        #f
+        (begin
+          (if (or (not fair)
+                  (not trial) (not (evo:trial-ok? trial)) (not (evo:feasible? trial)))
+            (chase-note! "ROLLBACK" (if (string=? why "") "trial" why) mood)
+            (begin
+              (set! chase (chase-keep chase plan))
+              (chase-note! "KEEP" step-why mood)))
+          (release-slot!)
+          #t)))))
+
+(define (step-chase!)
+  (let ((rules (if (hash? chase-rules) chase-rules (rules-hash))))
+    (let ((r (autopilot-slice chase-road rules chase-body chase-sim chase-i 12)))
+      (set! chase-i (lref r 1))
+      (set! chase-body (lref r 2))
+      (set! chase-sim (lref r 3))
+      (if (and (lref r 0) (not (chat-open?))
+               (seal-chase! (if (lref r 4) #t #f)))
+        (set! chase-phase 0)
+        #f))))
+
+; One slice a tick. A phrase, a deck, or a dream already walking goes first.
+(define (maybe-chase!)
+  (if (or (= chase-phase 0) (> hold-phase 0) (> card-phase 0) (> dream-phase 0))
+    #f
+    (step-chase!)))
+
 (define (maybe-dream!)
   (if (or (env-on? "LUMEN_SKIP_DREAM") (> hold-phase 0) (> card-phase 0) (llm-posting?) (chat-open?))
     #f
     (cond
       ((= dream-phase 1) (step-dream!))
+      ((> chase-phase 0) #f)
       ((and (player-alive? player) (>= run-ms next-dream))
        (begin-dream!))
       (else #f))))
@@ -2202,6 +2324,7 @@
     (advance-pace!)
     (maybe-hold!)
     (maybe-cards!)
+    (maybe-chase!)
     (maybe-dream!)
     (maybe-guests!)
     (ensure-ahead!)

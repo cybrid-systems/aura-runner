@@ -682,6 +682,37 @@
   (and (lane-clear? pieces x lane pace)
        (not (flyer-blocking? pieces x lane pace))))
 
+; A rival that has already locked its lane. Farther out it is still
+; stepping toward the hero, and dodging then would walk into it.
+(define (rival-commit-of q)
+  (let ((v (piece-nth q 11 0.0)))
+    (if (> v 0.0) v RIVAL-COMMIT)))
+
+(define (rival-locked-on? pieces x lane)
+  (let loop ((ps pieces))
+    (if (null? ps)
+      #f
+      (let ((q (car ps)))
+        (if (and (= (piece-k q) 10.0)
+                 (= (piece-lane q) lane)
+                 (let ((ahead (- (piece-x q) x)))
+                   (and (> ahead 0.2) (< ahead (rival-commit-of q)))))
+          #t
+          (loop (cdr ps)))))))
+
+; Leave a locked rival by one lane. Three locked lanes have nowhere to go.
+(define (dodge-rival p pieces)
+  (let ((lane (body-lane p))
+        (x (player-x p)))
+    (if (and (= (player-lane p) lane) (rival-locked-on? pieces x lane))
+      (cond
+        ((and (< lane 1.5) (not (rival-locked-on? pieces x (+ lane 1.0))))
+         (press-lane p 1.0))
+        ((and (> lane 0.5) (not (rival-locked-on? pieces x (- lane 1.0))))
+         (press-lane p -1.0))
+        (else p))
+      p)))
+
 ; A flyer steps aside once it enters the look, while a lane change can
 ; still finish. The slide below clears one both neighbours are holding.
 (define (dodge-flyer p pieces pace)
@@ -701,7 +732,7 @@
   (if (not (player-alive? p))
     p
     (let ((pace (pace-of rules)))
-      (let ((p1 (dodge-flyer p pieces pace)))
+      (let ((p1 (dodge-rival (dodge-flyer p pieces pace) pieces)))
         (let ((p2 (dodge-block p1 pieces pace)))
           (let ((q (next-hazard pieces (player-x p2) (body-lane p2))))
             (if (not q)
