@@ -2351,6 +2351,14 @@
       ((string=? arm "pals") (consider-pals! form say))
       (else (consider-form! form say)))))
 
+(define (wish-waiting? arm)
+  (cond
+    ((string=? arm "scene") (pair? wait-scene))
+    ((string=? arm "pals") (pair? wait-pals))
+    (else (pair? wait-motif))))
+
+; The words are never the form. A bright line changes the picture at
+; once, whether or not a model is awake. A gloomy line does not.
 (define (on-wish c msg)
   (set! wish-locale (wish-lang (hash-ref msg "lang" "")))
   (if (wish-has-audio? msg)
@@ -2361,20 +2369,19 @@
         ((string=? source "") (wish-note! "ROLLBACK" "hear"))
         ((string=? text "") (wish-note! "ROLLBACK" "empty"))
         ((banned? text) (wish-note! "ROLLBACK" "banned"))
-        ((not llm-on)
-         (let ((row (wish-preset text)))
-           (if row
-             (apply-offline! row)
-             (wish-note! "ROLLBACK" "offline"))))
-        (wish-open (wish-note! "SAY" "think"))
         (else
-         (set! wish-open #t)
-         (set! wish-queued #t)
-         (set! wish-text text)
-         (set! wish-kind (wish-arm text))
-         (set! wish-prompt (wish-user text))
-         (set! wish-think #f)))))
-  (flush-notes! c))
+         (let ((row (wish-with-lang (wish-answer text sky-r sky-g sky-b) wish-locale)))
+           (if (not row)
+             (wish-note! "ROLLBACK" "shape")
+             (begin
+               (apply-offline! row)
+               (if (wish-waiting? (hash-ref row "arm" "scene"))
+                 (wish-note! "SAY" "soon")
+                 #f))))))))
+  (flush-notes! c)
+  (if rules-dirty
+    (begin (send c (rules-msg)) (set! rules-dirty #f))
+    #f))
 
 (define (poll-llm! c)
   (if (not llm-on)
