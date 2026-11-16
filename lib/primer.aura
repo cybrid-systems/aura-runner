@@ -1,0 +1,153 @@
+; One number behind a rule card. The child may edit that number only.
+; Anything else, including a call, is refused here. The server publishes
+; the number through the live rule, and never installs this text.
+(require "std/string" all:)
+
+(define PRIMER-SLICE 12)
+(define PRIMER-G-MIN 18.0)
+(define PRIMER-G-MAX 40.0)
+
+(define (primer-rule card)
+  (cond
+    ((string=? card "light") "rule-gravity")
+    ((string=? card "double") "rule-double-jump")
+    ((string=? card "magnet") "rule-magnet")
+    (else "")))
+
+(define (primer-gap? c)
+  (or (= c 32) (= c 9)))
+
+(define (primer-digit? c)
+  (and (>= c 48) (<= c 57)))
+
+(define (primer-near? a b)
+  (and (number? a) (number? b) (< (if (< (- a b) 0) (- b a) (- a b)) 0.011)))
+
+(define (primer-forbidden? text)
+  (or (string-contains? text "banned")
+      (string-contains? text "set-code")
+      (string-contains? text "load")
+      (string-contains? text "mutate")
+      (string-contains? text "eval")
+      (string-contains? text "motif")
+      (string-contains? text "garden")
+      (string-contains? text "seq")
+      (string-contains? text "\"")
+      (string-contains? text "\\")
+      (string-contains? text "\n")
+      (string-contains? text ";")))
+
+(define (primer-skip s i n)
+  (if (or (>= i n) (not (primer-gap? (string-ref s i))))
+    i
+    (primer-skip s (+ i 1) n)))
+
+(define (primer-lit? s i lit)
+  (let ((n (string-length lit))
+        (m (string-length s)))
+    (if (> (+ i n) m)
+      #f
+      (let loop ((k 0))
+        (if (>= k n)
+          #t
+          (if (= (string-ref s (+ i k)) (string-ref lit k))
+            (loop (+ k 1))
+            #f))))))
+
+(define (primer-token s i n)
+  (let loop ((k i))
+    (if (or (>= k n)
+            (primer-gap? (string-ref s k))
+            (= (string-ref s k) 41))
+      (substring s i k)
+      (loop (+ k 1)))))
+
+; A number, then the index after it. A trailing dot or a second dot is
+; not a number. No sign, no exponent, no name.
+(define (primer-number s i n)
+  (if (or (>= i n) (not (primer-digit? (string-ref s i))))
+    #f
+    (let loop ((k (+ i 1)) (acc (- (string-ref s i) 48.0)) (frac #f) (div 10.0))
+      (if (>= k n)
+        (list acc k)
+        (let ((c (string-ref s k)))
+          (cond
+            ((primer-digit? c)
+             (if frac
+               (loop (+ k 1) (+ acc (/ (- c 48.0) div)) #t (* div 10.0))
+               (loop (+ k 1) (+ (* acc 10.0) (- c 48.0)) #f div)))
+            ((and (= c 46) (not frac))
+             (if (>= (+ k 1) n)
+               #f
+               (if (primer-digit? (string-ref s (+ k 1)))
+                 (loop (+ k 1) acc #t div)
+                 #f)))
+            (else (list acc k))))))))
+
+(define (primer-bounds? name value)
+  (cond
+    ((string=? name "rule-gravity")
+     (and (>= value PRIMER-G-MIN) (<= value PRIMER-G-MAX)))
+    ((string=? name "rule-double-jump")
+     (or (primer-near? value 0.0) (primer-near? value 1.0)))
+    ((string=? name "rule-magnet")
+     (or (primer-near? value 0.0) (primer-near? value 2.4)))
+    (else #f)))
+
+(define (primer-fail why)
+  (hash "ok" #f "why" why "name" "" "value" 0.0))
+
+(define (primer-shape card text)
+  (let ((n (string-length text))
+        (want (primer-rule card)))
+    (let ((i0 (primer-skip text 0 n)))
+      (if (not (primer-lit? text i0 "(define"))
+        (primer-fail "lex")
+        (let ((i1 (primer-skip text (+ i0 7) n)))
+          (if (not (primer-lit? text i1 "("))
+            (primer-fail "lex")
+            (let ((i2 (primer-skip text (+ i1 1) n)))
+              (let ((name (primer-token text i2 n)))
+                (if (not (string=? name want))
+                  (if (or (string=? name "rule-gravity")
+                          (string=? name "rule-double-jump")
+                          (string=? name "rule-magnet"))
+                    (primer-fail "card")
+                    (primer-fail "list"))
+                  (let ((i3 (primer-skip text (+ i2 (string-length name)) n)))
+                    (if (not (primer-lit? text i3 ")"))
+                      (primer-fail "lex")
+                      (let ((i4 (primer-skip text (+ i3 1) n)))
+                        (if (and (< i4 n) (= (string-ref text i4) 40))
+                          (primer-fail "list")
+                          (let ((num (primer-number text i4 n)))
+                            (if (not num)
+                              (primer-fail "lex")
+                              (let ((i5 (primer-skip text (car (cdr num)) n)))
+                                (if (not (primer-lit? text i5 ")"))
+                                  (primer-fail "lex")
+                                  (let ((i6 (primer-skip text (+ i5 1) n)))
+                                    (if (< i6 n)
+                                      (primer-fail "lex")
+                                      (if (primer-bounds? want (car num))
+                                        (hash "ok" #t "why" "fair" "name" want "value" (car num))
+                                        (primer-fail "bounds")))))))))))))))))))))
+
+; ok only for the one define of this card, with one in-bounds number.
+(define (primer-read card text)
+  (cond
+    ((or (not (string? card)) (string=? (primer-rule card) ""))
+     (primer-fail "card"))
+    ((or (not (string? text)) (= (string-length text) 0) (> (string-length text) 80))
+     (primer-fail "lex"))
+    ((primer-forbidden? text)
+     (primer-fail "list"))
+    (else (primer-shape card text))))
+
+; A refused line leaves the previous gravity. A kept gravity is the
+; number that was written, and only that number.
+(define (primer-keep prev card text)
+  (let ((got (primer-read card text)))
+    (if (and (hash-ref got "ok" #f) (string=? (hash-ref got "name" "") "rule-gravity"))
+      (hash-ref got "value" prev)
+      prev)))

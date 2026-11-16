@@ -553,10 +553,49 @@ function sendDeck(ids) {
   ws.send(JSON.stringify({ op: "cards", action: "equip", ids }));
 }
 
+const primerEl = document.getElementById("primer");
+const primerText = document.getElementById("primer-text");
+const primerTry = document.getElementById("primer-try");
+let primerCard = "";
+let primerBusy = false;
+
+function primerLine(id) {
+  const n = (v) => Number(v || 0).toFixed(1);
+  if (id === "light") return `(define (rule-gravity) ${n(rules.g)})`;
+  if (id === "double") return `(define (rule-double-jump) ${n(rules.air)})`;
+  if (id === "magnet") return `(define (rule-magnet) ${n(rules.magnet)})`;
+  return "";
+}
+
+function endPrimerWait() {
+  primerBusy = false;
+  if (primerTry) {
+    primerTry.disabled = false;
+    primerTry.textContent = "试一下";
+  }
+  if (primerCard && primerText && primerEl && !primerEl.hidden) primerText.value = primerLine(primerCard);
+}
+
+function openPrimer(id) {
+  if (!primerEl) return;
+  if (primerCard === id && !primerEl.hidden) {
+    primerEl.hidden = true;
+    primerCard = "";
+    paintCards();
+    return;
+  }
+  primerCard = id;
+  primerEl.hidden = false;
+  if (primerText) primerText.value = primerLine(id);
+  paintCards();
+}
+
 function paintCards() {
   if (!cardBookEl) return;
   cardBookEl.replaceChildren();
   for (const id of CARD_ORDER) {
+    const row = document.createElement("div");
+    row.className = "card-row";
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "card" + (cardPick.includes(id) ? " on" : "");
@@ -569,7 +608,17 @@ function paintCards() {
       else if (cardPick.length < 3) cardPick = CARD_ORDER.filter((x) => x === id || cardPick.includes(x));
       paintCards();
     });
-    cardBookEl.appendChild(btn);
+    row.appendChild(btn);
+    if (cardBook.owned.has(id)) {
+      const adv = document.createElement("button");
+      adv.type = "button";
+      adv.className = "primer-open" + (primerCard === id && primerEl && !primerEl.hidden ? " on" : "");
+      adv.textContent = "进阶";
+      adv.setAttribute("aria-expanded", primerCard === id && primerEl && !primerEl.hidden ? "true" : "false");
+      adv.addEventListener("click", () => openPrimer(id));
+      row.appendChild(adv);
+    }
+    cardBookEl.appendChild(row);
   }
   if (cardsOpen) cardsOpen.textContent = cardBook.equipped.length ? `cards ${cardBook.equipped.length}` : "cards";
 }
@@ -676,9 +725,12 @@ function connect() {
       }
       remember(msg);
       if (msg.arm === "cards") applyCardDecision(msg);
+      if (msg.arm === "rule") endPrimerWait();
       if (window.__lumenOnDecision) window.__lumenOnDecision(msg);
       if (msg.kind === "KEEP" && (msg.arm === "motif" || msg.arm === "scene" || msg.arm === "pals")) audio.keep();
       if (msg.kind === "ROLLBACK") rejectSpark = true;
+    } else if (msg.op === "primer" && msg.status === "same") {
+      endPrimerWait();
     } else if (msg.op === "err" && msg.why === "rewind") {
       showCue("Still this world");
     }
@@ -1198,6 +1250,16 @@ if (cardsOpen && deckEl) {
 if (cardsUse) {
   cardsUse.addEventListener("click", () => {
     sendDeck(cardPick.slice());
+  });
+}
+if (primerTry) {
+  primerTry.addEventListener("click", () => {
+    if (!primerCard || !primerText || primerBusy) return;
+    if (!ws || ws.readyState !== 1) return;
+    primerBusy = true;
+    primerTry.disabled = true;
+    primerTry.textContent = "在试跑";
+    ws.send(JSON.stringify({ op: "primer", card: primerCard, text: primerText.value }));
   });
 }
 if (cardsShare && cardShareEl) {

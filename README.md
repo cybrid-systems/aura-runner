@@ -27,6 +27,8 @@ The wish button is at the top left. A preset or a typed line is sent only when y
 
 Cards sit above that badge. Clearing level 1, level 2, and level 3 adds 轻轻的, 再跳一下, and 吸过来. A star pickup adds the last one early. 用这几张 tries the set on a slice of the run and does not change the feel until it is kept. A set that cannot be cleared, or a gravity outside 18 to 40, is turned away and the previous cards stay. A shared link is `?seed=` plus `cards=light.1,double.1,magnet.1`.
 
+进阶 on a card you already have shows that one rule. Changing its number tries the run, and the number stays only when the trial gets through. A number outside 18 to 40, or a line that is not that one rule, is turned away and the previous number stays. The road keeps moving while the box is open.
+
 A friend on the path keeps up with the run. It changes its speed, how often it switches lanes, or where it appears, one small step at a time, and only after a short trial still gets through. A miss puts the previous step back. The opening lesson has none. The three looks stay a fox, a bird, and a beetle.
 
 The same badge opens the world line. Each change that stayed, and each one that was turned away, is a short line. A kept line can be run again from a safe start on that seed. A line that was turned away shows why, and does not become the road. The list stays on this browser.

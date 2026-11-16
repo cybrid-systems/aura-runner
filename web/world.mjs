@@ -92,7 +92,6 @@ export function snapOk(snap) {
     && numIn(snap.forgive, 0, 0.5)
     && numIn(snap.air, 0, 1)
     && numIn(snap.magnet, 0, 3)
-    && (deck.includes("light") ? near(snap.g, 22) : true)
     && (deck.includes("double") ? near(snap.air, 1) : near(snap.air, 0))
     && (deck.includes("magnet") ? near(snap.magnet, 2.4) : near(snap.magnet, 0))
     && phrase(snap.motif || "", 400)
