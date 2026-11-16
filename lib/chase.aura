@@ -1,0 +1,311 @@
+; The rival's pace. One small change at a time, checked before it sticks.
+; Speed, lane-change pause, and where it appears. Not the band policy.
+(require "lib/gen")
+
+(define CHASE-SPEED-LO 1.6)
+(define CHASE-COOL-LO 0.28)
+(define CHASE-COOL-HI 0.70)
+(define CHASE-AT-LO 0.32)
+(define CHASE-AT-HI 0.55)
+(define CHASE-COMMIT-LO 5.5)
+(define CHASE-COMMIT-HI 11.0)
+; Strictly under this share of the runner's speed. Never equal to it.
+(define CHASE-FRACTION 0.45)
+(define CHASE-SPEED-STEP 0.15)
+(define CHASE-COOL-STEP 0.06)
+(define CHASE-AT-STEP 0.04)
+
+(define (chase-get h k d)
+  (if (hash? h) (hash-ref h k d) d))
+
+(define (chase-apart? a b)
+  (let ((d (- a b)))
+    (if (< d 0.0) (> (- 0.0 d) 0.0001) (> d 0.0001))))
+
+(define (chase-blank)
+  (hash "speed" 2.1 "cool" 0.42 "at" 0.42 "commit" 7.5 "knob" 0 "prev" #f))
+
+(define (chase-cap pace)
+  (* (if (and (number? pace) (> pace 0.1)) (exact->inexact pace) 8.0)
+     CHASE-FRACTION))
+
+(define (chase-speed-ok? speed pace)
+  (and (number? speed)
+       (>= speed CHASE-SPEED-LO)
+       (< speed (chase-cap pace))
+       (< speed pace)))
+
+(define (chase-window params pace)
+  (let ((closing (+ pace (chase-get params "speed" 2.1)))
+        (commit (chase-get params "commit" 7.5)))
+    (if (<= closing 0.1)
+      0.0
+      (- (/ commit closing) LEAD-LANE))))
+
+; The window gates a faster chase. A keener pause does not change it,
+; and at the top pace the opening speed is already a hair under the
+; spare formula, so that pause can still be tried.
+(define (chase-bounds? params pace)
+  (let ((cool (chase-get params "cool" 0.0))
+        (at (chase-get params "at" 0.0))
+        (commit (chase-get params "commit" 0.0)))
+    (and (chase-speed-ok? (chase-get params "speed" 0.0) pace)
+         (>= cool CHASE-COOL-LO) (<= cool CHASE-COOL-HI)
+         (>= at CHASE-AT-LO) (<= at CHASE-AT-HI)
+         (>= commit CHASE-COMMIT-LO) (<= commit CHASE-COMMIT-HI))))
+
+(define (chase-raised? state params)
+  (> (chase-get params "speed" 0.0)
+     (+ (chase-get state "speed" 0.0) 0.0001)))
+
+(define (chase-same? a b)
+  (and (not (chase-apart? (chase-get a "speed" 0.0) (chase-get b "speed" 0.0)))
+       (not (chase-apart? (chase-get a "cool" 0.0) (chase-get b "cool" 0.0)))
+       (not (chase-apart? (chase-get a "at" 0.0) (chase-get b "at" 0.0)))
+       (not (chase-apart? (chase-get a "commit" 0.0) (chase-get b "commit" 0.0)))))
+
+(define (chase-changes state params)
+  (+ (if (chase-apart? (chase-get state "speed" 2.1) (chase-get params "speed" 2.1)) 1 0)
+     (if (chase-apart? (chase-get state "cool" 0.42) (chase-get params "cool" 0.42)) 1 0)
+     (if (chase-apart? (chase-get state "at" 0.42) (chase-get params "at" 0.42)) 1 0)
+     (if (chase-apart? (chase-get state "commit" 7.5) (chase-get params "commit" 7.5)) 1 0)))
+
+; Band 0's first row is the slide, the lane step, and the jump.
+; The rival waits until that stretch, plus a few metres, is behind.
+(define (opening-lesson-m)
+  (let ((rows (pattern-table 0)))
+    (if (not (pair? rows))
+      66.0
+      (let ((laid (layout-specs (car rows) 0.0 8.0)))
+        (if (pair? laid) (car (cdr laid)) 66.0)))))
+
+; Metres from the level start. Level 1 and form 0 stay past the lesson.
+(define (chase-place params span level form)
+  (let ((raw (* span (chase-get params "at" 0.42)))
+        (floor (if (or (<= form 0) (<= level 1))
+                 (+ (opening-lesson-m) 6.0)
+                 (* span CHASE-AT-LO))))
+    (if (> raw floor) raw floor)))
+
+(define (chase-look level)
+  (modulo level 3))
+
+(define (chase-look-name level)
+  (cond
+    ((= (chase-look level) 0) "fox")
+    ((= (chase-look level) 1) "bird")
+    (else "beetle")))
+
+(define (chase-mood form bumps recent)
+  (cond
+    ((>= bumps 2) "gentle")
+    ((>= recent 4) "gentle")
+    ((and (<= bumps 0) (>= form 1) (< recent 2)) "keen")
+    (else "hold")))
+
+(define (chase-knob-name k)
+  (cond ((= k 0) "speed") ((= k 1) "cool") (else "at")))
+
+(define (chase-nudge-speed speed pace commit mood)
+  (let ((cap (- (chase-cap pace) 0.05)))
+    (if (string=? mood "keen")
+      (let ((next (if (>= speed cap) speed (min (+ speed CHASE-SPEED-STEP) cap))))
+        (if (and (chase-speed-ok? next pace)
+                 (>= (chase-window (hash "speed" next "commit" commit) pace) SPARE-S))
+          next
+          speed))
+      (max (- speed CHASE-SPEED-STEP) CHASE-SPEED-LO))))
+
+(define (chase-nudge-cool cool mood)
+  (if (string=? mood "keen")
+    (max (- cool CHASE-COOL-STEP) CHASE-COOL-LO)
+    (min (+ cool CHASE-COOL-STEP) CHASE-COOL-HI)))
+
+(define (chase-nudge-at at mood)
+  (if (string=? mood "keen")
+    (max (- at CHASE-AT-STEP) CHASE-AT-LO)
+    (min (+ at CHASE-AT-STEP) CHASE-AT-HI)))
+
+(define (chase-params-of state speed cool at)
+  (hash "speed" speed
+        "cool" cool
+        "at" at
+        "commit" (chase-get state "commit" 7.5)))
+
+; One knob. If that knob is already at its bound, try the next.
+(define (chase-step state form bumps recent pace)
+  (let ((mood (chase-mood form bumps recent))
+        (knob (chase-get state "knob" 0)))
+    (if (string=? mood "hold")
+      (hash "moved" #f "why" "hold" "mood" mood "knob" knob "params" state)
+      (let loop ((k 0) (use knob))
+        (if (>= k 3)
+          (hash "moved" #f "why" "hold" "mood" mood "knob" knob "params" state)
+          (let* ((speed (chase-get state "speed" 2.1))
+                 (cool (chase-get state "cool" 0.42))
+                 (at (chase-get state "at" 0.42))
+                 (commit (chase-get state "commit" 7.5))
+                 (params (cond
+                           ((= use 0)
+                            (chase-params-of state
+                                             (chase-nudge-speed speed pace commit mood)
+                                             cool at))
+                           ((= use 1)
+                            (chase-params-of state speed
+                                             (chase-nudge-cool cool mood) at))
+                           (else
+                            (chase-params-of state speed cool
+                                             (chase-nudge-at at mood))))))
+            (if (chase-same? params state)
+              (loop (+ k 1) (modulo (+ use 1) 3))
+              (hash "moved" #t
+                    "why" (chase-knob-name use)
+                    "mood" mood
+                    "knob" (modulo (+ use 1) 3)
+                    "params" params))))))))
+
+(define (chase-keep state step)
+  (let ((params (hash-ref step "params" state)))
+    (hash "speed" (chase-get params "speed" 2.1)
+          "cool" (chase-get params "cool" 0.42)
+          "at" (chase-get params "at" 0.42)
+          "commit" (chase-get params "commit" 7.5)
+          "knob" (chase-get step "knob" 0)
+          "prev" (hash "speed" (chase-get state "speed" 2.1)
+                       "cool" (chase-get state "cool" 0.42)
+                       "at" (chase-get state "at" 0.42)
+                       "commit" (chase-get state "commit" 7.5)
+                       "knob" (chase-get state "knob" 0)))))
+
+(define (chase-undo state)
+  (let ((prev (chase-get state "prev" #f)))
+    (if (not (hash? prev))
+      state
+      (hash "speed" (chase-get prev "speed" 2.1)
+            "cool" (chase-get prev "cool" 0.42)
+            "at" (chase-get prev "at" 0.42)
+            "commit" (chase-get prev "commit" 7.5)
+            "knob" (chase-get prev "knob" 0)
+            "prev" #f))))
+
+(define (chase-sum recent)
+  (let loop ((xs recent) (n 0))
+    (if (or (not (pair? xs)) (null? xs))
+      n
+      (loop (cdr xs) (+ n (if (number? (car xs)) (car xs) 0))))))
+
+(define (chase-remember recent bumps)
+  (let ((n (if (and (number? bumps) (> bumps 0)) bumps 0))
+        (xs (cons n (if (pair? recent) recent (list)))))
+    (if (> (length xs) 3)
+      (list (car xs) (car (cdr xs)) (car (cdr (cdr xs))))
+      xs)))
+
+(define (chase-rival params x lane)
+  (piece 10.0 x 0.72 0.95 0.0
+         (exact->inexact lane)
+         0.0
+         (chase-get params "speed" 2.1)
+         (exact->inexact lane)
+         0.0
+         (chase-get params "cool" 0.42)
+         (chase-get params "commit" 7.5)))
+
+; A flat road and one rival on the centre lane. seal asks for all three,
+; already locked, so they cannot fold onto the hero's lane and leave a gap.
+(define (chase-pieces params)
+  (let ((ground (piece 1.0 0.0 64.0 0.45 0.0))
+        (x 28.0))
+    (if (chase-get params "seal" #f)
+      (let ((locked (hash "speed" (chase-get params "speed" 2.1)
+                          "cool" (chase-get params "cool" 0.42)
+                          "at" (chase-get params "at" 0.42)
+                          "commit" 40.0)))
+        (list ground
+              (chase-rival locked x 0)
+              (chase-rival locked x 1)
+              (chase-rival locked x 2)))
+      (list ground (chase-rival params x 1)))))
+
+(define (chase-near? x a)
+  (let ((d (- x a)))
+    (if (< d 0.0) (< (- 0.0 d) 1.5) (< d 1.5))))
+
+(define (chase-lane-at? pieces x lane)
+  (let loop ((ps pieces))
+    (if (or (not (pair? ps)) (null? ps))
+      #f
+      (let ((q (car ps)))
+        (if (and (= (piece-k q) 10.0)
+                 (chase-near? (piece-x q) x)
+                 (= (piece-lane q) lane))
+          #t
+          (loop (cdr ps)))))))
+
+(define (chase-sealed? pieces)
+  (let loop ((ps pieces))
+    (if (or (not (pair? ps)) (null? ps))
+      #f
+      (let ((q (car ps)))
+        (if (and (= (piece-k q) 10.0)
+                 (chase-lane-at? pieces (piece-x q) 0.0)
+                 (chase-lane-at? pieces (piece-x q) 1.0)
+                 (chase-lane-at? pieces (piece-x q) 2.0))
+          #t
+          (loop (cdr ps)))))))
+
+; Empty string means the numbers themselves are allowed.
+(define (chase-static-why state params pace)
+  (cond
+    ((or (chase-get params "seal" #f) (chase-sealed? (chase-pieces params))) "sealed")
+    ((not (chase-speed-ok? (chase-get params "speed" 0.0) pace)) "fast")
+    ((not (chase-bounds? params pace)) "bounds")
+    ((and (chase-raised? state params)
+          (< (chase-window params pace) SPARE-S))
+     "bounds")
+    ((> (chase-changes state params) 1) "step")
+    (else "")))
+
+(define (chase-clear? params rules)
+  (let ((pieces (chase-pieces params)))
+    (and (not (chase-sealed? pieces))
+         (autopilot-clear? pieces rules))))
+
+(define (chase-line kind mood)
+  (cond
+    ((string=? kind "ROLLBACK") "它还是原来的样子")
+    ((string=? mood "gentle") "它放慢了")
+    (else "它跑得更勤了")))
+
+(define (chase-audit kind why mood state)
+  (hash "op" "decision"
+        "kind" kind
+        "why" why
+        "arm" "chaser"
+        "cue" (chase-line kind mood)
+        "mark" "chaser"
+        "speed" (chase-get state "speed" 2.1)
+        "cool" (chase-get state "cool" 0.42)
+        "at" (chase-get state "at" 0.42)
+        "commit" (chase-get state "commit" 7.5)))
+
+; Full check used by the tests. The live tick slices the same course.
+(define (chase-consider state proposal rules)
+  (let ((pace (pace-of rules))
+        (why (chase-static-why state proposal pace)))
+    (if (not (string=? why ""))
+      (hash "kind" "ROLLBACK" "why" why "state" state
+            "cue" (chase-line "ROLLBACK" "hold"))
+      (if (chase-clear? proposal rules)
+        (let ((step (hash "moved" #t
+                          "why" "speed"
+                          "mood" "keen"
+                          "knob" (chase-get state "knob" 0)
+                          "params" proposal)))
+          (let ((kept (chase-keep state step)))
+            (hash "kind" "KEEP"
+                  "why" "fair"
+                  "state" kept
+                  "cue" (chase-line "KEEP" "keen"))))
+        (hash "kind" "ROLLBACK" "why" "reachable" "state" state
+              "cue" (chase-line "ROLLBACK" "hold"))))))

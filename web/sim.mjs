@@ -215,7 +215,8 @@ const RIVAL_COMMIT = 7.5;
 const RIVAL_COOL = 0.42;
 
 // Kind 10 runs toward the hero. Look, speed, aim lane, and cool sit at
-// [6] [7] [8] [9]. Far away it steps toward the hero's lane. Close in, it commits.
+// [6] [7] [8] [9]. Field 10 is the pause after a lane step. Field 11 is
+// the distance where it locks. Missing numbers keep the defaults.
 function stepRivals(pieces, p, dt) {
   const px = p[0];
   const want = p[9];
@@ -223,12 +224,16 @@ function stepRivals(pieces, p, dt) {
     const q = pieces[i];
     if (q[0] !== 10) continue;
     const spd = q.length > 7 ? q[7] : 2.2;
+    const coolMax = q.length > 10 && q[10] > 0 ? q[10] : RIVAL_COOL;
+    const commit = q.length > 11 && q[11] > 0 ? q[11] : RIVAL_COMMIT;
     const lane = q.length > 5 ? q[5] : 1;
     const aim = q.length > 8 ? q[8] : lane;
     let cool = Math.max(0, (q.length > 9 ? q[9] : 0) - dt);
     q[1] -= spd * dt;
     const ahead = q[1] - px;
-    if (ahead < RIVAL_COMMIT) {
+    q[10] = coolMax;
+    q[11] = commit;
+    if (ahead < commit) {
       q[9] = cool;
       continue;
     }
@@ -240,7 +245,7 @@ function stepRivals(pieces, p, dt) {
     const next = lane === aim1 ? lane : lane < aim1 ? lane + 1 : lane - 1;
     q[5] = next;
     q[8] = aim1;
-    q[9] = next === lane ? 0 : RIVAL_COOL;
+    q[9] = next === lane ? 0 : coolMax;
   }
 }
 

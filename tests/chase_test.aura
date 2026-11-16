@@ -1,0 +1,129 @@
+; The rival changes one small thing at a time. A sealed road or a chase
+; that is too fast puts the previous numbers back. The opening lesson
+; stays empty, and a twelve-step slice does not finish the proving road.
+(require "lib/chase")
+
+(define rules8 (rules-of 32.0 11.2 8.0 0.48 0.12 0.12))
+(define rules14 (rules-of 29.6 12.4 14.0 0.56 0.12 0.12))
+(define rules-card (rules-of 22.0 11.2 8.0 0.48 0.12 0.12 25.0 1.0 2.4))
+
+(define (expect name ok)
+  (display name)
+  (display " ")
+  (display (if ok 1 0))
+  (newline)
+  (if ok #t (error (string-append "chase: " name))))
+
+(define (near? a b)
+  (not (chase-apart? a b)))
+
+(define (climb state form pace n)
+  (if (<= n 0)
+    state
+    (let ((step (chase-step state form 0 0 pace)))
+      (if (hash-ref step "moved" #f)
+        (climb (chase-keep state step) form pace (- n 1))
+        state))))
+
+(define (friendly? n)
+  (let ((s (chase-look-name n)))
+    (or (string=? s "fox") (string=? s "bird") (string=? s "beetle"))))
+
+(define (clean-line? s)
+  (and (not (string-contains? s "猎杀"))
+       (not (string-contains? s "追击"))
+       (not (string-contains? s "恐怖"))
+       (not (banned? s))))
+
+(define blank (chase-blank))
+(define held (chase-step blank 0 0 0 8.0))
+(define lesson (opening-lesson-m))
+(define span8 (level-span 8.0))
+(define placed (chase-place blank span8 1 0))
+
+(expect "novice-hold" (not (hash-ref held "moved" #f)))
+(expect "novice-speed" (near? (hash-ref (hash-ref held "params" blank) "speed" 0.0) 2.1))
+(expect "lesson" (and (> lesson 40.0) (< lesson 90.0)))
+(expect "novice-place" (and (>= placed (+ lesson 5.9)) (< placed span8)))
+(expect "novice-bounds" (chase-bounds? blank 8.0))
+
+(define climbed (climb blank 4 8.0 40))
+(define sp (hash-ref climbed "speed" 0.0))
+(expect "skilled-speed" (and (> sp 3.0) (< sp (chase-cap 8.0)) (< sp 8.0)))
+(expect "skilled-window" (>= (chase-window climbed 8.0) SPARE-S))
+(expect "skilled-clear" (chase-clear? climbed rules8))
+
+(define high (climb blank 4 14.0 40))
+(define hsp (hash-ref high "speed" 0.0))
+(expect "high-speed" (and (< hsp (chase-cap 14.0)) (< hsp 14.0) (<= hsp 2.2)))
+(expect "high-keen" (or (<= (hash-ref high "cool" 1.0) 0.30)
+                        (<= (hash-ref high "at" 1.0) 0.34)))
+(expect "high-clear" (chase-clear? high rules14))
+
+(define top (hash "speed" (- (chase-cap 8.0) 0.05)
+                  "cool" 0.28 "at" 0.32 "commit" 7.5))
+(expect "top-cap" (and (chase-speed-ok? (hash-ref top "speed" 0.0) 8.0)
+                       (>= (chase-window top 8.0) SPARE-S)))
+(expect "top-clear" (chase-clear? top rules8))
+(expect "top-cards" (chase-clear? top rules-card))
+
+(define fast (chase-consider blank
+               (hash "speed" 20.0 "cool" 0.42 "at" 0.42 "commit" 7.5)
+               rules8))
+(expect "fast-back" (and (string=? (hash-ref fast "kind" "") "ROLLBACK")
+                         (string=? (hash-ref fast "why" "") "fast")
+                         (near? (hash-ref (hash-ref fast "state" blank) "speed" 0.0) 2.1)))
+
+(define sealed (chase-consider blank
+                 (hash "speed" 2.1 "cool" 0.42 "at" 0.42 "commit" 7.5 "seal" #t)
+                 rules8))
+(expect "sealed-back" (and (string=? (hash-ref sealed "kind" "") "ROLLBACK")
+                           (string=? (hash-ref sealed "why" "") "sealed")
+                           (chase-same? (hash-ref sealed "state" blank) blank)))
+
+(define stepped (chase-consider blank
+                  (hash "speed" 2.25 "cool" 0.36 "at" 0.42 "commit" 7.5)
+                  rules8))
+(expect "one-step" (and (string=? (hash-ref stepped "kind" "") "ROLLBACK")
+                        (string=? (hash-ref stepped "why" "") "step")
+                        (chase-same? (hash-ref stepped "state" blank) blank)))
+
+(define wide (chase-consider blank
+               (hash "speed" 4.0 "cool" 0.42 "at" 0.42 "commit" 7.5)
+               rules14))
+(expect "window" (and (string=? (hash-ref wide "kind" "") "ROLLBACK")
+                      (string=? (hash-ref wide "why" "") "bounds")
+                      (chase-same? (hash-ref wide "state" blank) blank)))
+
+(define s1 (chase-keep blank (chase-step blank 4 0 0 8.0)))
+(define s2 (chase-keep s1 (chase-step s1 4 0 0 8.0)))
+(define back (chase-undo s2))
+(expect "undo-first" (chase-same? back s1))
+(expect "undo-not-second" (not (chase-same? back s2)))
+(expect "undo-not-blank" (not (chase-same? back blank)))
+
+(define course (chase-pieces blank))
+(define sl (autopilot-slice course rules8 (make-player 0.4) course 0 12))
+(expect "slice" (and (not (car sl)) (= (car (cdr sl)) 12)))
+(expect "one-clear" (chase-clear? blank rules8))
+(expect "seal-die" (not (autopilot-clear?
+                          (chase-pieces (hash "speed" 2.1 "cool" 0.42 "at" 0.42
+                                              "commit" 7.5 "seal" #t))
+                          rules8)))
+
+(define gentle (chase-step blank 3 2 0 8.0))
+(expect "gentle-mood" (string=? (hash-ref gentle "mood" "") "gentle"))
+(expect "line-gentle" (and (string=? (chase-line "KEEP" "gentle") "它放慢了")
+                           (clean-line? (chase-line "KEEP" "gentle"))))
+(expect "line-keen" (and (string=? (chase-line "KEEP" "keen") "它跑得更勤了")
+                         (clean-line? (chase-line "KEEP" "keen"))))
+(expect "line-back" (and (string=? (chase-line "ROLLBACK" "hold") "它还是原来的样子")
+                         (clean-line? (chase-line "ROLLBACK" "hold"))))
+(expect "looks" (and (friendly? 0) (friendly? 1) (friendly? 2) (friendly? 3)))
+
+(define row (chase-audit "ROLLBACK" "fast" "hold" blank))
+(expect "audit-op" (string=? (hash-ref row "op" "") "decision"))
+(expect "audit-arm" (string=? (hash-ref row "arm" "") "chaser"))
+(expect "audit-kind" (string=? (hash-ref row "kind" "") "ROLLBACK"))
+
+(void)
