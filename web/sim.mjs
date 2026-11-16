@@ -17,7 +17,8 @@ const DRAG_SCALE = 0.45;
 const BUMP_COST = 15;
 
 export function makePlayer(x) {
-  const p = new Float64Array(15);
+  // Field 15 is air-left. It stays 0 unless rules.air asks for one more jump.
+  const p = new Float64Array(16);
   p[0] = x;
   p[4] = 0.12;
   p[5] = 1;
@@ -109,7 +110,44 @@ function easeLane(p, dt) {
 }
 
 export function rulesOf(g, jump, speed, slide, coyote, forgive) {
-  return { g, jump, speed, slide, coyote, forgive, ph: 1.05, pw: 0.56, sh: 0.46, worth: 25 };
+  return {
+    g, jump, speed, slide, coyote, forgive,
+    ph: 1.05, pw: 0.56, sh: 0.46, worth: 25, air: 0, magnet: 0,
+  };
+}
+
+const MAGNET_V = 8;
+
+function rulesAir(rules) {
+  return rules.air >= 1 ? 1 : 0;
+}
+
+function rulesMagnet(rules) {
+  return rules.magnet > 0 ? rules.magnet : 0;
+}
+
+// Kind 5 only. Radius 0 leaves every piece where it is.
+function pullPickups(pieces, p, dt, radius) {
+  if (!(radius > 0)) return;
+  const px = p[0];
+  const bl = bodyLane(p);
+  const r2 = radius * radius;
+  const cap = MAGNET_V * dt;
+  for (let i = 0; i < pieces.length; i++) {
+    const q = pieces[i];
+    if (q[0] !== 5) continue;
+    const w = q[2];
+    const cx = q[1] + w * 0.5;
+    const pl = q.length > 5 ? q[5] : -1;
+    const lat = pl < -0.5 ? 0 : (pl - bl) * LANE_W;
+    const dx = px - cx;
+    if (dx * dx + lat * lat > r2) continue;
+    const adx = dx < 0 ? -dx : dx;
+    const step = adx > cap ? cap : adx;
+    const sign = dx < 0 ? -1 : 1;
+    q[1] = q[1] + sign * step;
+    if (pl >= 0) q[5] = bl;
+  }
 }
 
 function pickupWorth(rules) {
@@ -277,8 +315,10 @@ export function step(p, pieces, rules, dt) {
   nudgeFlyers(pieces, dt);
   stepRivals(pieces, p, dt);
   stepPoppers(pieces, p, dt);
+  pullPickups(pieces, p, dt, rulesMagnet(rules));
   const g = rules.g;
   const jump = rules.jump;
+  const air = rulesAir(rules);
   const speed = runSpeed(rules.speed, p);
   const slideDur = rules.slide;
   const coyoteMax = rules.coyote;
@@ -288,17 +328,25 @@ export function step(p, pieces, rules, dt) {
   const grounded = p[1] <= 0.0001 && !overGap(p[0], bodyLane(p), pieces);
   if (grounded) p[4] = coyoteMax;
   else p[4] = Math.max(0, p[4] - dt);
-  const canJump = grounded || p[4] > 0;
-  const jumped = p[7] > 0 && canJump;
-  if (jumped) {
+  // Ground jump uses jump. One air jump while p[15] is 1. A third press
+  // before landing does not launch.
+  const canGround = grounded || p[4] > 0;
+  const buffered = p[7] > 0;
+  const bank = air < 1 ? 0 : (grounded ? 1 : p[15]);
+  const groundJump = buffered && canGround;
+  const airJump = buffered && !groundJump && bank >= 1;
+  if (groundJump || airJump) {
     p[2] = 0;
     p[4] = 0;
     p[7] = 0;
     p[3] = 0;
     p[14] = TAKEOFF_S;
     if (p[1] < 0) p[1] = 0;
+    p[15] = groundJump && air >= 1 ? 1 : 0;
+  } else if (air >= 1 && grounded) {
+    p[15] = 1;
   }
-  if (p[8] > 0 && grounded && !jumped) {
+  if (p[8] > 0 && grounded && !groundJump && !airJump) {
     p[3] = slideDur;
     p[8] = 0;
   }

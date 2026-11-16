@@ -1,0 +1,103 @@
+; Rule cards. A deck names up to three hot rules. The live run does not
+; change until a sliced trial keeps the deck. Numbers here are the
+; contract: light gravity is 22, inside the band that still lands and
+; still clears a hurdle. Heavier than 40 or lighter than 18 is refused.
+; Jump below 9 or above 16 is refused the same way.
+(require "std/string" all:)
+
+(define CARD-LIGHT-G 22.0)
+(define CARD-MAGNET-R 2.4)
+(define CARD-G-MIN 18.0)
+(define CARD-G-MAX 40.0)
+(define CARD-JUMP-MIN 9.0)
+(define CARD-JUMP-MAX 16.0)
+(define CARD-VER "1")
+
+(define (bounds-ok? g jump)
+  (and (number? g) (number? jump)
+       (>= g CARD-G-MIN) (<= g CARD-G-MAX)
+       (>= jump CARD-JUMP-MIN) (<= jump CARD-JUMP-MAX)))
+
+(define (card-base s)
+  (if (not (string? s))
+    ""
+    (let ((i (string-find s ".")))
+      (if (< i 0) s (substring s 0 i)))))
+
+(define (card-ver s)
+  (if (not (string? s))
+    ""
+    (let ((i (string-find s ".")))
+      (if (< i 0) CARD-VER (substring s (+ i 1) (string-length s))))))
+
+(define (card-known? s)
+  (or (string=? s "light") (string=? s "double") (string=? s "magnet")))
+
+(define (has-id? ids name)
+  (let loop ((xs ids))
+    (if (or (not (pair? xs)) (null? xs))
+      #f
+      (if (and (string? (car xs)) (string=? (car xs) name))
+        #t
+        (loop (cdr xs))))))
+
+; Unknown id, a version other than 1, or more than three names refuses
+; the whole deck. Duplicates count once. Order is light, double, magnet.
+(define (flag-ids light double magnet)
+  (append (if light (list "light") (list))
+          (append (if double (list "double") (list))
+                  (if magnet (list "magnet") (list)))))
+
+(define (parse-deck raw)
+  (let loop ((xs raw) (n 0) (light #f) (double #f) (magnet #f))
+    (if (or (not (pair? xs)) (null? xs))
+      (if (> n 3)
+        #f
+        (flag-ids light double magnet))
+      (let ((s (car xs)))
+        (if (not (and (string? s) (card-known? (card-base s)) (string=? (card-ver s) CARD-VER)))
+          #f
+          (let ((base (card-base s)))
+            (cond
+              ((string=? base "light") (loop (cdr xs) (+ n 1) #t double magnet))
+              ((string=? base "double") (loop (cdr xs) (+ n 1) light #t magnet))
+              (else (loop (cdr xs) (+ n 1) light double #t)))))))))
+
+(define (cards-spec ids g-feel jump)
+  (let ((parsed (parse-deck ids)))
+    (if (not parsed)
+      (hash "ok" #f "why" "deck" "g" g-feel "air" 0.0 "magnet" 0.0 "ids" (list))
+      (let ((g (if (has-id? parsed "light") CARD-LIGHT-G g-feel))
+            (air (if (has-id? parsed "double") 1.0 0.0))
+            (mag (if (has-id? parsed "magnet") CARD-MAGNET-R 0.0)))
+        (if (not (bounds-ok? g jump))
+          (hash "ok" #f "why" "bounds" "g" g-feel "air" 0.0 "magnet" 0.0 "ids" (list))
+          (hash "ok" #t "why" "fair" "g" g "air" air "magnet" mag "ids" parsed))))))
+
+; A refused deck returns the previous tuple. Nothing in the tuple moves
+; until ok is true, which is the rollback the page asks for.
+(define (commit-deck prev ids g-feel jump)
+  (let ((spec (cards-spec ids g-feel jump)))
+    (if (hash-ref spec "ok" #f)
+      (list (hash-ref spec "g") (hash-ref spec "air") (hash-ref spec "magnet") (hash-ref spec "ids"))
+      prev)))
+
+(define (deck-same? a b)
+  (equal? a b))
+
+(define (join-cards ids)
+  (let loop ((xs ids) (b ""))
+    (if (or (not (pair? xs)) (null? xs))
+      b
+      (let ((one (string-append (car xs) "." CARD-VER)))
+        (loop (cdr xs) (if (string=? b "") one (string-append b "," one)))))))
+
+(define (seed-token n)
+  (let ((s (number->string (floor (exact->inexact (if (number? n) n 1))))))
+    (if (string-suffix? s ".0")
+      (substring s 0 (- (string-length s) 2))
+      s)))
+
+; Seed and card ids with versions. No key, no audio, no source.
+(define (share-query seed ids)
+  (string-append "seed=" (seed-token seed) "&cards=" (join-cards ids)))

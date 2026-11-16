@@ -380,16 +380,22 @@
 
 ; Takeoff pushes at jump/TAKEOFF-S for TAKEOFF-S, then gravity.
 ; Apex adds the height gained while speeding up. Air time adds that push.
+; One jump, or two when the double-jump card is on. The second launch
+; is taken at the top of the first, so the gate has to be scored again
+; under that physics. Air 0 keeps the single-jump numbers.
 (define (jump-apex rules)
   (let ((v (hash-ref rules "jump"))
-        (g (hash-ref rules "g")))
-    (+ (* 0.5 v TAKEOFF-S) (/ (* v v) (* 2.0 g)))))
+        (g (hash-ref rules "g"))
+        (one (+ (* 0.5 v TAKEOFF-S) (/ (* v v) (* 2.0 g)))))
+    (if (>= (rules-air rules) 1.0) (* 2.0 one) one)))
 
 (define (jump-distance rules)
   (let ((v (hash-ref rules "jump"))
         (g (hash-ref rules "g"))
         (s (hash-ref rules "speed")))
-    (* s (+ TAKEOFF-S (/ (* 2.0 v) g)))))
+    (if (>= (rules-air rules) 1.0)
+      (* s (+ (* 2.0 TAKEOFF-S) (/ (* 3.0 v) g)))
+      (* s (+ TAKEOFF-S (/ (* 2.0 v) g))))))
 
 (define (pace-of rules)
   (let ((s (hash-ref rules "speed" REF-SPEED)))
@@ -476,6 +482,8 @@
         "ph" (hash-ref rules "ph")
         "pw" (hash-ref rules "pw")
         "sh" (hash-ref rules "sh")
+        "air" (hash-ref rules "air" 0.0)
+        "magnet" (hash-ref rules "magnet" 0.0)
         "strict" #t))
 
 ; Run `budget` autopilot steps. Returns

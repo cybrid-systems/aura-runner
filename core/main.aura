@@ -11,6 +11,7 @@
 (require "lib/scene")
 (require "lib/pals")
 (require "lib/review")
+(require "lib/cards")
 
 (define SYS
   "You design one obstacle phrase for a children's 3D endless runner called Lumen Run. The runner has three lanes (0 left, 1 centre, 2 right), jumps, and slides. No markdown. Allowed pieces: (seq (ground W) (gap W) (hurdle H W) (gate BOTTOM W) (coin Y) (spring W) (block LANE DEPTH) (coin-lane LANE Y)). Every parameter is a number; never write the words BOTTOM, W, H, LANE, DEPTH or other placeholders. Ranges in meters: spring W 0.45-1.6, hurdle W 0.35-2.2 and H 0.15-0.9, gate W 0.35-2.0 and BOTTOM 0.58-0.85, coin Y 0.4-2.4, coin-lane LANE 0, 1 or 2 and Y 0.4-2.4, ground W 0.8-18, gap W 0.4-2.0, block LANE 0, 1 or 2 and DEPTH 0.5-2.2. Optional (loot KIND) restyles every pickup. KIND is coin, star, gem, blossom, or apple. Optional (bend AMP) turns the road. AMP is 0.12 to 0.65. Start and end with ground. Leave at least one lane open beside every block. No violence, fear, weapons, or scary words. Bright garden, friendly shapes. First write one short bright English sentence with no parentheses, then the s-expression. That sentence is what the child reads. A ground of 10.4 is one beat, about 1.3 seconds, and a ground of 4.8 is a short rest. Leave a full beat of ground before a jump. Optional (flyer KIND LANE Y) sends one gentle toy flying toward the runner along one lane. KIND is plane, bubble, lantern, leaf, or ball. LANE is 0, 1 or 2. Y is 0.55 to 0.85. At most two flyers, and never on every lane at once. Optional last word on a hurdle, a gate, or a block picks its look. A hurdle is bar, log, fence, bloom, or drum. A gate is bar, ribbon, vine, lights, or scarf. A block is pot, stump, mushroom, crate, or bush. A low wide shape is a jump, a bar with room underneath is a slide, and one tall shape in a single lane is a lane change. Recolor a shape freely. One beat holds one move. Example: (seq (ground 6) (block 0 1) (hurdle 0.4 0.7) (ground 5) (gate 0.72 0.8) (ground 5) (gap 1.1) (ground 5))")
@@ -51,6 +52,11 @@
 (define bend-now 0.38)
 (define loot-now "coin")
 (define speed-lock #f)
+; The light card holds gravity. Pace may still change jump, slide and speed.
+(define g-lock #f)
+(define air-now 0.0)
+(define magnet-now 0.0)
+(define deck-ids (list))
 (define rule-rev 1)
 (define publish-via "set-code")
 
@@ -73,6 +79,8 @@
 (define published-jump jump-now)
 (define published-slide slide-now)
 (define published-speed speed-now)
+(define published-air 0.0)
+(define published-magnet 0.0)
 (define acc 0.0)
 (define last-ms 0)
 (define audit (list))
@@ -131,10 +139,10 @@
 
 (define (rules-hash)
   (rules-of g-now jump-now speed-now slide-now coyote-now forgive-now
-            (loot-worth loot-now)))
+            (loot-worth loot-now) air-now magnet-now))
 
 (define (full-src)
-  (hot-source g-now jump-now slide-now speed-now coyote-now forgive-now hue-now motif-now scene-now pals-now))
+  (hot-source g-now jump-now slide-now speed-now coyote-now forgive-now hue-now motif-now scene-now pals-now air-now magnet-now))
 
 (define (rule-body n)
   (string-append "(lambda () " (num-src n) ")"))
@@ -173,6 +181,18 @@
 (define hold-geom 0.0)
 (define hold-budget 0.0)
 (define hold-margin 0.0)
+; A deck waits here. Twelve autopilot steps a tick, then one trial.
+; Feel does not change until that trial keeps the deck.
+(define card-phase 0)
+(define card-pieces (list))
+(define card-sim (list))
+(define card-body #f)
+(define card-i 0)
+(define card-rules #f)
+(define card-spec #f)
+(define card-geom 0.0)
+(define card-budget 0.0)
+(define card-margin 0.0)
 (define tuned #f)
 
 (define (publish-named! name value)
@@ -437,7 +457,9 @@
   (set! published-g g-now)
   (set! published-jump jump-now)
   (set! published-slide slide-now)
-  (set! published-speed speed-now))
+  (set! published-speed speed-now)
+  (set! published-air air-now)
+  (set! published-magnet magnet-now))
 
 (define (apply-feel! why)
   ; The pace numbers move even while a POST is in flight. The rebind
@@ -445,7 +467,7 @@
   (if (string=? why "tutorial")
     why
     (let ((f (feel-for band)))
-    (let ((ng (feel-g f))
+    (let ((ng (if g-lock CARD-LIGHT-G (feel-g f)))
           (nj (feel-jump f))
           (nsl (feel-slide f))
           (nv (feel-speed f)))
@@ -588,6 +610,8 @@
   (publish-named! "rule-slide-s" slide-now)
   (publish-named! "rule-run-speed" speed-now)
   (publish-named! "rule-hue" hue-now)
+  (publish-named! "rule-double-jump" air-now)
+  (publish-named! "rule-magnet" magnet-now)
   (let ((how (publish-rule! "motif-form" (motif-body motif-now) (full-src))))
     (set! publish-via how)
     (set! rule-rev (+ rule-rev 1))
@@ -627,9 +651,10 @@
   (set! acc 0.0)
   (set! last-ms 0)
   (set! cleared (list))
-  (set! g-now (feel-g opening-feel))
+  (set! g-now (if g-lock CARD-LIGHT-G (feel-g opening-feel)))
   (set! jump-now (feel-jump opening-feel))
   (set! slide-now (feel-slide opening-feel))
+  (set! card-phase 0)
   (set! hue-now 0.0)
   (set! motif-now "")
   (set! motif-pieces (list))
@@ -675,6 +700,7 @@
 (define (rules-msg)
   (hash "op" "rules" "rev" rule-rev
         "g" g-now "jump" jump-now "speed" speed-now
+        "air" air-now "magnet" magnet-now
         "slide" slide-now "coyote" coyote-now "forgive" forgive-now
         "hue" hue-now "ph" 1.05 "pw" 0.56 "sh" 0.46
         "via" publish-via
@@ -693,6 +719,7 @@
         "replay" (string-append "LUMEN-" (int-str seed))
         "rev" rule-rev "via" publish-via
         "g" g-now "jump" jump-now "speed" speed-now
+        "air" air-now "magnet" magnet-now
         "slide" slide-now "coyote" coyote-now "forgive" forgive-now
         "hue" hue-now "ph" 1.05 "pw" 0.56 "sh" 0.46
         "sky" (list sky-r sky-g sky-b)
@@ -722,6 +749,8 @@
         "band" band
         "g" g-now
         "jump" jump-now
+        "air" air-now
+        "magnet" magnet-now
         "speed" speed-now
         "worth" (loot-worth loot-now)
         "pace" pace
@@ -1292,8 +1321,142 @@
 ; A new dream starts only while the run is alive, a couple of seconds in.
 ; A phrase the model just sent goes first, so the two autopilots do not
 ; share a tick.
+(define (id-list v)
+  (cond
+    ((string? v) (list v))
+    ((null? v) (list))
+    ((pair? v) v)
+    (else (list))))
+
+(define (cards-rollback! why)
+  (note! "ROLLBACK" why "cards" "这样合在一起过不去" "cards"))
+
+; The candidate rules are not live yet. A deck that fails the layout,
+; or that names a gravity or jump outside the card bounds, leaves the
+; bindings alone.
+(define (begin-cards! msg)
+  (let ((ids (id-list (hash-ref msg "ids" (list)))))
+    (let ((spec (cards-spec ids (feel-g (feel-for band)) jump-now)))
+      (if (not (hash-ref spec "ok" #f))
+        (cards-rollback! (hash-ref spec "why" "deck"))
+        (if (deck-same? (hash-ref spec "ids" (list)) deck-ids)
+          #t
+          (let ((form (if (and (string? motif-now) (> (string-length motif-now) 0))
+                        motif-now
+                        (pattern-form seed next-id band))))
+            (let ((rules (rules-of (hash-ref spec "g") jump-now speed-now slide-now
+                                   coyote-now forgive-now (loot-worth loot-now)
+                                   (hash-ref spec "air") (hash-ref spec "magnet"))))
+              (let ((laid (layout-form form rules)))
+                (if (not (layout-fair? laid))
+                  (cards-rollback!
+                    (if (and (hash? laid) (> (hash-ref laid "geometry" 0.0) 0.0))
+                      "geometry"
+                      "reachable"))
+                  (begin
+                    (set! card-spec spec)
+                    (set! card-rules rules)
+                    (set! card-geom (hash-ref laid "geometry" 0.0))
+                    (set! card-budget (hash-ref laid "budget" 0.0))
+                    (set! card-margin (hash-ref laid "margin" 0.0))
+                    (set! card-pieces (hash-ref laid "pieces"))
+                    (set! card-sim card-pieces)
+                    (set! card-body (make-player 0.4))
+                    (set! card-i 0)
+                    (set! card-phase 1)
+                    #t))))))))))
+
+(define (publish-trio! g air mag)
+  (let ((a (publish-named! "rule-double-jump" air))
+        (m (publish-named! "rule-magnet" mag))
+        (ghow (publish-named! "rule-gravity" g)))
+    (and (not (string=? a "fail"))
+         (not (string=? m "fail"))
+         (not (string=? ghow "fail")))))
+
+(define (seal-cards! cleared?)
+  (let* ((spec card-spec)
+         (geom card-geom)
+         (budget card-budget)
+         (margin card-margin)
+         (fair (and cleared?
+                    (<= geom 0.0)
+                    (<= budget 0.0)
+                    (>= margin SPARE-S))))
+    (let* ((ids (if (hash? spec) (hash-ref spec "ids" (list)) (list)))
+           (label (if (null? ids) "plain" (join-cards ids)))
+           (cand (evo:candidate label (hash "id" (string-append "c" (int-str next-id))
+                                             "target" "rule-gravity")))
+           (trial (open-trial cand
+                              (hash "timeout-ms" 1500
+                                    "apply" (lambda (c) #t)
+                                    "evaluate"
+                                    (lambda (c)
+                                      (hash "status" "ok"
+                                            "objectives" (hash "fair" (if fair 1.0 0.0))
+                                            "constraints"
+                                            (hash "budget" budget
+                                                  "geometry" geom
+                                                  "reachable" (if fair 0.0 1.0)
+                                                  "safe" 0.0)
+                                            "behavior" (hash "band" (exact->inexact band))))))))
+      (if (trial-busy? trial)
+        #f
+        (begin
+          (if (or (not fair)
+                  (not trial) (not (evo:trial-ok? trial)) (not (evo:feasible? trial)))
+            (note! "ROLLBACK" "reachable" "cards" "这样合在一起过不去" "cards")
+            (let ((prev-g g-now)
+                  (prev-air air-now)
+                  (prev-mag magnet-now)
+                  (prev-lock g-lock)
+                  (prev-ids deck-ids)
+                  (new-g (hash-ref spec "g"))
+                  (new-air (hash-ref spec "air"))
+                  (new-mag (hash-ref spec "magnet")))
+              (set! g-now new-g)
+              (set! air-now new-air)
+              (set! magnet-now new-mag)
+              (set! g-lock (has-id? ids "light"))
+              (set! deck-ids ids)
+              (set! tuned #t)
+              (if (publish-trio! new-g new-air new-mag)
+                (begin
+                  (set! published-g g-now)
+                  (set! published-air air-now)
+                  (set! published-magnet magnet-now)
+                  (note! "KEEP" "fair" "cards" "这几张可以一起用" "cards"))
+                (begin
+                  (set! g-now prev-g)
+                  (set! air-now prev-air)
+                  (set! magnet-now prev-mag)
+                  (set! g-lock prev-lock)
+                  (set! deck-ids prev-ids)
+                  (publish-trio! prev-g prev-air prev-mag)
+                  (note! "ROLLBACK" "commit" "cards" "这样合在一起过不去" "cards")))))
+          (release-slot!)
+          #t)))))
+
+(define (step-cards!)
+  (let ((rules (if (hash? card-rules) card-rules (rules-hash))))
+    (let ((r (autopilot-slice card-pieces rules card-body card-sim card-i 12)))
+      (set! card-i (lref r 1))
+      (set! card-body (lref r 2))
+      (set! card-sim (lref r 3))
+      (if (and (lref r 0) (not (chat-open?))
+               (seal-cards! (if (lref r 4) #t #f)))
+        (set! card-phase 0)
+        #f))))
+
+; One slice a tick. A phrase already in its slice goes first, so the
+; two walks do not share the tick.
+(define (maybe-cards!)
+  (if (or (= card-phase 0) (> hold-phase 0))
+    #f
+    (step-cards!)))
+
 (define (maybe-dream!)
-  (if (or (env-on? "LUMEN_SKIP_DREAM") (> hold-phase 0) (llm-posting?) (chat-open?))
+  (if (or (env-on? "LUMEN_SKIP_DREAM") (> hold-phase 0) (> card-phase 0) (llm-posting?) (chat-open?))
     #f
     (cond
       ((= dream-phase 1) (step-dream!))
@@ -1813,7 +1976,7 @@
             (set! band fm)
             (set! player (pset player 6 pts))
             (let ((f (feel-for band)))
-              (set! g-now (feel-g f))
+              (set! g-now (if g-lock CARD-LIGHT-G (feel-g f)))
               (set! jump-now (feel-jump f))
               (set! slide-now (feel-slide f))
               (if (not speed-lock) (set! speed-now (feel-speed f)) #f))
@@ -1874,6 +2037,7 @@
       #f)
     (advance-pace!)
     (maybe-hold!)
+    (maybe-cards!)
     (maybe-dream!)
     (maybe-guests!)
     (ensure-ahead!)
@@ -1886,6 +2050,19 @@
     ; note sent after it can sit unread when the deadline lands on that tick.
     (flush-notes! c)
     (send c (state-msg ev))))
+
+(define (on-cards c msg)
+  (let ((act (hash-ref msg "action" "equip")))
+    (if (and (string? act) (string=? act "export"))
+      (send c (hash "op" "cards" "action" "export"
+                    "seed" seed
+                    "cards" deck-ids
+                    "query" (share-query seed deck-ids)))
+      (if (and (string? act) (string=? act "equip"))
+        (begin
+          (begin-cards! msg)
+          (flush-notes! c))
+        (send c (hash "op" "err" "why" "bad-cards"))))))
 
 (define (on-rebind c msg)
   (let ((name (hash-ref msg "name" ""))
@@ -2080,6 +2257,7 @@
            (set! stall-waiting #f))
          #f))
       ((string=? op "rebind") (on-rebind c msg))
+      ((string=? op "cards") (on-cards c msg))
       ((string=? op "propose") (on-propose c msg))
       ((string=? op "provider") (on-provider c msg))
       ((string=? op "audit") (on-audit c msg))

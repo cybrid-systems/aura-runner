@@ -9,7 +9,10 @@
 ; exact integers truncates (docs/stdlib/division.md).
 ;
 ; Player: (x y vy slide-left coyote alive score jump-buffer slide-buffer
-;          lane lx grace drag lvx thrust)
+;          lane lx grace drag lvx thrust air-left)
+;   air-left is 1 when one extra jump is still available. It stays 0
+;   unless the rules ask for a double jump, so a normal trace is the
+;   same motion. The ward is still not a field.
 ;   grace is seconds of invulnerability after a bump or a gap.
 ;   drag is seconds of a slower pace after an obstacle. A gap recovery
 ;   clears it, so "Back on the path" does not stick the pace.
@@ -38,14 +41,15 @@
 (define LANE-V 16.0)
 
 (define (make-player x)
-  (list x 0.0 0.0 0.0 0.12 1.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 0.0))
+  (list x 0.0 0.0 0.0 0.12 1.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0))
 
 (define GRACE-S 1.5)
 (define DRAG-S 1.15)
 (define DRAG-SCALE 0.45)
 (define BUMP-COST 15.0)
 
-; The player stays a 15-field list, so the golden trace is unchanged.
+; Field 15 is the extra jump. A normal run leaves it at 0, so the
+; golden trace of x, y and vy stays the same. The ward stays outside.
 ; list-ref and a scratch vector keep a step from walking that spine
 ; once per field. The vector dies inside pset.
 (define (pxs p i)
@@ -226,14 +230,77 @@
 (define (piece->list q) q)
 
 ; Worth is the points a pickup adds. Callers that omit it keep a coin at 25.
+(define (rest-nth rest i fallback)
+  (let loop ((xs rest) (n 0))
+    (if (or (not (pair? xs)) (null? xs))
+      fallback
+      (if (= n i)
+        (if (number? (car xs)) (exact->inexact (car xs)) fallback)
+        (loop (cdr xs) (+ n 1))))))
+
+; Worth, then extra jumps (0 or 1), then magnet radius. Callers that
+; omit the tail keep a coin at 25 and no card effects.
 (define (rules-of g jump speed slide coyote forgive . rest)
-  (let ((worth (if (and (pair? rest) (number? (car rest)) (> (car rest) 0.0))
-                 (exact->inexact (car rest))
-                 25.0)))
+  (let ((worth (rest-nth rest 0 25.0))
+        (air (rest-nth rest 1 0.0))
+        (magnet (rest-nth rest 2 0.0)))
     (hash "g" g "jump" jump "speed" speed "slide" slide
           "coyote" coyote "forgive" forgive
           "ph" 1.05 "pw" 0.56 "sh" 0.46
-          "worth" worth)))
+          "worth" (if (> worth 0.0) worth 25.0)
+          "air" (if (>= air 1.0) 1.0 0.0)
+          "magnet" (if (> magnet 0.0) magnet 0.0))))
+
+(define (rules-air rules)
+  (let ((n (hash-ref rules "air" 0.0)))
+    (if (and (number? n) (>= n 1.0)) 1.0 0.0)))
+
+(define (rules-magnet rules)
+  (let ((n (hash-ref rules "magnet" 0.0)))
+    (if (and (number? n) (> n 0.0)) n 0.0)))
+
+; One jump from the ground or from the air. left is the extra jump
+; still banked after this launch: 1 after the ground jump, 0 after the
+; air jump. A third press finds 0 and does not launch.
+(define (launch-jump p left)
+  (let ((launched (pset (pset (pset (pset (pset p 2 0.0) 4 0.0) 7 0.0) 3 0.0) 14 TAKEOFF-S)))
+    (let ((up (if (< (player-y launched) 0.0) (pset launched 1 0.0) launched)))
+      (pset up 15 left))))
+
+; Pull speed. Only kind 5 (coin, star, gem, blossom, apple) moves.
+; A gap, a hurdle, a rival, or a popper is copied through.
+(define MAGNET-V 8.0)
+
+(define (pull-one q px bl dt radius)
+  (if (not (= (piece-k q) 5.0))
+    q
+    (let* ((w (piece-w q))
+           (cx (+ (piece-x q) (* w 0.5)))
+           (pl (piece-lane q))
+           (lat (if (< pl -0.5) 0.0 (* (- pl bl) LANE-W)))
+           (dx (- px cx))
+           (r2 (* radius radius)))
+      (if (> (+ (* dx dx) (* lat lat)) r2)
+        q
+        (let* ((cap (* MAGNET-V dt))
+               (adx (if (< dx 0.0) (- 0.0 dx) dx))
+               (step (if (> adx cap) cap adx))
+               (sign (if (< dx 0.0) -1.0 1.0))
+               (nx (+ (piece-x q) (* sign step)))
+               (nlane (if (>= pl 0.0) bl pl)))
+          (piece 5.0 nx w (piece-h q) (piece-y q) nlane))))))
+
+; Radius 0 returns the same list, so a run with the magnet off does
+; not rebuild pieces and the pull stops on the same step it is cleared.
+(define (pull-pickups pieces p dt radius)
+  (if (or (not (number? radius)) (<= radius 0.0))
+    pieces
+    (let ((px (player-x p))
+          (bl (body-lane p)))
+      (let loop ((ps pieces) (acc (list)))
+        (if (null? ps)
+          (reverse acc)
+          (loop (cdr ps) (cons (pull-one (car ps) px bl dt radius) acc)))))))
 
 (define (pickup-worth rules)
   (let ((n (hash-ref rules "worth" 25.0)))
@@ -351,9 +418,12 @@
 (define (step p pieces rules dt)
   (if (<= (pxs p 5) 0.0)
     (list p pieces "dead")
-    (let ((pieces (step-poppers (step-rivals (nudge-flyers pieces dt) p dt) p dt)))
+    (let ((pieces (pull-pickups
+                    (step-poppers (step-rivals (nudge-flyers pieces dt) p dt) p dt)
+                    p dt (rules-magnet rules))))
     (let* ((g (hash-ref rules "g"))
            (jump (hash-ref rules "jump"))
+           (air (rules-air rules))
            (speed (run-speed (hash-ref rules "speed") p))
            (slide-dur (hash-ref rules "slide"))
            (coyote-max (hash-ref rules "coyote"))
@@ -365,13 +435,20 @@
            (p3 (if grounded
                  (pset p2 4 coyote-max)
                  (pset p2 4 (max 0.0 (- (pxs p2 4) dt)))))
-           (can-jump (or grounded (> (pxs p3 4) 0.0)))
-           (jumped (and (> (pxs p3 7) 0.0) can-jump))
-           (p4 (if jumped
-                 (let ((launched (pset (pset (pset (pset (pset p3 2 0.0) 4 0.0) 7 0.0) 3 0.0) 14 TAKEOFF-S)))
-                   (if (< (player-y launched) 0.0) (pset launched 1 0.0) launched))
-                 p3))
-           (p5 (if (and (> (pxs p4 8) 0.0) grounded (not jumped))
+           ; The ground jump still uses rule-jump-v. One more launch is
+           ; allowed while air-left is 1. The press after that does nothing
+           ; until the runner is back on the ground.
+           (can-ground (or grounded (> (pxs p3 4) 0.0)))
+           (buffered (> (pxs p3 7) 0.0))
+           (bank (if (< air 1.0) 0.0 (if grounded 1.0 (pxs p3 15))))
+           (ground-jump (and buffered can-ground))
+           (air-jump (and buffered (not ground-jump) (>= bank 1.0)))
+           (p4 (cond
+                 (ground-jump (launch-jump p3 (if (>= air 1.0) 1.0 0.0)))
+                 (air-jump (launch-jump p3 0.0))
+                 ((and (>= air 1.0) grounded) (pset p3 15 1.0))
+                 (else p3)))
+           (p5 (if (and (> (pxs p4 8) 0.0) grounded (not ground-jump))
                  (pset (pset p4 3 slide-dur) 8 0.0)
                  p4))
            (p6 (if (> (pxs p5 3) 0.0)

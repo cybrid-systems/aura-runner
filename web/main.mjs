@@ -213,6 +213,8 @@ function applyRules(msg) {
     num(msg.coyote, rules.coyote),
     num(msg.forgive, rules.forgive),
   );
+  rules.air = num(msg.air, rules.air || 0);
+  rules.magnet = num(msg.magnet, rules.magnet || 0);
   if (typeof msg.hue === "number") hue = msg.hue;
   applyScene(msg);
   applyLook(msg);
@@ -379,6 +381,7 @@ function applyLevel(msg) {
   if (typeof msg.goal === "number") levelGoal = msg.goal;
   if (typeof msg.level0 === "number") levelStart = msg.level0;
   if (typeof msg.pace === "number") formN = Math.max(0, Math.min(4, Math.round(msg.pace)));
+  noteCardGrants();
 }
 
 function clampInt(v, lo, hi, fallback) {
@@ -482,6 +485,104 @@ function wardStep(ready, left, ev, dt) {
   return { ready: left2 <= 0, left: left2, held: false };
 }
 
+const CARD_KEY = "lumen-cards";
+const CARD_INFO = { light: "轻轻的", double: "再跳一下", magnet: "吸过来" };
+const CARD_ORDER = ["light", "double", "magnet"];
+const cardsOpen = document.getElementById("cards-open");
+const deckEl = document.getElementById("deck");
+const cardBookEl = document.getElementById("card-book");
+const cardShareEl = document.getElementById("card-share");
+const cardsUse = document.getElementById("cards-use");
+const cardsShare = document.getElementById("cards-share");
+
+function loadCardBook() {
+  const blank = { owned: new Set(), equipped: [] };
+  try {
+    const raw = JSON.parse(localStorage.getItem(CARD_KEY) || "null");
+    if (!raw || typeof raw !== "object") return blank;
+    const owned = new Set((Array.isArray(raw.owned) ? raw.owned : []).filter((id) => CARD_INFO[id]));
+    const equipped = CARD_ORDER.filter((id) => Array.isArray(raw.equipped) && raw.equipped.includes(id) && owned.has(id));
+    return { owned, equipped };
+  } catch {
+    return blank;
+  }
+}
+
+function saveCardBook() {
+  localStorage.setItem(CARD_KEY, JSON.stringify({
+    owned: CARD_ORDER.filter((id) => cardBook.owned.has(id)),
+    equipped: cardBook.equipped,
+  }));
+}
+
+let cardBook = loadCardBook();
+const queriedCards = (params.get("cards") || "")
+  .split(",")
+  .map((s) => s.split(".")[0])
+  .filter((id) => CARD_INFO[id])
+  .slice(0, 3);
+if (queriedCards.length) {
+  for (const id of queriedCards) cardBook.owned.add(id);
+  cardBook.equipped = CARD_ORDER.filter((id) => queriedCards.includes(id));
+  saveCardBook();
+}
+let cardPick = cardBook.equipped.slice();
+
+function grantCard(id) {
+  if (!CARD_INFO[id] || cardBook.owned.has(id)) return;
+  cardBook.owned.add(id);
+  saveCardBook();
+  paintCards();
+  showCue(CARD_INFO[id]);
+}
+
+function noteCardGrants() {
+  if (levelN >= 2) grantCard("light");
+  if (levelN >= 3) grantCard("double");
+  if (levelN >= 4) grantCard("magnet");
+}
+
+function sendDeck(ids) {
+  if (!ws || ws.readyState !== 1) return;
+  ws.send(JSON.stringify({ op: "cards", action: "equip", ids }));
+}
+
+function paintCards() {
+  if (!cardBookEl) return;
+  cardBookEl.replaceChildren();
+  for (const id of CARD_ORDER) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "card" + (cardPick.includes(id) ? " on" : "");
+    btn.textContent = CARD_INFO[id];
+    btn.disabled = !cardBook.owned.has(id);
+    btn.setAttribute("aria-pressed", cardPick.includes(id) ? "true" : "false");
+    btn.addEventListener("click", () => {
+      if (!cardBook.owned.has(id)) return;
+      if (cardPick.includes(id)) cardPick = cardPick.filter((x) => x !== id);
+      else if (cardPick.length < 3) cardPick = CARD_ORDER.filter((x) => x === id || cardPick.includes(x));
+      paintCards();
+    });
+    cardBookEl.appendChild(btn);
+  }
+  if (cardsOpen) cardsOpen.textContent = cardBook.equipped.length ? `cards ${cardBook.equipped.length}` : "cards";
+}
+
+function applyCardDecision(msg) {
+  if (msg.kind === "KEEP") {
+    cardBook.equipped = CARD_ORDER.filter((id) => cardPick.includes(id));
+    saveCardBook();
+  } else if (msg.kind === "ROLLBACK") {
+    cardPick = cardBook.equipped.slice();
+  }
+  paintCards();
+}
+
+function shareText() {
+  const ids = cardBook.equipped.map((id) => `${id}.1`).join(",");
+  return `${location.origin}${location.pathname}?seed=${seed}&cards=${ids}`;
+}
+
 function connect() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   ws = new WebSocket(`${proto}://${location.host}/ws`);
@@ -523,6 +624,9 @@ function connect() {
       carry = null;
       replayEl.textContent = msg.replay;
       syncRecord();
+      cardPick = cardBook.equipped.slice();
+      paintCards();
+      if (cardBook.equipped.length) sendDeck(cardBook.equipped);
     } else if (msg.op === "resync") {
       freshRun = false;
       pieces = [];
@@ -551,6 +655,7 @@ function connect() {
       });
     } else if (msg.op === "decision") {
       remember(msg);
+      if (msg.arm === "cards") applyCardDecision(msg);
       if (msg.kind === "KEEP" && (msg.arm === "motif" || msg.arm === "scene" || msg.arm === "pals")) audio.keep();
       if (msg.kind === "ROLLBACK") rejectSpark = true;
     }
@@ -664,6 +769,11 @@ function publishProbe() {
   root.dataset.best = String(record.bestLevel);
   root.dataset.bend = bend.toFixed(2);
   root.dataset.mark = markEl && !markEl.hidden ? markEl.textContent : "";
+  root.dataset.g = String(rules.g);
+  root.dataset.air = String(rules.air || 0);
+  root.dataset.magnet = String(rules.magnet || 0);
+  root.dataset.cards = cardBook.equipped.join(",");
+  root.dataset.owned = CARD_ORDER.filter((id) => cardBook.owned.has(id)).join(",");
   root.dataset.chat = saidRows.join(" | ");
   root.dataset.said = saidEl && !saidEl.hidden ? saidEl.textContent : "";
   root.dataset.flyers = String(pieces.reduce((n, q) => n + (q[0] === 8 ? 1 : 0), 0));
@@ -736,6 +846,7 @@ function frame(now) {
       if (ev === "coin") {
         audio.pickup(loot);
         spark = "coin";
+        if (loot === "star") grantCard("magnet");
         const got = awardPickup(rules.worth, combo, comboUntil, now, grade, gradeBank);
         combo = got.combo;
         comboUntil = got.comboUntil;
@@ -1001,8 +1112,42 @@ badgeEl.addEventListener("click", () => {
   const open = notesEl.hidden;
   notesEl.hidden = !open;
   badgeEl.setAttribute("aria-expanded", open ? "true" : "false");
-  if (open) paintNotes();
+  if (open) {
+    paintNotes();
+    if (deckEl) {
+      deckEl.hidden = true;
+      if (cardsOpen) cardsOpen.setAttribute("aria-expanded", "false");
+    }
+  }
 });
+paintCards();
+if (cardsOpen && deckEl) {
+  cardsOpen.addEventListener("click", () => {
+    const open = deckEl.hidden;
+    deckEl.hidden = !open;
+    cardsOpen.setAttribute("aria-expanded", open ? "true" : "false");
+    if (open) {
+      notesEl.hidden = true;
+      badgeEl.setAttribute("aria-expanded", "false");
+      paintCards();
+    }
+  });
+}
+if (cardsUse) {
+  cardsUse.addEventListener("click", () => {
+    sendDeck(cardPick.slice());
+  });
+}
+if (cardsShare && cardShareEl) {
+  cardsShare.addEventListener("click", () => {
+    const text = shareText();
+    cardShareEl.hidden = false;
+    cardShareEl.textContent = text;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).catch(() => {});
+    }
+  });
+}
 window.addEventListener("keydown", (e) => {
   if (e.key === "F3") {
     showStats = !showStats;
