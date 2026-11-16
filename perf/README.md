@@ -83,13 +83,22 @@ cybrid-systems/aura#5116 is fixed there).
 
 | target | report | verdict |
 |---|---|---|
-| the physics (`perf/spec.aura`) | `perf/out/report-physics-v025.txt` | `intend-met=1 KEEP=2 ROLLBACK=3 speedup-x=0.91` |
+| the physics (`perf/spec.aura`) | `perf/out/report-physics-v025.txt` | `intend-met=1 KEEP=2 ROLLBACK=3 speedup-x=1.49` |
 | the autopilot (`perf/spec-autopilot.aura`) | `perf/out/report-autopilot-v025.txt` | `intend-met=0 KEEP=2 ROLLBACK=7` |
 
-The physics round keeps `collide-slack`: the site floor (20% on the
-define the candidate changes) is met — `collide` goes 344 ms → 269 ms —
-while the program as a whole moves less than the program floor. That is
-the site floor doing its job.
+The physics round keeps the two candidates that stop rebuilding the
+piece list every frame (`nudge-flyers-noop`, `step-poppers-noop`), each
+judged against the null of the define it rebinds:
+
+```
+candidate nudge-flyers-noop PASS reason=gate-pass heldout-ms=1694 ref-ms=2563 ref-target=nudge-flyers
+candidate step-poppers-noop PASS reason=gate-pass heldout-ms=1798 ref-ms=2531 ref-target=step-poppers
+verdict intend-met=1 KEEP=2 ROLLBACK=3 speedup-x=1.49 (2534ms->1694ms n=5)
+```
+
+A third candidate (`collide-slack`) is kept by the **site floor**: the
+define it changes (`collide`) goes 344 ms → 269 ms, so it wins on its own
+site even when the program as a whole moves less than the program floor.
 
 The autopilot round keeps nothing: `hazard-window`, `lane-clear-once`
 and `gap-window` are all `no-speedup`, and `wrong-scale` is
