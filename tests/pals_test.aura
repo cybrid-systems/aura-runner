@@ -18,6 +18,10 @@
 
 (report "default" default-pals)
 (report "car" "(pal car beep 0.3 0.55 0.95 pace)")
+(report "van" "(pal van nori 0.98 0.78 0.32 pace)")
+(report "racer" "(pal racer vroom 0.96 0.45 0.32 follow)")
+(report "taxi" "(pal taxi toot 0.98 0.86 0.28 pace)")
+(report "wagon" "(pal wagon mill 0.48 0.78 0.55 side)")
 (report "bird" "(pal bird lark 0.95 0.86 0.35 float)")
 (report "puppy" "(pal puppy pip 0.6 0.8 0.4 hop)")
 (report "dark" "(pal kitten mochi 0.05 0.05 0.05 hop)")
@@ -42,7 +46,7 @@
 (define upd (merge-pals base (one "(pal car beep 0.4 0.6 0.9 pace)")))
 (display "update ")
 (display (if (and (string=? (hash-ref upd "cue") "A friend looks different")
-                  (= (length (hash-ref upd "rows")) 2))
+                  (= (length (hash-ref upd "rows")) 4))
            1 0))
 (newline)
 

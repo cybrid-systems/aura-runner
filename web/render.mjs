@@ -683,16 +683,66 @@ export function createRenderer(canvas) {
     eyes(x, y + 0.58, z + 0.22);
   }
 
-  function drawCar(x, y, z, rgb) {
+  const CAR_LOOKS = ["car", "van", "racer", "taxi", "wagon"];
+
+  function axles(x, y, z, front, back, wide) {
     const wheel = [0.16, 0.14, 0.14];
+    const w = wide || 0.28;
+    push(x - w, y + 0.12, z + front, 0.22, 0.22, 0.22, 1, wheel, 0.55, 0);
+    push(x + w, y + 0.12, z + front, 0.22, 0.22, 0.22, 1, wheel, 0.55, 0);
+    push(x - w, y + 0.12, z + back, 0.22, 0.22, 0.22, 1, wheel, 0.55, 0);
+    push(x + w, y + 0.12, z + back, 0.22, 0.22, 0.22, 1, wheel, 0.55, 0);
+  }
+
+  function lamps(x, y, z) {
+    push(x - 0.16, y, z, 0.08, 0.08, 0.06, 1, [1, 0.95, 0.7], 0.2, 0.85);
+    push(x + 0.16, y, z, 0.08, 0.08, 0.06, 1, [1, 0.95, 0.7], 0.2, 0.85);
+  }
+
+  function drawCar(x, y, z, rgb) {
     push(x, y + 0.28, z, 0.72, 0.28, 1.05, 0, rgb, 0.32, 0.06);
     push(x, y + 0.5, z - 0.02, 0.48, 0.26, 0.48, 0, shade(rgb, 1.12), 0.22, 0.1);
-    push(x - 0.28, y + 0.12, z + 0.32, 0.22, 0.22, 0.22, 1, wheel, 0.55, 0);
-    push(x + 0.28, y + 0.12, z + 0.32, 0.22, 0.22, 0.22, 1, wheel, 0.55, 0);
-    push(x - 0.28, y + 0.12, z - 0.32, 0.22, 0.22, 0.22, 1, wheel, 0.55, 0);
-    push(x + 0.28, y + 0.12, z - 0.32, 0.22, 0.22, 0.22, 1, wheel, 0.55, 0);
-    push(x - 0.16, y + 0.3, z + 0.54, 0.08, 0.08, 0.06, 1, [1, 0.95, 0.7], 0.2, 0.85);
-    push(x + 0.16, y + 0.3, z + 0.54, 0.08, 0.08, 0.06, 1, [1, 0.95, 0.7], 0.2, 0.85);
+    axles(x, y, z, 0.32, -0.32);
+    lamps(x, y + 0.3, z + 0.54);
+  }
+
+  function drawVan(x, y, z, rgb) {
+    const glass = [0.78, 0.9, 0.98];
+    push(x, y + 0.42, z, 0.78, 0.52, 1.2, 0, rgb, 0.34, 0.05);
+    push(x, y + 0.58, z + 0.12, 0.62, 0.28, 0.46, 0, glass, 0.15, 0.12);
+    axles(x, y, z, 0.38, -0.38, 0.32);
+    lamps(x, y + 0.28, z + 0.62);
+  }
+
+  function drawRacer(x, y, z, rgb) {
+    push(x, y + 0.2, z, 0.66, 0.16, 1.4, 0, rgb, 0.28, 0.08);
+    push(x, y + 0.34, z - 0.05, 0.36, 0.16, 0.42, 0, shade(rgb, 1.08), 0.2, 0.1);
+    push(x, y + 0.36, z - 0.58, 0.5, 0.08, 0.12, 0, shade(rgb, 0.75), 0.3, 0.05);
+    axles(x, y, z, 0.42, -0.42);
+    lamps(x, y + 0.2, z + 0.7);
+  }
+
+  function drawTaxi(x, y, z, rgb) {
+    drawCar(x, y, z, rgb);
+    push(x, y + 0.7, z, 0.22, 0.1, 0.16, 0, [0.98, 0.9, 0.35], 0.25, 0.45);
+  }
+
+  function drawWagon(x, y, z, rgb) {
+    push(x, y + 0.32, z + 0.08, 0.8, 0.36, 0.9, 1, rgb, 0.32, 0.06);
+    push(x, y + 0.34, z - 0.48, 0.62, 0.32, 0.4, 0, shade(rgb, 0.86), 0.34, 0.04);
+    push(x, y + 0.52, z + 0.1, 0.5, 0.22, 0.4, 0, shade(rgb, 1.1), 0.2, 0.08);
+    axles(x, y, z, 0.28, -0.46, 0.3);
+    lamps(x, y + 0.32, z + 0.52);
+  }
+
+  // A car keeps its colour and steps through the fleet. Reduced motion
+  // stays on the body it arrived with.
+  function carLook(plan, t, i, reduced) {
+    const home = CAR_LOOKS.indexOf(plan);
+    if (home < 0) return plan;
+    if (reduced) return CAR_LOOKS[home];
+    const step = Math.floor((t || 0) / 3.2 + i * 0.7);
+    return CAR_LOOKS[(home + step) % CAR_LOOKS.length];
   }
 
   function drawBunny(x, y, z, rgb) {
@@ -785,6 +835,10 @@ export function createRenderer(canvas) {
   function drawBody(plan, x, y, z, rgb, t, reduced) {
     if (plan === "kitten") drawKitten(x, y, z, rgb);
     else if (plan === "car") drawCar(x, y, z, rgb);
+    else if (plan === "van") drawVan(x, y, z, rgb);
+    else if (plan === "racer") drawRacer(x, y, z, rgb);
+    else if (plan === "taxi") drawTaxi(x, y, z, rgb);
+    else if (plan === "wagon") drawWagon(x, y, z, rgb);
     else if (plan === "bunny") drawBunny(x, y, z, rgb);
     else if (plan === "bird") drawBird(x, y, z, rgb, t, reduced);
     else if (plan === "butterfly") drawButterfly(x, y, z, rgb, t, reduced);
@@ -800,6 +854,7 @@ export function createRenderer(canvas) {
   function drawPals(list, pz, t, reduced) {
     if (!Array.isArray(list)) return;
     const nPals = Math.min(6, list.length);
+    const looks = [];
     for (let i = 0; i < nPals; i++) {
       const pal = list[i];
       const side = i % 2 === 0 ? 1 : -1;
@@ -817,9 +872,14 @@ export function createRenderer(canvas) {
       const at = sample(z, lat);
       spin = at.psi;
       push(at.x, 0.02, at.z, 0.55, 0.02, 0.4, 0, [0.18, 0.12, 0.08], 1, 0);
-      drawBody(pal.plan || pal.kind, at.x, hop, at.z, palRgb(pal), t, reduced);
+      const plan = pal.plan || pal.kind;
+      const look = carLook(plan, t, i, reduced);
+      looks.push(look);
+      drawBody(look, at.x, hop, at.z, palRgb(pal), t, reduced);
       spin = 0;
     }
+    // Names the body each friend is wearing, so a probe can see a car change.
+    canvas.dataset.fleet = looks.join(",");
   }
 
   // Cloth, clasp, and circlet in the road frame. Negative ds trails

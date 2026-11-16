@@ -24,7 +24,7 @@
   "You redesign the garden backdrop for a children's 3D endless runner called Lumen Run. No markdown. Form: (garden (sky R G B) (ground R G B) (flower KIND DENSITY) (light L)). KIND is one of daisy, tulip, blossom, buttercup. Sky channels are 0.25 to 1 and the sky stays bright. Ground is green: G is at least 0.30 and at least as large as R, and not much smaller than B. Density is 0.15 to 1. Light is 0.50 to 1, never night. Optional (fog F) is 0 to 0.38; do not ask for thicker fog. No violence, fear, weapons, or scary words. Make it look different from a plain blue sky and daisies. First write one short bright English sentence with no parentheses, then the s-expression. That sentence is what the child reads. Example: (garden (sky 0.95 0.45 0.55) (ground 0.35 0.72 0.32) (flower tulip 0.85) (light 0.9))")
 
 (define PALS-SYS
-  "You change one friendly companion in a children's 3D endless runner called Lumen Run. No markdown. Restyle a friend who is already here by keeping the same name, or add one new gentle friend. Form: (pal KIND NAME R G B MOTION). KIND is kitten, car, bunny, bird, butterfly, frog, duck, puppy, fox, turtle, bee, or a new gentle word of 3 to 12 letters. NAME is 2 to 12 letters. R G B are 0.25 to 1 and the colour stays bright. MOTION is hop, pace, float, follow, or side. No violence, fear, weapons, or scary words. Always restyle the runner in that same answer with (hero KIND R G B), alone or as one clause inside (pals ...). Pick a KIND different from the runner's current look. KIND is keeper, kitten, car, bunny, bird, butterfly, frog, or duck. keeper is the light-keeper. R G B stay bright, from 0.25 to 1. A hero clause changes the runner only and does not add a friend. First write one short bright English sentence with no parentheses, then the s-expression. That sentence is what the child reads. Example: (pal bird lark 0.95 0.86 0.35 float)")
+  "You change one friendly companion in a children's 3D endless runner called Lumen Run. No markdown. Restyle a friend who is already here by keeping the same name, or add one new gentle friend. Form: (pal KIND NAME R G B MOTION). KIND is kitten, car, van, racer, taxi, wagon, bunny, bird, butterfly, frog, duck, puppy, fox, turtle, bee, or a new gentle word of 3 to 12 letters. NAME is 2 to 12 letters. R G B are 0.25 to 1 and the colour stays bright. MOTION is hop, pace, float, follow, or side. No violence, fear, weapons, or scary words. Always restyle the runner in that same answer with (hero KIND R G B), alone or as one clause inside (pals ...). Pick a KIND different from the runner's current look. KIND is keeper, kitten, car, bunny, bird, butterfly, frog, or duck. keeper is the light-keeper. R G B stay bright, from 0.25 to 1. A hero clause changes the runner only and does not add a friend. First write one short bright English sentence with no parentheses, then the s-expression. That sentence is what the child reads. Example: (pal bird lark 0.95 0.86 0.35 float)")
 
 (define opening-feel (feel-for 0))
 (define g-now (feel-g opening-feel))
@@ -3212,15 +3212,14 @@
 
 (define (guest-text i)
   (cond
-    ((= i 0) "(pal bunny bun 0.98 0.78 0.86 hop)")
-    ((= i 1) "(pal puppy pip 0.92 0.62 0.42 hop)")
-    ((= i 2) "(pal bird wren 0.95 0.86 0.35 float)")
-    ((= i 3) "(pal butterfly flip 0.72 0.55 0.98 float)")
+    ((= i 0) "(pal taxi toot 0.98 0.86 0.28 pace)")
+    ((= i 1) "(pal wagon mill 0.48 0.78 0.55 side)")
+    ((= i 2) "(pal car zip 0.62 0.55 0.95 follow)")
+    ((= i 3) "(pal van cozy 0.95 0.62 0.45 pace)")
     (else "")))
 
-; Mochi and the car are already here. Four more friends arrive on their
-; own so the path is crowded before a model phrase lands. A full roster
-; waits, and a call in flight is left alone.
+; Mochi and three cars are already here. More cars roll in until the
+; roster is full. A full roster waits, and a call in flight is left alone.
 (define (maybe-guests!)
   (if (or (not (player-alive? player))
           (llm-posting?)
