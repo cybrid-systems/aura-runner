@@ -3,6 +3,7 @@ import { awardPickup, dropGrade, gradeLabel, lootWorth, praise } from "./score.m
 import { createRenderer } from "./render.mjs";
 import { createInput } from "./input.mjs";
 import { createAudio } from "./audio.mjs";
+import { installWish } from "./wish.mjs";
 
 const canvas = document.getElementById("view");
 const scoreEl = document.getElementById("score");
@@ -656,6 +657,7 @@ function connect() {
     } else if (msg.op === "decision") {
       remember(msg);
       if (msg.arm === "cards") applyCardDecision(msg);
+      if (window.__lumenOnDecision) window.__lumenOnDecision(msg);
       if (msg.kind === "KEEP" && (msg.arm === "motif" || msg.arm === "scene" || msg.arm === "pals")) audio.keep();
       if (msg.kind === "ROLLBACK") rejectSpark = true;
     }
@@ -702,6 +704,33 @@ window.__lumenFrames = (n) => {
   } finally {
     stepping = false;
   }
+};
+
+// Start the 180-frame bench window after the page is ready. Frames
+// recorded while headless Chrome was still on the real clock are discarded.
+window.__lumenBenchMark = () => {
+  frameN = 0;
+  frames.fill(0);
+  lastNow = performance.now();
+  if (benchEl) {
+    benchEl.hidden = true;
+    benchEl.textContent = "";
+  }
+};
+
+window.__lumenFramePeek = () => {
+  const n = Math.min(frameN, frames.length);
+  if (!n) return { n: 0 };
+  const copy = Array.from(frames.subarray(0, n)).sort((a, b) => a - b);
+  const at = (q) => copy[Math.min(n - 1, Math.floor(q * (n - 1)))] || 0;
+  return {
+    n,
+    p50: at(0.5),
+    p95: at(0.95),
+    slow: copy.filter((v) => v > 22).length,
+    head: copy.slice(0, 3),
+    tail: copy.slice(-5),
+  };
 };
 
 function restart() {
@@ -1118,6 +1147,12 @@ badgeEl.addEventListener("click", () => {
       deckEl.hidden = true;
       if (cardsOpen) cardsOpen.setAttribute("aria-expanded", "false");
     }
+    const wishPanel = document.getElementById("wish");
+    if (wishPanel) {
+      wishPanel.hidden = true;
+      const wishOpen = document.getElementById("wish-open");
+      if (wishOpen) wishOpen.setAttribute("aria-expanded", "false");
+    }
   }
 });
 paintCards();
@@ -1130,6 +1165,12 @@ if (cardsOpen && deckEl) {
       notesEl.hidden = true;
       badgeEl.setAttribute("aria-expanded", "false");
       paintCards();
+      const wishPanel = document.getElementById("wish");
+      if (wishPanel) {
+        wishPanel.hidden = true;
+        const wishOpen = document.getElementById("wish-open");
+        if (wishOpen) wishOpen.setAttribute("aria-expanded", "false");
+      }
     }
   });
 }
@@ -1157,5 +1198,15 @@ window.addEventListener("keydown", (e) => {
 
 if (renderer) renderer.resize();
 window.addEventListener("resize", () => renderer && renderer.resize());
+installWish({
+  send(payload) {
+    if (!ws || ws.readyState !== 1) return false;
+    ws.send(JSON.stringify(payload));
+    return true;
+  },
+  muted() {
+    return audio.muted || muteBtn.getAttribute("aria-pressed") === "true";
+  },
+});
 connect();
 requestAnimationFrame(frame);

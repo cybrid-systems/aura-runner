@@ -722,14 +722,25 @@
   (list "kill" "blood" "gun" "knife" "scary" "monster" "weapon"
         "damn" "drug" "bomb" "gore" "murder"))
 
+; Multi-character phrases only. A single character such as 死 would
+; reject ordinary wishes that merely contain that character.
+(define banned-zh
+  (list "炸弹" "爆炸" "开枪" "手枪" "刀子" "流血" "血腥"
+        "恐怖" "鬼怪" "杀死" "杀人" "武器" "毒药"))
+
+(define (banned-list? text words)
+  (let loop ((ws words))
+    (if (null? ws)
+      #f
+      (if (string-contains? text (car ws))
+        #t
+        (loop (cdr ws))))))
+
 (define (banned? text)
-  (let ((low (string-downcase text)))
-    (let loop ((ws banned-words))
-      (if (null? ws)
-        #f
-        (if (string-contains? low (car ws))
-          #t
-          (loop (cdr ws)))))))
+  (if (not (string? text))
+    #f
+    (or (banned-list? (string-downcase text) banned-words)
+        (banned-list? text banned-zh))))
 
 (define (allowed-symbol? s)
   (or (string=? s "seq") (string=? s "ground") (string=? s "gap")
