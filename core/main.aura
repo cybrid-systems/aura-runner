@@ -15,6 +15,7 @@
 (require "lib/wish")
 (require "lib/chase")
 (require "lib/world")
+(require "lib/primer")
 
 (define SYS
   "You design one obstacle phrase for a children's 3D endless runner called Lumen Run. The runner has three lanes (0 left, 1 centre, 2 right), jumps, and slides. No markdown. Allowed pieces: (seq (ground W) (gap W) (hurdle H W) (gate BOTTOM W) (coin Y) (spring W) (block LANE DEPTH) (coin-lane LANE Y)). Every parameter is a number; never write the words BOTTOM, W, H, LANE, DEPTH or other placeholders. Ranges in meters: spring W 0.45-1.6, hurdle W 0.35-2.2 and H 0.15-0.9, gate W 0.35-2.0 and BOTTOM 0.58-0.85, coin Y 0.4-2.4, coin-lane LANE 0, 1 or 2 and Y 0.4-2.4, ground W 0.8-18, gap W 0.4-2.0, block LANE 0, 1 or 2 and DEPTH 0.5-2.2. Optional (loot KIND) restyles every pickup. KIND is coin, star, gem, blossom, or apple. Optional (bend AMP) turns the road. AMP is 0.12 to 0.65. Start and end with ground. Leave at least one lane open beside every block. No violence, fear, weapons, or scary words. Bright garden, friendly shapes. First write one short bright English sentence with no parentheses, then the s-expression. That sentence is what the child reads. A ground of 10.4 is one beat, about 1.3 seconds, and a ground of 4.8 is a short rest. Leave a full beat of ground before a jump. Optional (flyer KIND LANE Y) sends one gentle toy flying toward the runner along one lane. KIND is plane, bubble, lantern, leaf, or ball. LANE is 0, 1 or 2. Y is 0.55 to 0.85. At most two flyers, and never on every lane at once. Optional last word on a hurdle, a gate, or a block picks its look. A hurdle is bar, log, fence, bloom, or drum. A gate is bar, ribbon, vine, lights, or scarf. A block is pot, stump, mushroom, crate, or bush. A low wide shape is a jump, a bar with room underneath is a slide, and one tall shape in a single lane is a lane change. Recolor a shape freely. One beat holds one move. Example: (seq (ground 6) (block 0 1) (hurdle 0.4 0.7) (ground 5) (gate 0.72 0.8) (ground 5) (gap 1.1) (ground 5))")
@@ -55,8 +56,11 @@
 (define bend-now 0.38)
 (define loot-now "coin")
 (define speed-lock #f)
-; The light card holds gravity. Pace may still change jump, slide and speed.
+; The light card holds gravity. A kept primer number sits in g-held and
+; wins over that card until the next kept deck. Pace may still change
+; jump, slide and speed.
 (define g-lock #f)
+(define g-held #f)
 (define air-now 0.0)
 (define magnet-now 0.0)
 (define deck-ids (list))
@@ -570,6 +574,13 @@
   (set! published-air air-now)
   (set! published-magnet magnet-now))
 
+; A kept primer gravity stays put. Otherwise the light card, then pace.
+(define (gravity-now f)
+  (cond
+    ((number? g-held) g-held)
+    (g-lock CARD-LIGHT-G)
+    (else (feel-g f))))
+
 (define (apply-feel! why)
   ; The pace numbers move even while a POST is in flight. The rebind
   ; waits, because publishing a rule then wedges that call.
@@ -579,7 +590,7 @@
     (if (string=? why "tutorial")
     why
     (let ((f (feel-for band)))
-    (let ((ng (if g-lock CARD-LIGHT-G (feel-g f)))
+    (let ((ng (gravity-now f))
           (nj (feel-jump f))
           (nsl (feel-slide f))
           (nv (feel-speed f)))
@@ -780,10 +791,11 @@
   (set! acc 0.0)
   (set! last-ms 0)
   (set! cleared (list))
-  (set! g-now (if g-lock CARD-LIGHT-G (feel-g opening-feel)))
+  (set! g-now (gravity-now opening-feel))
   (set! jump-now (feel-jump opening-feel))
   (set! slide-now (feel-slide opening-feel))
   (set! card-phase 0)
+  (set! primer-phase 0)
   (set! hue-now 0.0)
   (set! motif-now "")
   (set! motif-pieces (list))
@@ -1466,7 +1478,9 @@
 ; or that names a gravity or jump outside the card bounds, leaves the
 ; bindings alone.
 (define (begin-cards! msg)
-  (let ((ids (id-list (hash-ref msg "ids" (list)))))
+  (if (> primer-phase 0)
+    #f
+    (let ((ids (id-list (hash-ref msg "ids" (list)))))
     (let ((spec (cards-spec ids (feel-g (feel-for band)) jump-now)))
       (if (not (hash-ref spec "ok" #f))
         (cards-rollback! (hash-ref spec "why" "deck"))
@@ -1495,7 +1509,7 @@
                     (set! card-body (make-player 0.4))
                     (set! card-i 0)
                     (set! card-phase 1)
-                    #t))))))))))
+                    #t)))))))))))
 
 (define (publish-trio! g air mag)
   (let ((a (publish-named! "rule-double-jump" air))
@@ -1541,6 +1555,7 @@
                   (prev-air air-now)
                   (prev-mag magnet-now)
                   (prev-lock g-lock)
+                  (prev-held g-held)
                   (prev-ids deck-ids)
                   (new-g (hash-ref spec "g"))
                   (new-air (hash-ref spec "air"))
@@ -1549,6 +1564,7 @@
               (set! air-now new-air)
               (set! magnet-now new-mag)
               (set! g-lock (has-id? ids "light"))
+              (set! g-held #f)
               (set! deck-ids ids)
               (set! tuned #t)
               (if (publish-trio! new-g new-air new-mag)
@@ -1562,6 +1578,7 @@
                   (set! air-now prev-air)
                   (set! magnet-now prev-mag)
                   (set! g-lock prev-lock)
+                  (set! g-held prev-held)
                   (set! deck-ids prev-ids)
                   (publish-trio! prev-g prev-air prev-mag)
                   (note! "ROLLBACK" "commit" "cards" "这样合在一起过不去" "cards")))))
@@ -1582,9 +1599,143 @@
 ; One slice a tick. A phrase already in its slice goes first, so the
 ; two walks do not share the tick.
 (define (maybe-cards!)
-  (if (or (= card-phase 0) (> hold-phase 0))
+  (if (or (= card-phase 0) (> hold-phase 0) (> primer-phase 0))
     #f
     (step-cards!)))
+
+; One number from the card's advanced line. Twelve steps, then one trial.
+; The live gravity does not move until that trial keeps it.
+(define primer-phase 0)
+(define primer-g 32.0)
+(define primer-pieces (list))
+(define primer-sim (list))
+(define primer-body #f)
+(define primer-i 0)
+(define primer-rules #f)
+(define primer-geom 0.0)
+(define primer-budget 0.0)
+(define primer-margin 0.0)
+
+(define (primer-note! kind why)
+  (note! kind why "rule"
+         (if (string=? kind "KEEP") "这样可以跑" "这样跑不起来")
+         "rule"))
+
+(define (primer-live name)
+  (cond
+    ((string=? name "rule-double-jump") air-now)
+    ((string=? name "rule-magnet") magnet-now)
+    (else g-now)))
+
+(define (primer-same? name value)
+  (and (number? value) (< (world-abs (- value (primer-live name))) 0.011)))
+
+(define (primer-busy?)
+  (or (> hold-phase 0) (> card-phase 0) (> chase-phase 0) (> dream-phase 0)))
+
+(define (begin-primer! got)
+  (let ((value (hash-ref got "value" 0)))
+    (let ((rules (rules-of value jump-now speed-now slide-now coyote-now forgive-now
+                           (loot-worth loot-now) air-now magnet-now))
+          (form (if (and (string? motif-now) (> (string-length motif-now) 0))
+                  motif-now
+                  (pattern-form seed next-id band))))
+      (let ((laid (layout-form form rules)))
+        (if (not (layout-fair? laid))
+          (primer-note! "ROLLBACK"
+            (if (and (hash? laid) (> (hash-ref laid "geometry" 0.0) 0.0))
+              "geometry"
+              "reachable"))
+          (begin
+            (set! primer-g value)
+            (set! primer-rules rules)
+            (set! primer-geom (hash-ref laid "geometry" 0.0))
+            (set! primer-budget (hash-ref laid "budget" 0.0))
+            (set! primer-margin (hash-ref laid "margin" 0.0))
+            (set! primer-pieces (hash-ref laid "pieces"))
+            (set! primer-sim primer-pieces)
+            (set! primer-body (make-player 0.4))
+            (set! primer-i 0)
+            (set! primer-phase 1)
+            #t))))))
+
+(define (seal-primer! cleared?)
+  (let ((fair (and cleared?
+                   (<= primer-geom 0.0)
+                   (<= primer-budget 0.0)
+                   (>= primer-margin SPARE-S))))
+    (let* ((cand (evo:candidate "gravity"
+                                (hash "id" (string-append "p" (int-str next-id))
+                                      "target" "rule-gravity")))
+           (trial (open-trial cand
+                              (hash "timeout-ms" 1500
+                                    "apply" (lambda (c) #t)
+                                    "evaluate"
+                                    (lambda (c)
+                                      (hash "status" "ok"
+                                            "objectives" (hash "fair" (if fair 1.0 0.0))
+                                            "constraints"
+                                            (hash "budget" primer-budget
+                                                  "geometry" primer-geom
+                                                  "reachable" (if fair 0.0 1.0)
+                                                  "safe" 0.0)
+                                            "behavior" (hash "band" (exact->inexact band))))))))
+      (if (trial-busy? trial)
+        #f
+        (begin
+          (if (or (not fair)
+                  (not trial) (not (evo:trial-ok? trial)) (not (evo:feasible? trial)))
+            (primer-note! "ROLLBACK" "reachable")
+            (let ((prev g-now)
+                  (prev-held g-held))
+              (set! g-now primer-g)
+              (set! g-held primer-g)
+              (set! tuned #t)
+              (if (string=? (publish-named! "rule-gravity" primer-g) "fail")
+                (begin
+                  (set! g-now prev)
+                  (set! g-held prev-held)
+                  (publish-named! "rule-gravity" prev)
+                  (primer-note! "ROLLBACK" "commit"))
+                (begin
+                  (set! published-g g-now)
+                  (primer-note! "KEEP" "fair")))))
+          (release-slot!)
+          #t)))))
+
+(define (step-primer!)
+  (let ((rules (if (hash? primer-rules) primer-rules (rules-hash))))
+    (let ((r (autopilot-slice primer-pieces rules primer-body primer-sim primer-i PRIMER-SLICE)))
+      (set! primer-i (lref r 1))
+      (set! primer-body (lref r 2))
+      (set! primer-sim (lref r 3))
+      (if (and (lref r 0) (not (chat-open?))
+               (seal-primer! (if (lref r 4) #t #f)))
+        (set! primer-phase 0)
+        #f))))
+
+(define (maybe-primer!)
+  (if (or (= primer-phase 0) (> hold-phase 0) (> card-phase 0) (> chase-phase 0) (> dream-phase 0))
+    #f
+    (step-primer!)))
+
+(define (on-primer c msg)
+  (let ((card (hash-ref msg "card" ""))
+        (text (hash-ref msg "text" "")))
+    (let ((got (primer-read (if (string? card) card "") (if (string? text) text ""))))
+      (cond
+        ((> primer-phase 0)
+         (send c (hash "op" "primer" "status" "busy")))
+        ((not (hash-ref got "ok" #f))
+         (primer-note! "ROLLBACK" (hash-ref got "why" "lex")))
+        ((primer-same? (hash-ref got "name" "") (hash-ref got "value" 0))
+         (send c (hash "op" "primer" "status" "same")))
+        ((not (string=? (hash-ref got "name" "") "rule-gravity"))
+         (primer-note! "ROLLBACK" "bounds"))
+        ((primer-busy?)
+         (primer-note! "ROLLBACK" "busy"))
+        (else (begin-primer! got)))
+      (flush-notes! c))))
 
 ; The numbers on the note are the live set: the kept step, or the set
 ; a failed trial left in place. The ask is what puts the sentence on
@@ -1678,12 +1829,12 @@
 
 ; One slice a tick. A phrase, a deck, or a dream already walking goes first.
 (define (maybe-chase!)
-  (if (or (= chase-phase 0) (> hold-phase 0) (> card-phase 0) (> dream-phase 0))
+  (if (or (= chase-phase 0) (> hold-phase 0) (> card-phase 0) (> dream-phase 0) (> primer-phase 0))
     #f
     (step-chase!)))
 
 (define (maybe-dream!)
-  (if (or (env-on? "LUMEN_SKIP_DREAM") (> hold-phase 0) (> card-phase 0) (llm-posting?) (chat-open?))
+  (if (or (env-on? "LUMEN_SKIP_DREAM") (> hold-phase 0) (> card-phase 0) (> primer-phase 0) (llm-posting?) (chat-open?))
     #f
     (cond
       ((= dream-phase 1) (step-dream!))
@@ -2344,7 +2495,7 @@
             (set! band fm)
             (set! player (pset player 6 pts))
             (let ((f (feel-for band)))
-              (set! g-now (if g-lock CARD-LIGHT-G (feel-g f)))
+              (set! g-now (gravity-now f))
               (set! jump-now (feel-jump f))
               (set! slide-now (feel-slide f))
               (if (not speed-lock) (set! speed-now (feel-speed f)) #f))
@@ -2372,10 +2523,11 @@
         "flower" flower-now "density" density-now "light" light-now "fog" fog-now
         "pals" pals-now "rows" pals-rows "hero" hero-now
         "bend" bend-now "loot" loot-now
-        "deck" deck-ids "g-lock" g-lock "speed-lock" speed-lock
+        "deck" deck-ids "g-lock" g-lock "g-held" g-held "speed-lock" speed-lock
         "seed" seed "level" level-n "form" form "pace" pace "band" band
         "chase" chase "recent" chase-recent
         "card-phase" card-phase "hold-phase" hold-phase
+        "primer-phase" primer-phase
         "dream-phase" dream-phase "chase-phase" chase-phase
         "chase-plan" chase-plan "card-spec" card-spec "hold-form" hold-form
         "dream-form" dream-form
@@ -2412,6 +2564,7 @@
   (set! loot-now (hash-ref saved "loot"))
   (set! deck-ids (hash-ref saved "deck"))
   (set! g-lock (hash-ref saved "g-lock"))
+  (set! g-held (hash-ref saved "g-held"))
   (set! speed-lock (hash-ref saved "speed-lock"))
   (set! seed (hash-ref saved "seed"))
   (set! level-n (hash-ref saved "level"))
@@ -2421,6 +2574,7 @@
   (set! chase (hash-ref saved "chase"))
   (set! chase-recent (hash-ref saved "recent"))
   (set! card-phase (hash-ref saved "card-phase"))
+  (set! primer-phase (hash-ref saved "primer-phase"))
   (set! hold-phase (hash-ref saved "hold-phase"))
   (set! dream-phase (hash-ref saved "dream-phase"))
   (set! chase-phase (hash-ref saved "chase-phase"))
@@ -2435,6 +2589,7 @@
 
 (define (clear-slices!)
   (set! card-phase 0)
+  (set! primer-phase 0)
   (set! hold-phase 0)
   (set! dream-phase 0)
   (set! chase-phase 0)
@@ -2524,6 +2679,12 @@
       (let ((ids (world-deck snap)))
         (set! deck-ids (if (pair? ids) ids (list)))
         (set! g-lock (has-id? deck-ids "light")))
+      (set! g-held
+        (if (and g-lock (> (world-abs (- g-now CARD-LIGHT-G)) 0.05))
+          g-now
+          (if (and (not g-lock) (> (world-abs (- g-now (feel-g (feel-for form)))) 0.2))
+            g-now
+            #f)))
       (set! speed-lock (> (world-abs (- speed-now (feel-speed (feel-for form)))) 0.2))
       (set! chase (hash "speed" (exact->inexact (hash-ref snap "chase-speed"))
                         "cool" (exact->inexact (hash-ref snap "chase-cool"))
@@ -2652,6 +2813,7 @@
     (maybe-cards!)
     (maybe-chase!)
     (maybe-dream!)
+    (maybe-primer!)
     (maybe-guests!)
     (ensure-ahead!)
     (poll-llm! c)
@@ -2871,6 +3033,7 @@
          #f))
       ((string=? op "rebind") (on-rebind c msg))
       ((string=? op "cards") (on-cards c msg))
+      ((string=? op "primer") (on-primer c msg))
       ((string=? op "propose") (on-propose c msg))
       ((string=? op "wish") (on-wish c msg))
       ((string=? op "provider") (on-provider c msg))

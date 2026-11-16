@@ -474,6 +474,50 @@ html, body {
 }
 .card.on { background: #ffe08a; }
 .card:disabled { opacity: 0.45; cursor: default; }
+.card-row { display: flex; gap: 8px; align-items: stretch; }
+.card-row .card { flex: 1; }
+.primer-open {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 14px;
+  background: #fff;
+  color: var(--ink);
+  font: 800 14px/1.2 ui-rounded, "Segoe UI", system-ui, sans-serif;
+  cursor: pointer;
+}
+.primer-open.on { background: #ffe08a; }
+#primer { margin-top: 8px; }
+#primer[hidden] { display: none; }
+#primer-note {
+  margin: 0;
+  color: var(--ink);
+  font: 700 15px/1.35 ui-rounded, "Segoe UI", system-ui, sans-serif;
+}
+#primer-text {
+  display: block;
+  width: 100%;
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 12px;
+  background: #fff;
+  color: #24160f;
+  font: 700 18px/1.4 ui-monospace, "Cascadia Code", "Source Code Pro", monospace;
+  resize: none;
+  touch-action: auto;
+}
+#primer-try {
+  margin: 8px 0 0;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: #ffe08a;
+  color: var(--ink);
+  font: 800 16px/1 ui-rounded, "Segoe UI", system-ui, sans-serif;
+  cursor: pointer;
+}
+#primer-try:disabled { opacity: 0.55; cursor: default; }
 #cards-use, #cards-share {
   margin: 10px 8px 0 0;
   padding: 8px 12px;
@@ -493,7 +537,7 @@ html, body {
   color: #8a5a32;
 }
 #card-share[hidden] { display: none; }
-#motion:focus-visible, #mute:focus-visible, #badge:focus-visible, #model:focus-visible, #again:focus-visible, #cards-open:focus-visible, #cards-use:focus-visible, #cards-share:focus-visible, .card:focus-visible, #wish-open:focus-visible, #wish-send:focus-visible, #wish-mic:focus-visible, #wish-allow:focus-visible, #wish-use:focus-visible, #wish-again:focus-visible, #wish-type:focus-visible, #wish-talk:focus-visible, #wish-zh:focus-visible, #wish-en:focus-visible, .wish-preset:focus-visible, #note-list button:focus-visible {
+#motion:focus-visible, #mute:focus-visible, #badge:focus-visible, #model:focus-visible, #again:focus-visible, #cards-open:focus-visible, #cards-use:focus-visible, #cards-share:focus-visible, .card:focus-visible, #wish-open:focus-visible, #wish-send:focus-visible, #wish-mic:focus-visible, #wish-allow:focus-visible, #wish-use:focus-visible, #wish-again:focus-visible, #wish-type:focus-visible, #wish-talk:focus-visible, #wish-zh:focus-visible, #wish-en:focus-visible, .wish-preset:focus-visible, #note-list button:focus-visible, .primer-open:focus-visible, #primer-try:focus-visible, #primer-text:focus-visible {
   outline: 3px solid white;
   outline-offset: 3px;
 }

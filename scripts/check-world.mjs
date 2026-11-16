@@ -87,7 +87,10 @@ if (saved.nodes[0].snap) fail("stored");
 
 const weak = { ...phrase, g: 5 };
 const sword = { ...phrase, deck: ["sword"] };
-if (snapOk(weak) || snapOk(sword)) fail("bounds");
+const edited = snap("", ["light", "double"], 24, 1);
+const drift = snap("", ["light", "double"], 22, 0);
+if (snapOk(weak) || snapOk(sword) || snapOk(drift)) fail("bounds");
+if (!snapOk(edited)) fail("primer-g");
 
 const adopted = adoptDecision(blankWorld(), {
   op: "decision", kind: "KEEP", why: "fair", arm: "motif", cue: "A new shape bloomed",

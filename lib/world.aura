@@ -119,7 +119,8 @@
            (world-num-in? (hash-ref snap "forgive" #f) 0.0 0.5)
            (world-num-in? air 0.0 1.0)
            (world-num-in? magnet 0.0 3.0)
-           (if (has-id? deck "light") (world-near? g CARD-LIGHT-G) #t)
+           ; Gravity may be any legal band number. A primer edit of the
+           ; light card keeps that number, still inside 18 to 40.
            (if (has-id? deck "double") (world-near? air 1.0) (world-near? air 0.0))
            (if (has-id? deck "magnet") (world-near? magnet CARD-MAGNET-R) (world-near? magnet 0.0))
            (world-phrase? (world-str snap "motif") 400)
