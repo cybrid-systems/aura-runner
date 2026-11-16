@@ -4,6 +4,7 @@ import { createRenderer } from "./render.mjs";
 import { createInput } from "./input.mjs";
 import { createAudio } from "./audio.mjs";
 import { installWish } from "./wish.mjs";
+import { adoptDecision, loadWorld, paintWorld, saveWorld } from "./world.mjs";
 
 const canvas = document.getElementById("view");
 const scoreEl = document.getElementById("score");
@@ -117,6 +118,7 @@ const nearSeen = new Set();
 const toastQ = [];
 let toastUntil = 0;
 const gardenNotes = [];
+let worldline = loadWorld(localStorage);
 const saidRows = [];
 let ws;
 let connected = false;
@@ -237,20 +239,14 @@ function lerpScene(dt) {
   if (Math.abs(sceneTarget.density - sceneView.density) < 0.04) sceneView.flower = sceneTarget.flower;
 }
 
+function requestRewind(node) {
+  if (!node || node.kind !== "KEEP" || !node.snap) return;
+  if (!connected || !ws || ws.readyState !== 1) return;
+  ws.send(JSON.stringify({ op: "rewind", id: node.id, kind: "KEEP", snap: node.snap }));
+}
+
 function paintNotes() {
-  noteList.replaceChildren();
-  for (const row of gardenNotes) {
-    const li = document.createElement("li");
-    const title = document.createElement("strong");
-    title.textContent = row.cue;
-    li.append(title);
-    if (row.why) {
-      const sub = document.createElement("span");
-      sub.textContent = row.why;
-      li.append(sub);
-    }
-    noteList.append(li);
-  }
+  paintWorld(noteList, worldline, requestRewind);
 }
 
 function showSaid(text) {
@@ -516,6 +512,15 @@ function saveCardBook() {
   }));
 }
 
+function applyServerDeck(ids) {
+  const next = CARD_ORDER.filter((id) => ids.includes(id));
+  for (const id of next) cardBook.owned.add(id);
+  cardBook.equipped = next;
+  cardPick = next.slice();
+  saveCardBook();
+  paintCards();
+}
+
 let cardBook = loadCardBook();
 const queriedCards = (params.get("cards") || "")
   .split(",")
@@ -625,9 +630,18 @@ function connect() {
       carry = null;
       replayEl.textContent = msg.replay;
       syncRecord();
-      cardPick = cardBook.equipped.slice();
-      paintCards();
-      if (cardBook.equipped.length) sendDeck(cardBook.equipped);
+      if (typeof msg.world === "string") {
+        worldline = { ...worldline, tip: msg.world };
+        saveWorld(localStorage, worldline);
+      }
+      const rewound = typeof msg.world === "string" && msg.world.length > 0;
+      if (rewound) applyServerDeck(Array.isArray(msg.deck) ? msg.deck : []);
+      else {
+        cardPick = cardBook.equipped.slice();
+        paintCards();
+        if (cardBook.equipped.length) sendDeck(cardBook.equipped);
+      }
+      if (!notesEl.hidden) paintNotes();
     } else if (msg.op === "resync") {
       freshRun = false;
       pieces = [];
@@ -655,11 +669,18 @@ function connect() {
         alive: true,
       });
     } else if (msg.op === "decision") {
+      const next = adoptDecision(worldline, msg);
+      if (next !== worldline) {
+        worldline = next;
+        saveWorld(localStorage, worldline);
+      }
       remember(msg);
       if (msg.arm === "cards") applyCardDecision(msg);
       if (window.__lumenOnDecision) window.__lumenOnDecision(msg);
       if (msg.kind === "KEEP" && (msg.arm === "motif" || msg.arm === "scene" || msg.arm === "pals")) audio.keep();
       if (msg.kind === "ROLLBACK") rejectSpark = true;
+    } else if (msg.op === "err" && msg.why === "rewind") {
+      showCue("Still this world");
     }
   };
   ws.onclose = () => {

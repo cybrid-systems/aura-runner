@@ -29,6 +29,8 @@ Cards sit above that badge. Clearing level 1, level 2, and level 3 adds 轻轻�
 
 A friend on the path keeps up with the run. It changes its speed, how often it switches lanes, or where it appears, one small step at a time, and only after a short trial still gets through. A miss puts the previous step back. The opening lesson has none. The three looks stay a fox, a bird, and a beetle.
 
+The same badge opens the world line. Each change that stayed, and each one that was turned away, is a short line. A kept line can be run again from a safe start on that seed. A line that was turned away shows why, and does not become the road. The list stays on this browser.
+
 A kept change from the model shows as a short word in the bottom-right (`shape`, `bend`, `star`, `sky`, `friend`, or the runner's new look). The latest sentence sits on the line above that word. The run does not stop for it. A stumble still uses the line at the top: "Oops! Keep going", or "Back on the path" after a gap.
 
 Already have an Aura nightly binary and want to skip the download:

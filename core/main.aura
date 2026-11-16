@@ -14,6 +14,7 @@
 (require "lib/cards")
 (require "lib/wish")
 (require "lib/chase")
+(require "lib/world")
 
 (define SYS
   "You design one obstacle phrase for a children's 3D endless runner called Lumen Run. The runner has three lanes (0 left, 1 centre, 2 right), jumps, and slides. No markdown. Allowed pieces: (seq (ground W) (gap W) (hurdle H W) (gate BOTTOM W) (coin Y) (spring W) (block LANE DEPTH) (coin-lane LANE Y)). Every parameter is a number; never write the words BOTTOM, W, H, LANE, DEPTH or other placeholders. Ranges in meters: spring W 0.45-1.6, hurdle W 0.35-2.2 and H 0.15-0.9, gate W 0.35-2.0 and BOTTOM 0.58-0.85, coin Y 0.4-2.4, coin-lane LANE 0, 1 or 2 and Y 0.4-2.4, ground W 0.8-18, gap W 0.4-2.0, block LANE 0, 1 or 2 and DEPTH 0.5-2.2. Optional (loot KIND) restyles every pickup. KIND is coin, star, gem, blossom, or apple. Optional (bend AMP) turns the road. AMP is 0.12 to 0.65. Start and end with ground. Leave at least one lane open beside every block. No violence, fear, weapons, or scary words. Bright garden, friendly shapes. First write one short bright English sentence with no parentheses, then the s-expression. That sentence is what the child reads. A ground of 10.4 is one beat, about 1.3 seconds, and a ground of 4.8 is a short rest. Leave a full beat of ground before a jump. Optional (flyer KIND LANE Y) sends one gentle toy flying toward the runner along one lane. KIND is plane, bubble, lantern, leaf, or ball. LANE is 0, 1 or 2. Y is 0.55 to 0.85. At most two flyers, and never on every lane at once. Optional last word on a hurdle, a gate, or a block picks its look. A hurdle is bar, log, fence, bloom, or drum. A gate is bar, ribbon, vine, lights, or scarf. A block is pot, stump, mushroom, crate, or bush. A low wide shape is a jump, a bar with room underneath is a slide, and one tall shape in a single lane is a lane change. Recolor a shape freely. One beat holds one move. Example: (seq (ground 6) (block 0 1) (hurdle 0.4 0.7) (ground 5) (gate 0.72 0.8) (ground 5) (gap 1.1) (ground 5))")
@@ -240,6 +241,64 @@
         (exact->inexact (car xs))
         (loop (cdr xs))))))
 
+(define world-tree (world-blank))
+; While a rewind is laying the road again, pace must not publish a new note.
+(define rewind-quiet #f)
+
+(define (world-track? kind why arm)
+  (and (or (string=? kind "KEEP") (string=? kind "ROLLBACK"))
+       (or (string=? arm "motif")
+           (string=? arm "scene")
+           (string=? arm "pals")
+           (string=? arm "cards")
+           (string=? arm "chaser")
+           (string=? arm "rule")
+           (string=? arm "wish")
+           (string=? arm "guest")
+           (string=? arm "llm")
+           (and (string=? arm "run") (string=? why "level")))))
+
+; A chase that outran a slower pace is stored just under the cap, so the
+; snap can be run again. The live step is unchanged.
+(define (chase-snap-speed run)
+  (let ((sp (chase-get chase "speed" 2.1))
+        (cap (* (exact->inexact run) 0.45)))
+    (if (and (number? sp) (>= sp 1.6) (< sp cap) (< sp run))
+      sp
+      (max 1.6 (- cap 0.05)))))
+
+(define (world-snap-now)
+  (hash "seed" seed
+        "level" level-n
+        "form" form
+        "pace" pace
+        "band" band
+        "g" g-now
+        "jump" jump-now
+        "slide" slide-now
+        "speed" speed-now
+        "air" air-now
+        "magnet" magnet-now
+        "hue" hue-now
+        "coyote" coyote-now
+        "forgive" forgive-now
+        "motif" motif-now
+        "scene" scene-now
+        "pals" pals-now
+        "loot" loot-now
+        "bend" bend-now
+        "deck" deck-ids
+        "chase-speed" (chase-snap-speed speed-now)
+        "chase-cool" (chase-get chase "cool" 0.42)
+        "chase-at" (chase-get chase "at" 0.42)
+        "chase-commit" (chase-get chase "commit" 7.5)
+        "sky" (list sky-r sky-g sky-b)
+        "ground" (list ground-r ground-g ground-b)
+        "flower" flower-now
+        "density" density-now
+        "light" light-now
+        "fog" fog-now))
+
 (define (note! kind why arm . rest)
   (let ((cue (if (and (pair? rest) (string? (car rest))) (car rest) ""))
         (mark (if (and (pair? rest) (pair? (cdr rest)) (string? (car (cdr rest))))
@@ -248,8 +307,24 @@
                       (string? (car (cdr (cdr rest)))))
                (car (cdr (cdr rest))) ""))
         (margin (rest-margin rest)))
-    (let ((row (hash "op" "decision" "kind" kind "why" why "arm" arm
-                     "via" publish-via "cue" cue "mark" mark "ask" ask)))
+    (let* ((tracked (world-track? kind why arm))
+           (added (if tracked
+                    (world-add world-tree kind why arm cue (world-snap-now) (monotonic-ms))
+                    #f)))
+      (if tracked (set! world-tree (hash-ref added "tree" world-tree)) #f)
+      (let ((row (if (not tracked)
+                   (hash "op" "decision" "kind" kind "why" why "arm" arm
+                         "via" publish-via "cue" cue "mark" mark "ask" ask)
+                   (if (hash? (hash-ref added "snap" #f))
+                     (hash "op" "decision" "kind" kind "why" why "arm" arm
+                           "via" publish-via "cue" cue "mark" mark "ask" ask
+                           "world" (hash-ref added "id" "")
+                           "parent" (hash-ref added "parent" "")
+                           "snap" (hash-ref added "snap" #f))
+                     (hash "op" "decision" "kind" kind "why" why "arm" arm
+                           "via" publish-via "cue" cue "mark" mark "ask" ask
+                           "world" (hash-ref added "id" "")
+                           "parent" (hash-ref added "parent" ""))))))
     (set! audit (cons (hash "kind" kind "why" why "arm" arm "cue" cue) audit))
     (if (> (length audit) 12)
       (set! audit (take-n audit 12))
@@ -264,7 +339,7 @@
                         (if margin (hash "arm" arm "margin" margin) (hash "arm" arm))
                         "" 0)
            (catch (e) #f)))
-    row)))
+    row))))
 
 (define (flush-notes! c)
   (let loop ((xs (reverse pending)))
@@ -460,7 +535,9 @@
         (loop (cdr xs))))))
 
 (define (choose-band)
-  (if (env-on? "LUMEN_SKIP_ARM")
+  (if rewind-quiet
+    "pace"
+    (if (env-on? "LUMEN_SKIP_ARM")
     (begin (set! band 0) "tutorial")
     (begin
       (set! pace (pace-wanted))
@@ -471,7 +548,7 @@
         (begin
           (flush-owed!)
           (open-next-arm!)
-          "pace")))))
+          "pace"))))))
 
 ; A finish moves the pace. The clock does not.
 (define (advance-pace!)
@@ -496,7 +573,10 @@
 (define (apply-feel! why)
   ; The pace numbers move even while a POST is in flight. The rebind
   ; waits, because publishing a rule then wedges that call.
-  (if (string=? why "tutorial")
+  ; A rewind lays the saved numbers and must not note a fresh pace step.
+  (if rewind-quiet
+    why
+    (if (string=? why "tutorial")
     why
     (let ((f (feel-for band)))
     (let ((ng (if g-lock CARD-LIGHT-G (feel-g f)))
@@ -547,7 +627,7 @@
               (note! "KEEP" why "rule" feel-cue)
               (set! feel-cue ""))
             #f)
-          why))))))
+          why)))))))
 
 (define (shift-onto pieces x0)
   (shift-pieces pieces x0))
@@ -781,7 +861,9 @@
         "pace" pace "points" (floor (player-score player))
         "motif" motif-now "scene" scene-now
         "pals" pals-rows "hero" (hero-public) "provider" llm-provider
-        "model" (active-model) "providers" (ready-providers)))
+        "model" (active-model) "providers" (ready-providers)
+        "world" (hash-ref world-tree "tip" "")
+        "deck" deck-ids))
 
 ; The event is part of the hash when it is built. A later hash-set! on
 ; this value is the site cybrid-systems/aura #5274 exits from.
@@ -2273,8 +2355,251 @@
             (begin-level!)
             (ensure-ahead!)))))))
 
+; A new hello or restart starts a fresh trunk. Older branches stay.
+(define (world-trunk!)
+  (set! world-tree (hash "nodes" (hash-ref world-tree "nodes" (list))
+                         "tip" ""
+                         "n" (hash-ref world-tree "n" 0))))
+
+(define (capture-run!)
+  (hash "g" g-now "jump" jump-now "slide" slide-now "speed" speed-now
+        "air" air-now "magnet" magnet-now "hue" hue-now
+        "coyote" coyote-now "forgive" forgive-now
+        "motif" motif-now "pieces" motif-pieces "span" motif-span
+        "scene" scene-now
+        "sky-r" sky-r "sky-g" sky-g "sky-b" sky-b
+        "ground-r" ground-r "ground-g" ground-g "ground-b" ground-b
+        "flower" flower-now "density" density-now "light" light-now "fog" fog-now
+        "pals" pals-now "rows" pals-rows "hero" hero-now
+        "bend" bend-now "loot" loot-now
+        "deck" deck-ids "g-lock" g-lock "speed-lock" speed-lock
+        "seed" seed "level" level-n "form" form "pace" pace "band" band
+        "chase" chase "recent" chase-recent
+        "card-phase" card-phase "hold-phase" hold-phase
+        "dream-phase" dream-phase "chase-phase" chase-phase
+        "chase-plan" chase-plan "card-spec" card-spec "hold-form" hold-form
+        "dream-form" dream-form
+        "via" publish-via "rev" rule-rev "dirty" rules-dirty))
+
+(define (restore-run! saved)
+  (set! g-now (hash-ref saved "g"))
+  (set! jump-now (hash-ref saved "jump"))
+  (set! slide-now (hash-ref saved "slide"))
+  (set! speed-now (hash-ref saved "speed"))
+  (set! air-now (hash-ref saved "air"))
+  (set! magnet-now (hash-ref saved "magnet"))
+  (set! hue-now (hash-ref saved "hue"))
+  (set! coyote-now (hash-ref saved "coyote"))
+  (set! forgive-now (hash-ref saved "forgive"))
+  (set! motif-now (hash-ref saved "motif"))
+  (set! motif-pieces (hash-ref saved "pieces"))
+  (set! motif-span (hash-ref saved "span"))
+  (set! scene-now (hash-ref saved "scene"))
+  (set! sky-r (hash-ref saved "sky-r"))
+  (set! sky-g (hash-ref saved "sky-g"))
+  (set! sky-b (hash-ref saved "sky-b"))
+  (set! ground-r (hash-ref saved "ground-r"))
+  (set! ground-g (hash-ref saved "ground-g"))
+  (set! ground-b (hash-ref saved "ground-b"))
+  (set! flower-now (hash-ref saved "flower"))
+  (set! density-now (hash-ref saved "density"))
+  (set! light-now (hash-ref saved "light"))
+  (set! fog-now (hash-ref saved "fog"))
+  (set! pals-now (hash-ref saved "pals"))
+  (set! pals-rows (hash-ref saved "rows"))
+  (set! hero-now (hash-ref saved "hero"))
+  (set! bend-now (hash-ref saved "bend"))
+  (set! loot-now (hash-ref saved "loot"))
+  (set! deck-ids (hash-ref saved "deck"))
+  (set! g-lock (hash-ref saved "g-lock"))
+  (set! speed-lock (hash-ref saved "speed-lock"))
+  (set! seed (hash-ref saved "seed"))
+  (set! level-n (hash-ref saved "level"))
+  (set! form (hash-ref saved "form"))
+  (set! pace (hash-ref saved "pace"))
+  (set! band (hash-ref saved "band"))
+  (set! chase (hash-ref saved "chase"))
+  (set! chase-recent (hash-ref saved "recent"))
+  (set! card-phase (hash-ref saved "card-phase"))
+  (set! hold-phase (hash-ref saved "hold-phase"))
+  (set! dream-phase (hash-ref saved "dream-phase"))
+  (set! chase-phase (hash-ref saved "chase-phase"))
+  (set! chase-plan (hash-ref saved "chase-plan"))
+  (set! card-spec (hash-ref saved "card-spec"))
+  (set! hold-form (hash-ref saved "hold-form"))
+  (set! dream-form (hash-ref saved "dream-form"))
+  (set! publish-via (hash-ref saved "via"))
+  (set! rule-rev (hash-ref saved "rev"))
+  (set! rules-dirty (hash-ref saved "dirty"))
+  (set! rewind-quiet #f))
+
+(define (clear-slices!)
+  (set! card-phase 0)
+  (set! hold-phase 0)
+  (set! dream-phase 0)
+  (set! chase-phase 0)
+  (set! chase-plan #f)
+  (set! card-spec #f)
+  (set! hold-form "")
+  (set! dream-form ""))
+
+(define (how-ok? how)
+  (and (string? how) (not (string=? how "fail"))))
+
+(define (publish-phrase! name body)
+  (let ((how (publish-rule! name body (full-src))))
+    (set! publish-via how)
+    (set! rule-rev (+ rule-rev 1))
+    (set! rules-dirty #t)
+    how))
+
+(define (publish-world!)
+  (and (how-ok? (publish-named! "rule-gravity" g-now))
+       (how-ok? (publish-named! "rule-jump-v" jump-now))
+       (how-ok? (publish-named! "rule-slide-s" slide-now))
+       (how-ok? (publish-named! "rule-run-speed" speed-now))
+       (how-ok? (publish-named! "rule-hue" hue-now))
+       (how-ok? (publish-named! "rule-double-jump" air-now))
+       (how-ok? (publish-named! "rule-magnet" magnet-now))
+       (how-ok? (publish-named! "rule-coyote-s" coyote-now))
+       (how-ok? (publish-named! "rule-forgive" forgive-now))
+       (how-ok? (publish-phrase! "motif-form" (motif-body motif-now)))
+       (how-ok? (publish-phrase! "scene-form" (scene-body scene-now)))
+       (how-ok? (publish-phrase! "pals-form" (pals-body pals-now)))))
+
+(define (scene-install! text)
+  (let ((form (if (and (string? text) (> (string-length text) 0)) text default-scene)))
+    (let ((found (check-scene form)))
+      (if (not (and (hash? found) (hash-ref found "ok" #f)))
+        #f
+        (begin (apply-scene! found form) #t)))))
+
+(define (pals-install! text)
+  (let ((form (if (and (string? text) (> (string-length text) 0)) text default-pals)))
+    (let ((found (check-roster form)))
+      (if (not (and (hash? found) (hash-ref found "ok" #f)))
+        #f
+        (begin
+          (set! pals-now form)
+          (set! pals-rows (hash-ref found "pals" (list)))
+          (set! hero-now (hash-ref found "hero" #f))
+          #t)))))
+
+(define (motif-install! text)
+  (if (not (and (string? text) (> (string-length text) 0)))
+    (begin
+      (set! motif-now "")
+      (set! motif-pieces (list))
+      (set! motif-span 0.0)
+      #t)
+    (let ((laid (layout-form text (rules-hash))))
+      (if (not (layout-fair? laid))
+        #f
+        (begin
+          (set! motif-now text)
+          (set! motif-pieces (hash-ref laid "pieces" (list)))
+          (set! motif-span (hash-ref laid "x1" 0.0))
+          #t)))))
+
+(define (apply-snap! snap)
+  (if (not (world-snap-ok? snap))
+    #f
+    (begin
+      (set! g-now (exact->inexact (hash-ref snap "g")))
+      (set! jump-now (exact->inexact (hash-ref snap "jump")))
+      (set! slide-now (exact->inexact (hash-ref snap "slide")))
+      (set! speed-now (exact->inexact (hash-ref snap "speed")))
+      (set! air-now (exact->inexact (hash-ref snap "air")))
+      (set! magnet-now (exact->inexact (hash-ref snap "magnet")))
+      (set! hue-now (exact->inexact (hash-ref snap "hue")))
+      (set! coyote-now (exact->inexact (hash-ref snap "coyote")))
+      (set! forgive-now (exact->inexact (hash-ref snap "forgive")))
+      (set! loot-now (hash-ref snap "loot"))
+      (set! bend-now (exact->inexact (hash-ref snap "bend")))
+      (set! seed (exact->inexact (hash-ref snap "seed")))
+      (set! level-n (level-exact (hash-ref snap "level")))
+      (set! form (form-exact (hash-ref snap "form")))
+      (set! pace (form-exact (hash-ref snap "pace")))
+      (set! band (form-exact (hash-ref snap "band")))
+      (let ((ids (world-deck snap)))
+        (set! deck-ids (if (pair? ids) ids (list)))
+        (set! g-lock (has-id? deck-ids "light")))
+      (set! speed-lock (> (world-abs (- speed-now (feel-speed (feel-for form)))) 0.2))
+      (set! chase (hash "speed" (exact->inexact (hash-ref snap "chase-speed"))
+                        "cool" (exact->inexact (hash-ref snap "chase-cool"))
+                        "at" (exact->inexact (hash-ref snap "chase-at"))
+                        "commit" (exact->inexact (hash-ref snap "chase-commit"))
+                        "knob" 0
+                        "prev" #f))
+      (set! chase-recent (list))
+      (and (scene-install! (hash-ref snap "scene" ""))
+           (pals-install! (hash-ref snap "pals" ""))
+           (motif-install! (hash-ref snap "motif" ""))))))
+
+; Back at that branch's start: on the ground, same seed, saved rules.
+; Notes taken while the road is laid are dropped. The tree is not one of them.
+(define (rebuild-road!)
+  (let ((kept pending))
+    (set! rewind-quiet #t)
+    (set! player (make-player 1.2))
+    (set! world (list))
+    (set! chunks (list))
+    (set! next-id 0)
+    (set! next-x 0.0)
+    (set! sent-id 0)
+    (set! rival-for 0)
+    (set! run-ms 0.0)
+    (set! level-bumps 0)
+    (set! acc 0.0)
+    (set! last-ms 0)
+    (set! feel-cue "")
+    (set! slide-hinted #f)
+    (set! ward-ready #t)
+    (set! ward-left 0.0)
+    (try (begin (begin-level!) (ensure-ahead!)) (catch (e) #f))
+    (set! rewind-quiet #f)
+    (set! pending kept)
+    (set! feel-cue "")
+    (set! tuned #t)
+    (remember-published!)
+    (set! rules-dirty #f)))
+
+(define (install-world! snap)
+  (if (not (world-snap-ok? snap))
+    #f
+    (let ((saved (capture-run!)))
+      (clear-slices!)
+      (if (not (apply-snap! snap))
+        (begin (restore-run! saved) (publish-world!) #f)
+        (if (not (publish-world!))
+          (begin (restore-run! saved) (publish-world!) #f)
+          (begin (rebuild-road!) #t))))))
+
+(define (on-rewind c msg)
+  (let ((id (hash-ref msg "id" ""))
+        (kind (hash-ref msg "kind" ""))
+        (snap (hash-ref msg "snap" #f))
+        (saved world-tree))
+    (let ((got (world-take world-tree
+                           (if (string? id) id "")
+                           (if (string? kind) kind "")
+                           snap)))
+      (if (not (hash-ref got "ok" #f))
+        (send c (hash "op" "err" "why" "rewind"))
+        (begin
+          (set! world-tree (hash-ref got "tree" world-tree))
+          (if (not (install-world! (hash-ref got "snap" #f)))
+            (begin
+              (set! world-tree saved)
+              (send c (hash "op" "err" "why" "rewind")))
+            (begin
+              (send c (welcome-msg))
+              (send-all-chunks c)
+              (send c (state-msg "ok")))))))))
+
 (define (on-hello c msg)
   (let ((parsed (parse-seed (hash-ref msg "seed" #f))))
+    (world-trunk!)
     (set! seed (if parsed parsed (exact->inexact (fresh-seed))))
     (set! speed-lock #f)
     (set! speed-now 8.0)
@@ -2287,6 +2612,7 @@
 
 (define (on-restart c msg)
   (let ((parsed (parse-seed (hash-ref msg "seed" #f))))
+    (world-trunk!)
     (if parsed (set! seed parsed) #f)
     (reset-run!)
     (send c (welcome-msg))
@@ -2549,6 +2875,7 @@
       ((string=? op "wish") (on-wish c msg))
       ((string=? op "provider") (on-provider c msg))
       ((string=? op "audit") (on-audit c msg))
+      ((string=? op "rewind") (on-rewind c msg))
       ((string=? op "bye") #f)
       (else (send c (hash "op" "err" "why" "unknown"))))))
 

@@ -1,0 +1,285 @@
+; A short tree of world changes. KEEP can be run again. ROLLBACK stays
+; visible and is not installed. The cap drops the oldest side node, never
+; the current tip. Secrets are refused, not stored.
+(require "std/string" all:)
+(require "lib/cards")
+
+(define WORLD-CAP 24)
+
+(define (world-blank)
+  (hash "nodes" (list) "tip" "" "n" 0))
+
+(define (world-abs n)
+  (if (< n 0) (- 0 n) n))
+
+(define (world-digit d)
+  (substring (number->string (floor d)) 0 1))
+
+(define (world-int n)
+  (let ((k (floor (exact->inexact (if (and (number? n) (>= n 0)) n 0)))))
+    (if (< k 1)
+      "0"
+      (let loop ((x k) (b ""))
+        (if (< x 1)
+          b
+          (let ((q (floor (/ x 10.0))))
+            (loop q (string-append (world-digit (- x (* q 10.0))) b))))))))
+
+(define (world-clip s n)
+  (if (not (string? s))
+    ""
+    (if (<= (string-length s) n) s (substring s 0 n))))
+
+(define (world-inject? s)
+  (or (string-contains? s "\"")
+      (string-contains? s "\\")
+      (string-contains? s "\n")))
+
+(define (world-phrase? s n)
+  (and (string? s)
+       (<= (string-length s) n)
+       (not (world-inject? s))))
+
+(define (world-truthy? v)
+  (cond
+    ((not v) #f)
+    ((string? v) (> (string-length v) 0))
+    ((number? v) (not (= v 0)))
+    (else #t)))
+
+(define (world-secret? snap)
+  (or (world-truthy? (hash-ref snap "audio" #f))
+      (world-truthy? (hash-ref snap "key" #f))
+      (world-truthy? (hash-ref snap "token" #f))
+      (world-truthy? (hash-ref snap "api" #f))
+      (world-truthy? (hash-ref snap "secret" #f))))
+
+(define (world-num-in? n lo hi)
+  (and (number? n) (>= n lo) (<= n hi)))
+
+(define (world-int-in? n lo hi)
+  (and (number? n)
+       (< (world-abs (- n (floor n))) 0.011)
+       (>= n lo)
+       (<= n hi)))
+
+(define (world-near? a b)
+  (< (world-abs (- a b)) 0.051))
+
+(define (world-one? s words)
+  (let loop ((xs words))
+    (if (or (not (pair? xs)) (null? xs))
+      #f
+      (if (string=? s (car xs)) #t (loop (cdr xs))))))
+
+; A missing deck, or the null an empty JSON array becomes, is no cards.
+; A string or a bad id refuses the whole snap.
+(define (world-deck snap)
+  (let ((raw (hash-ref snap "deck" (list))))
+    (cond
+      ((or (not raw) (null? raw)) (list))
+      ((pair? raw) (parse-deck raw))
+      ((or (string? raw) (hash? raw)) #f)
+      (else (list)))))
+
+(define (world-channels? v)
+  (and (pair? v)
+       (pair? (cdr v))
+       (pair? (cdr (cdr v)))
+       (null? (cdr (cdr (cdr v))))
+       (world-num-in? (car v) 0.0 1.0)
+       (world-num-in? (car (cdr v)) 0.0 1.0)
+       (world-num-in? (car (cdr (cdr v))) 0.0 1.0)))
+
+(define (world-str snap k)
+  (let ((v (hash-ref snap k #f)))
+    (if (string? v) v "")))
+
+(define (world-snap-ok? snap)
+  (if (or (not (hash? snap)) (world-secret? snap))
+    #f
+    (let ((speed (hash-ref snap "speed" #f))
+          (deck (world-deck snap))
+          (g (hash-ref snap "g" #f))
+          (air (hash-ref snap "air" #f))
+          (magnet (hash-ref snap "magnet" #f))
+          (chase (hash-ref snap "chase-speed" #f)))
+      (and (or (null? deck) (pair? deck))
+           (world-num-in? (hash-ref snap "seed" #f) 0.001 1000000000000.0)
+           (world-int-in? (hash-ref snap "level" #f) 1 40)
+           (world-int-in? (hash-ref snap "form" #f) 0 4)
+           (world-int-in? (hash-ref snap "pace" #f) 0 4)
+           (world-int-in? (hash-ref snap "band" #f) 0 4)
+           (world-num-in? g 18.0 40.0)
+           (world-num-in? (hash-ref snap "jump" #f) 9.0 16.0)
+           (world-num-in? (hash-ref snap "slide" #f) 0.2 1.0)
+           (world-num-in? speed 6.0 16.0)
+           (world-num-in? (hash-ref snap "hue" #f) 0.0 8.0)
+           (world-num-in? (hash-ref snap "coyote" #f) 0.0 0.5)
+           (world-num-in? (hash-ref snap "forgive" #f) 0.0 0.5)
+           (world-num-in? air 0.0 1.0)
+           (world-num-in? magnet 0.0 3.0)
+           (if (has-id? deck "light") (world-near? g CARD-LIGHT-G) #t)
+           (if (has-id? deck "double") (world-near? air 1.0) (world-near? air 0.0))
+           (if (has-id? deck "magnet") (world-near? magnet CARD-MAGNET-R) (world-near? magnet 0.0))
+           (world-phrase? (world-str snap "motif") 400)
+           (world-phrase? (world-str snap "scene") 400)
+           (world-phrase? (world-str snap "pals") 800)
+           (world-one? (world-str snap "loot") (list "coin" "blossom" "apple" "star" "gem"))
+           (world-one? (world-str snap "flower") (list "daisy" "tulip" "blossom" "buttercup"))
+           (world-channels? (hash-ref snap "sky" #f))
+           (world-channels? (hash-ref snap "ground" #f))
+           (world-num-in? (hash-ref snap "density" #f) 0.15 1.0)
+           (world-num-in? (hash-ref snap "light" #f) 0.50 1.0)
+           (world-num-in? (hash-ref snap "fog" #f) 0.0 0.38)
+           (world-num-in? (hash-ref snap "bend" #f) 0.0 0.65)
+           (number? chase)
+           (>= chase 1.6)
+           (< chase speed)
+           (< chase (* speed 0.45))
+           (world-num-in? (hash-ref snap "chase-cool" #f) 0.28 0.70)
+           (world-num-in? (hash-ref snap "chase-at" #f) 0.32 0.55)
+           (world-num-in? (hash-ref snap "chase-commit" #f) 5.5 11.0)))))
+
+(define (world-triple v)
+  (list (exact->inexact (car v))
+        (exact->inexact (car (cdr v)))
+        (exact->inexact (car (cdr (cdr v))))))
+
+(define (world-clean snap)
+  (let ((deck (world-deck snap)))
+    (hash "seed" (exact->inexact (hash-ref snap "seed" 1))
+          "level" (floor (hash-ref snap "level" 1))
+          "form" (floor (hash-ref snap "form" 0))
+          "pace" (floor (hash-ref snap "pace" 0))
+          "band" (floor (hash-ref snap "band" 0))
+          "g" (exact->inexact (hash-ref snap "g" 32))
+          "jump" (exact->inexact (hash-ref snap "jump" 11.2))
+          "slide" (exact->inexact (hash-ref snap "slide" 0.48))
+          "speed" (exact->inexact (hash-ref snap "speed" 8))
+          "air" (exact->inexact (hash-ref snap "air" 0))
+          "magnet" (exact->inexact (hash-ref snap "magnet" 0))
+          "hue" (exact->inexact (hash-ref snap "hue" 0))
+          "coyote" (exact->inexact (hash-ref snap "coyote" 0.12))
+          "forgive" (exact->inexact (hash-ref snap "forgive" 0.12))
+          "motif" (world-str snap "motif")
+          "scene" (world-str snap "scene")
+          "pals" (world-str snap "pals")
+          "loot" (world-str snap "loot")
+          "bend" (exact->inexact (hash-ref snap "bend" 0.38))
+          "deck" (if (pair? deck) deck (list))
+          "chase-speed" (exact->inexact (hash-ref snap "chase-speed" 2.1))
+          "chase-cool" (exact->inexact (hash-ref snap "chase-cool" 0.42))
+          "chase-at" (exact->inexact (hash-ref snap "chase-at" 0.42))
+          "chase-commit" (exact->inexact (hash-ref snap "chase-commit" 7.5))
+          "sky" (world-triple (hash-ref snap "sky" (list 0.55 0.72 0.95)))
+          "ground" (world-triple (hash-ref snap "ground" (list 0.42 0.68 0.38)))
+          "flower" (world-str snap "flower")
+          "density" (exact->inexact (hash-ref snap "density" 0.45))
+          "light" (exact->inexact (hash-ref snap "light" 0.82))
+          "fog" (exact->inexact (hash-ref snap "fog" 0.22)))))
+
+(define (world-accept kind snap)
+  (and (string? kind) (string=? kind "KEEP") (world-snap-ok? snap)))
+
+(define (world-find tree id)
+  (let loop ((xs (hash-ref tree "nodes" (list))))
+    (if (or (not (pair? xs)) (null? xs))
+      #f
+      (if (and (string? id) (string=? (hash-ref (car xs) "id" "") id))
+        (car xs)
+        (loop (cdr xs))))))
+
+(define (world-drop-oldest nodes tip)
+  (cond
+    ((or (not (pair? nodes)) (null? nodes)) nodes)
+    ((not (string=? (hash-ref (car nodes) "id" "") tip)) (cdr nodes))
+    (else (cons (car nodes) (world-drop-oldest (cdr nodes) tip)))))
+
+(define (world-trim nodes tip)
+  (if (or (not (pair? nodes)) (<= (length nodes) WORLD-CAP))
+    nodes
+    (let ((next (world-drop-oldest nodes tip)))
+      (if (>= (length next) (length nodes))
+        nodes
+        (world-trim next tip)))))
+
+(define (world-id-ok? id)
+  (and (string? id)
+       (>= (string-length id) 2)
+       (<= (string-length id) 48)
+       (string-prefix? id "w")
+       (not (string-contains? id "\""))
+       (not (string-contains? id "\\"))
+       (not (string-contains? id " "))
+       (not (string-contains? id "\n"))
+       (not (string-contains? id "("))
+       (not (string-contains? id ")"))))
+
+(define (world-node id parent kind why arm cue snap)
+  (hash "id" id
+        "parent" (if (string? parent) parent "")
+        "kind" kind
+        "why" (world-clip why 24)
+        "arm" (world-clip arm 16)
+        "cue" (world-clip cue 80)
+        "snap" (if (and (string=? kind "KEEP") (world-snap-ok? snap))
+                 (world-clean snap)
+                 #f)))
+
+(define (world-put tree node move?)
+  (let ((tip (if move? (hash-ref node "id" "") (hash-ref tree "tip" ""))))
+    (hash "nodes" (world-trim (append (hash-ref tree "nodes" (list)) (list node)) tip)
+          "tip" tip
+          "n" (+ (hash-ref tree "n" 0) 1))))
+
+(define (world-add tree kind why arm cue snap stamp)
+  (if (not (and (string? kind) (or (string=? kind "KEEP") (string=? kind "ROLLBACK"))))
+    (hash "tree" tree "id" "" "parent" "" "snap" #f)
+    (let* ((n (+ (hash-ref tree "n" 0) 1))
+           (id (string-append "w" (world-int n) "-" (world-int stamp)))
+           (parent (hash-ref tree "tip" ""))
+           (node (world-node id parent kind why arm cue snap))
+           (next (world-put tree node (string=? kind "KEEP"))))
+      (hash "tree" next "id" id "parent" parent "snap" (hash-ref node "snap" #f)))))
+
+(define (world-set-tip tree id)
+  (hash "nodes" (hash-ref tree "nodes" (list))
+        "tip" id
+        "n" (hash-ref tree "n" 0)))
+
+(define (world-rewind tree id)
+  (let ((node (world-find tree id)))
+    (if (not node)
+      (hash "ok" #f "tree" tree "why" "missing" "snap" #f)
+      (if (not (string=? (hash-ref node "kind" "") "KEEP"))
+        (hash "ok" #f "tree" tree "why" "rollback" "snap" #f)
+        (let ((snap (hash-ref node "snap" #f)))
+          (if (not (world-snap-ok? snap))
+            (hash "ok" #f "tree" tree "why" "rollback" "snap" #f)
+            (hash "ok" #t "tree" (world-set-tip tree id) "why" "keep" "snap" (world-clean snap))))))))
+
+; A known rollback stays a rollback even if the caller says KEEP.
+; An id this process has not seen is kept only when the snap itself is a KEEP world.
+(define (world-take tree id kind snap)
+  (let ((node (if (world-id-ok? id) (world-find tree id) #f)))
+    (cond
+      ((not (world-id-ok? id))
+       (hash "ok" #f "tree" tree "why" "missing" "snap" #f "id" ""))
+      (node
+       (if (and (string=? (hash-ref node "kind" "") "KEEP")
+                (world-snap-ok? (hash-ref node "snap" #f)))
+         (hash "ok" #t
+               "tree" (world-set-tip tree id)
+               "why" "keep"
+               "snap" (world-clean (hash-ref node "snap" #f))
+               "id" id)
+         (hash "ok" #f "tree" tree "why" "rollback" "snap" #f "id" id)))
+      ((world-accept kind snap)
+       (let ((fresh (world-node id (hash-ref tree "tip" "") "KEEP" "fair" "run" "" snap)))
+         (hash "ok" #t
+               "tree" (world-put tree fresh #t)
+               "why" "keep"
+               "snap" (hash-ref fresh "snap" #f)
+               "id" id)))
+      (else (hash "ok" #f "tree" tree "why" "missing" "snap" #f "id" id)))))
