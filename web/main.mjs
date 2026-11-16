@@ -1220,12 +1220,6 @@ badgeEl.addEventListener("click", () => {
       deckEl.hidden = true;
       if (cardsOpen) cardsOpen.setAttribute("aria-expanded", "false");
     }
-    const wishPanel = document.getElementById("wish");
-    if (wishPanel) {
-      wishPanel.hidden = true;
-      const wishOpen = document.getElementById("wish-open");
-      if (wishOpen) wishOpen.setAttribute("aria-expanded", "false");
-    }
   }
 });
 paintCards();
@@ -1238,12 +1232,6 @@ if (cardsOpen && deckEl) {
       notesEl.hidden = true;
       badgeEl.setAttribute("aria-expanded", "false");
       paintCards();
-      const wishPanel = document.getElementById("wish");
-      if (wishPanel) {
-        wishPanel.hidden = true;
-        const wishOpen = document.getElementById("wish-open");
-        if (wishOpen) wishOpen.setAttribute("aria-expanded", "false");
-      }
     }
   });
 }
@@ -1286,9 +1274,6 @@ installWish({
     if (!ws || ws.readyState !== 1) return false;
     ws.send(JSON.stringify(payload));
     return true;
-  },
-  muted() {
-    return audio.muted || muteBtn.getAttribute("aria-pressed") === "true";
   },
 });
 connect();
