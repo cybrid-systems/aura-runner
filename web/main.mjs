@@ -79,6 +79,9 @@ let bend = 0.38;
 let loot = "coin";
 let levelN = 1;
 let levelGoal = 0;
+let props = [];
+let sunHide = false;
+let shownToys = [];
 let levelStart = 0;
 let formN = 0;
 const WARD_WAIT = 9;
@@ -204,6 +207,29 @@ function applyProvider(msg) {
   paintModel();
 }
 
+function applyProps(msg) {
+  if (Array.isArray(msg.props)) {
+    const next = [];
+    for (const name of msg.props) {
+      if ((name === "sun" || name === "moon" || name === "plane") && !next.includes(name)) next.push(name);
+      if (next.length >= 3) break;
+    }
+    props = next;
+  }
+  if (typeof msg["sun-hide"] === "boolean") sunHide = msg["sun-hide"];
+}
+
+function applyShown(msg) {
+  if (!Array.isArray(msg.shown)) return;
+  const next = [];
+  for (const raw of msg.shown) {
+    const t = validThing(raw);
+    if (t) next.push(t);
+    if (next.length >= 4) break;
+  }
+  shownToys = next;
+}
+
 function applyLook(msg) {
   if (typeof msg.bend === "number" && msg.bend >= 0.05 && msg.bend <= 0.75) bend = msg.bend;
   if (typeof msg.loot === "string" && LOOTS.has(msg.loot)) loot = msg.loot;
@@ -230,6 +256,8 @@ function applyRules(msg) {
   applyHero(msg);
   applyProvider(msg);
   applyLevel(msg);
+  applyProps(msg);
+  applyShown(msg);
 }
 
 function lerpScene(dt) {
@@ -378,6 +406,9 @@ function resetLocal() {
   levelGoal = 0;
   levelStart = 0;
   formN = 0;
+  props = [];
+  sunHide = false;
+  shownToys = [];
   wardReady = true;
   wardLeft = 0;
   if (goalFill) goalFill.style.width = "0%";
@@ -897,6 +928,9 @@ function publishProbe() {
   root.dataset.speed = String(rules.speed);
   root.dataset.level = String(levelN);
   root.dataset.goal = Number.isFinite(levelGoal) ? levelGoal.toFixed(1) : "";
+  root.dataset.props = props.join(",");
+  root.dataset.sun = sunHide ? "off" : props.includes("sun") ? "on" : "soft";
+  root.dataset.shown = shownToys.map((toy) => toy.name).join(",");
   root.dataset.ward = wardReady ? "1" : "0";
   root.dataset.gear = String(gearTier());
   root.dataset.best = String(record.bestLevel);
@@ -1048,6 +1082,9 @@ function frame(now) {
         near: nearSpark, reject: rejectSpark,
         scene: sceneView, stumble: stumble / 1500, pals, hero, bend, loot,
         goal: levelGoal,
+        props,
+        sunHide,
+        shown: shownToys,
         thingChunks,
         gear: gearTier(),
         ward: wardReady ? 1 : Math.max(0, (WARD_WAIT - wardLeft) / WARD_WAIT),

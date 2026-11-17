@@ -63,6 +63,22 @@ export function validThing(t) {
   };
 }
 
+// Where a spoken toy stands beside the runner. Lateral ±3.6 is off the
+// road, so this box is a picture only and not a hit volume. ahead is
+// metres in front of the runner; the road frame is onRoad's.
+export function showBox(thing, i) {
+  const n = Number.isFinite(i) ? i : 0;
+  const side = n % 2 === 0 ? -1 : 1;
+  const ahead = 5.5 + n * 3;
+  const lat = side * 3.6;
+  const role = thing && thing.role;
+  const size = thing && Number.isFinite(thing.size) ? thing.size : 1;
+  if (role === "jump") return { ahead, lat, y: 0, w: 1.1, h: size, d: 0.7 };
+  if (role === "slide") return { ahead, lat, y: 0, w: 1.4, h: 1.15, d: 0.6 };
+  const h = 1.35 * size;
+  return { ahead, lat, y: 0, w: size, h, d: size };
+}
+
 const arrived = new Map();
 
 // 0..1 grow-in the first time a thing is drawn.

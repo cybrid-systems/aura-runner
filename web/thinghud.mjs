@@ -17,6 +17,8 @@ export function hudText(msg) {
       };
     case "live":
       return { text: `换上了 · 第 ${(Number(info.variant) || 0) + 1} 个 · 下一段路生效`, busy: false };
+    case "kept":
+      return { text: "画出来了", busy: false };
     case "none":
       return { text: info.why === "commit" ? "这次没装上，画面先不变" : "这次没有通过检查的，画面先不变", busy: false };
     case "rollback":

@@ -531,3 +531,408 @@
         "anim" (hash-ref checked "anim" (list "none" 0.0 0.0))
         "name" (hash-ref checked "name" "")
         "parts" (hash-ref checked "parts" (list))))
+
+; ---------------------------------------------------------------- compose
+
+; A sentence the model never answers still becomes one toy. The form is
+; built from fixed numbers and an ASCII name. The child's words are only
+; matched, never copied in, and never evaluated. check-thing is the gate:
+; a recipe that slips outside the box is replaced by one known-safe decor.
+
+(define COMPOSE-SAFE
+  "(thing decor 1.2 (anim bob 0.08 0.8) (name toy) (part sphere 0 0.55 0 0.62 0.62 0.62 0.98 0.85 0.35 0.2) (part box 0 0.18 0 0.5 0.28 0.46 0.45 0.72 0.95 0))")
+
+(define (thing-pad text)
+  (string-append " " (string-downcase (if (string? text) text "")) " "))
+
+(define (thing-word? text w)
+  (thing-has? (thing-pad text) (string-append " " w " ")))
+
+(define (compose-sum text)
+  (let ((s (if (string? text) text "")))
+    (let loop ((i 0) (n (string-length s)) (a 0))
+      (if (>= i n)
+        a
+        (loop (+ i 1) n (+ a (string-ref s i)))))))
+
+; 0..k-1 as an exact integer. list-ref rejects an inexact 2.0.
+(define (compose-slot n k)
+  (let ((m (modulo (if (number? n) n 0) (if (and (number? k) (> k 0)) k 1))))
+    (cond
+      ((< m 0.5) 0)
+      ((< m 1.5) 1)
+      ((< m 2.5) 2)
+      ((< m 3.5) 3)
+      ((< m 4.5) 4)
+      ((< m 5.5) 5)
+      ((< m 6.5) 6)
+      (else 7))))
+
+(define (compose-paint i)
+  (cond
+    ((< i 0.5) "1.0 0.85 0.3")
+    ((< i 1.5) "0.98 0.55 0.75")
+    ((< i 2.5) "0.95 0.35 0.32")
+    ((< i 3.5) "1.0 0.62 0.28")
+    ((< i 4.5) "0.35 0.82 0.4")
+    ((< i 5.5) "0.35 0.62 0.98")
+    ((< i 6.5) "0.72 0.48 0.95")
+    (else "0.95 0.95 0.98")))
+
+(define (compose-digit i)
+  (cond
+    ((< i 0.5) "0")
+    ((< i 1.5) "1")
+    ((< i 2.5) "2")
+    ((< i 3.5) "3")
+    ((< i 4.5) "4")
+    ((< i 5.5) "5")
+    ((< i 6.5) "6")
+    (else "7")))
+
+(define (compose-strip text w)
+  (let loop ((s (if (string? text) text "")))
+    (let ((i (string-index s w 0)))
+      (if (< i 0)
+        s
+        (loop (string-append (substring s 0 i)
+                             (substring s (+ i (string-length w)) (string-length s))))))))
+
+; 花园 contains 花 and is a garden, not a blossom. 花朵 still is.
+(define (compose-flower? text)
+  (or (thing-has? text "花朵")
+      (thing-word? text "flower")
+      (thing-has? (compose-strip text "花园") "花")))
+
+; ASCII id of a known silhouette, or "".
+(define (compose-name text)
+  (if (not (string? text))
+    ""
+    (let ((low (string-downcase text)))
+      (cond
+        ((or (thing-has? text "恐龙") (thing-word? low "dinosaur")
+             (thing-has? text "龙") (thing-word? low "dragon"))
+         "dragon")
+        ((or (thing-has? text "城堡") (thing-word? low "castle")) "castle")
+        ((or (thing-has? text "房子") (thing-has? text "屋子")
+             (thing-word? low "house") (thing-word? low "home"))
+         "house")
+        ((or (thing-has? text "蘑菇") (thing-word? low "mushroom")) "mushroom")
+        ((or (thing-has? text "机器人") (thing-word? low "robot")) "robot")
+        ((or (thing-has? text "气球") (thing-word? low "balloon")) "balloon")
+        ((or (thing-has? text "彩虹") (thing-word? low "rainbow")) "rainbow")
+        ((or (thing-has? text "蛋糕") (thing-word? low "cake")) "cake")
+        ((compose-flower? text) "flower")
+        ((or (thing-has? text "树") (thing-word? low "tree")) "tree")
+        ((or (thing-has? text "船") (thing-word? low "boat") (thing-word? low "ship")) "boat")
+        ((or (thing-has? text "鱼") (thing-word? low "fish")) "fish")
+        ((or (thing-has? text "云") (thing-word? low "cloud")) "cloud")
+        ((or (thing-has? text "星星") (thing-has? text "颗星") (thing-word? low "star")
+             (thing-has? (compose-strip (compose-strip text "星期") "行星") "星"))
+         "star")
+        ((or (thing-has? text "汽车") (thing-has? text "小车") (thing-word? low "car")) "car")
+        ((or (thing-has? text "太阳") (thing-word? low "sun")) "sun")
+        ((or (thing-has? text "月亮") (thing-word? low "moon")) "moon")
+        ((or (thing-has? text "飞机") (thing-word? low "plane") (thing-word? low "airplane")) "plane")
+        (else "")))))
+
+(define (compose-draw? text)
+  (or (thing-has? text "画") (thing-has? text "做") (thing-has? text "变出")
+      (thing-has? text "来一个") (thing-has? text "加一个") (thing-has? text "放一个")
+      (thing-word? text "draw") (thing-word? text "make")))
+
+; True when this sentence should place a toy. A pure colour line does not.
+(define (compose-wanted? text)
+  (and (string? text) (> (string-length text) 0) (not (thing-banned? text))
+       (or (not (string=? (compose-name text) "")) (compose-draw? text))))
+
+(define (compose-role text)
+  (let ((r (wish-role-of (if (string? text) text ""))))
+    (if (string=? r "") "decor" r)))
+
+(define (compose-size role)
+  (cond
+    ((string=? role "jump") "0.4")
+    ((string=? role "slide") "0.8")
+    ((string=? role "pickup") "1.1")
+    ((string=? role "pal") "0.8")
+    (else "1.2")))
+
+(define (compose-colour text)
+  (let ((t (if (string? text) text "")))
+    (cond
+      ((or (thing-has? t "粉") (thing-word? t "pink")) 1)
+      ((or (thing-has? t "红") (thing-word? t "red")) 2)
+      ((or (thing-has? t "橙") (thing-has? t "橘") (thing-word? t "orange")) 3)
+      ((or (thing-has? t "金") (thing-has? t "黄") (thing-word? t "gold") (thing-word? t "yellow")) 0)
+      ((or (thing-has? t "绿") (thing-word? t "green")) 4)
+      ((or (thing-has? t "蓝") (thing-word? t "blue")) 5)
+      ((or (thing-has? t "紫") (thing-word? t "purple") (thing-word? t "violet")) 6)
+      ((or (thing-has? t "白") (thing-word? t "white") (thing-has? t "雪")) 7)
+      (else (compose-slot (compose-sum t) 8)))))
+
+(define (compose-variant text)
+  (compose-slot (compose-sum (if (string? text) text "")) 3))
+
+(define (compose-label text)
+  (let ((n (compose-name text)))
+    (if (string=? n "")
+      (string-append "toy" (compose-digit (compose-slot (compose-sum text) 8)))
+      n)))
+
+(define (compose-part shape x y z sx sy sz rgb glow)
+  (string-append "(part " shape " " x " " y " " z " " sx " " sy " " sz " " rgb " " glow ")"))
+
+(define (compose-join xs)
+  (let loop ((ys xs) (s ""))
+    (if (or (not (pair? ys)) (null? ys))
+      s
+      (loop (cdr ys)
+            (if (string=? s "") (car ys) (string-append s " " (car ys)))))))
+
+(define (compose-jump paint accent)
+  (compose-join
+    (list (compose-part "box" "0" "0.46" "0" "0.7" "0.86" "0.42" paint "0.1")
+          (compose-part "sphere" "0" "0.84" "0" "0.26" "0.22" "0.26" accent "0.25"))))
+
+(define (compose-slide paint accent)
+  (compose-join
+    (list (compose-part "box" "0" "0.74" "0" "0.9" "0.46" "0.3" paint "0.1")
+          (compose-part "cylinder" "-0.32" "0.42" "0" "0.12" "0.72" "0.12" accent "0")
+          (compose-part "cylinder" "0.32" "0.42" "0" "0.12" "0.72" "0.12" accent "0"))))
+
+(define (compose-unknown variant paint accent)
+  (cond
+    ((< variant 0.5)
+     (compose-join
+       (list (compose-part "sphere" "0" "0.72" "0" "0.42" "0.42" "0.42" paint "0.2")
+             (compose-part "sphere" "0" "0.38" "0" "0.55" "0.5" "0.55" paint "0.1")
+             (compose-part "box" "0" "0.12" "0" "0.4" "0.2" "0.4" accent "0"))))
+    ((< variant 1.5)
+     (compose-join
+       (list (compose-part "box" "-0.18" "0.35" "0" "0.4" "0.55" "0.4" paint "0.1")
+             (compose-part "sphere" "0.2" "0.55" "0" "0.34" "0.34" "0.34" accent "0.25")
+             (compose-part "cone" "0" "0.8" "0" "0.28" "0.28" "0.28" paint "0.15"))))
+    (else
+     (compose-join
+       (list (compose-part "cylinder" "0" "0.28" "0" "0.32" "0.5" "0.32" paint "0")
+             (compose-part "cone" "0" "0.72" "0" "0.4" "0.48" "0.4" accent "0.2")
+             (compose-part "sphere" "0.12" "0.42" "0.1" "0.16" "0.16" "0.16" paint "0.3"))))))
+
+(define (compose-body name variant paint accent)
+  (cond
+    ((string=? name "dragon")
+     (compose-join
+       (list (compose-part "sphere" "0.05" "0.38" "0" "0.62" "0.36" "0.42" paint "0.15")
+             (compose-part "sphere" "0.22" "0.62" "0.18" "0.28" "0.28" "0.28" paint "0.2")
+             (compose-part "cone" "0.28" "0.82" "0.22" "0.12" "0.22" "0.12" accent "0.3")
+             (compose-part "box" "-0.22" "0.48" "0" "0.42" "0.12" "0.28" accent "0.1")
+             (compose-part "cone" "-0.28" "0.32" "-0.05" "0.22" "0.14" "0.3" paint "0")
+             (compose-part "sphere" "0.3" "0.66" "0.28" "0.08" "0.08" "0.08" "0.95 0.95 0.98" "0.4"))))
+    ((string=? name "castle")
+     (compose-join
+       (list (compose-part "box" "0" "0.22" "0" "0.8" "0.4" "0.55" paint "0")
+             (compose-part "cylinder" "-0.22" "0.55" "0" "0.22" "0.5" "0.22" accent "0.1")
+             (compose-part "cylinder" "0.22" "0.5" "0.05" "0.2" "0.42" "0.2" accent "0.1")
+             (compose-part "cone" "-0.22" "0.86" "0" "0.26" "0.22" "0.26" paint "0.2")
+             (compose-part "cone" "0.22" "0.78" "0.05" "0.24" "0.2" "0.24" paint "0.2")
+             (compose-part "box" "0" "0.16" "0.22" "0.16" "0.28" "0.08" "0.95 0.85 0.45" "0.15"))))
+    ((string=? name "house")
+     (compose-join
+       (list (compose-part "box" "0" "0.32" "0" "0.7" "0.55" "0.55" paint "0.05")
+             (compose-part "cone" "0" "0.72" "0" "0.78" "0.38" "0.62" accent "0.15")
+             (compose-part "box" "0" "0.2" "0.26" "0.18" "0.32" "0.08" "0.72 0.48 0.28" "0.1")
+             (compose-part "sphere" "0.2" "0.42" "0.26" "0.12" "0.12" "0.08" "1.0 0.92 0.45" "0.35"))))
+    ((string=? name "tree")
+     (compose-join
+       (list (compose-part "cylinder" "0" "0.22" "0" "0.18" "0.4" "0.18" "0.72 0.48 0.28" "0")
+             (compose-part "sphere" "0" "0.62" "0" "0.7" "0.55" "0.7" paint "0.1")
+             (compose-part "sphere" "0.15" "0.78" "0.05" "0.4" "0.32" "0.4" accent "0.15"))))
+    ((string=? name "cake")
+     (compose-join
+       (list (compose-part "cylinder" "0" "0.28" "0" "0.7" "0.32" "0.7" paint "0.1")
+             (compose-part "cylinder" "0" "0.52" "0" "0.5" "0.22" "0.5" accent "0.15")
+             (compose-part "sphere" "0" "0.68" "0" "0.22" "0.16" "0.22" "0.98 0.55 0.75" "0.2")
+             (compose-part "sphere" "0" "0.82" "0" "0.14" "0.14" "0.14" "0.95 0.35 0.32" "0.35"))))
+    ((string=? name "flower")
+     (compose-join
+       (list (compose-part "cylinder" "0" "0.28" "0" "0.08" "0.5" "0.08" "0.35 0.82 0.4" "0")
+             (compose-part "sphere" "0" "0.68" "0" "0.28" "0.22" "0.22" paint "0.25")
+             (compose-part "sphere" "-0.16" "0.64" "0" "0.22" "0.2" "0.18" paint "0.2")
+             (compose-part "sphere" "0.16" "0.64" "0" "0.22" "0.2" "0.18" paint "0.2")
+             (compose-part "sphere" "0" "0.72" "0" "0.14" "0.14" "0.14" "1.0 0.85 0.3" "0.4"))))
+    ((string=? name "boat")
+     (compose-join
+       (list (compose-part "box" "0" "0.28" "0" "0.85" "0.28" "0.4" paint "0.1")
+             (compose-part "box" "0.1" "0.5" "0" "0.28" "0.22" "0.28" accent "0.1")
+             (compose-part "cylinder" "-0.05" "0.62" "0" "0.06" "0.5" "0.06" "0.95 0.95 0.98" "0")
+             (compose-part "box" "-0.02" "0.7" "0.02" "0.08" "0.32" "0.28" "0.95 0.95 0.98" "0.15"))))
+    ((string=? name "fish")
+     (compose-join
+       (list (compose-part "sphere" "0.05" "0.48" "0" "0.55" "0.32" "0.28" paint "0.15")
+             (compose-part "cone" "-0.32" "0.5" "0" "0.28" "0.22" "0.16" accent "0.1")
+             (compose-part "cone" "0" "0.68" "0" "0.16" "0.2" "0.12" paint "0.2")
+             (compose-part "sphere" "0.22" "0.54" "0.1" "0.08" "0.08" "0.08" "0.95 0.95 0.98" "0.3"))))
+    ((string=? name "cloud")
+     (compose-join
+       (list (compose-part "sphere" "-0.16" "0.5" "0" "0.42" "0.36" "0.36" paint "0.15")
+             (compose-part "sphere" "0.16" "0.52" "0" "0.4" "0.34" "0.34" paint "0.1")
+             (compose-part "sphere" "0" "0.66" "0" "0.36" "0.3" "0.32" accent "0.2"))))
+    ((string=? name "mushroom")
+     (compose-join
+       (list (compose-part "cylinder" "0" "0.28" "0" "0.22" "0.48" "0.22" "0.98 0.9 0.75" "0")
+             (compose-part "sphere" "0" "0.62" "0" "0.75" "0.4" "0.75" paint "0.2")
+             (compose-part "sphere" "0.15" "0.74" "0.12" "0.12" "0.1" "0.1" "0.95 0.95 0.98" "0.2"))))
+    ((string=? name "robot")
+     (compose-join
+       (list (compose-part "box" "0" "0.38" "0" "0.45" "0.48" "0.32" paint "0.1")
+             (compose-part "sphere" "0" "0.72" "0" "0.32" "0.28" "0.3" accent "0.2")
+             (compose-part "sphere" "0.08" "0.74" "0.12" "0.08" "0.08" "0.06" "0.35 0.9 0.98" "0.45")
+             (compose-part "box" "-0.32" "0.42" "0" "0.16" "0.36" "0.14" paint "0.05")
+             (compose-part "box" "0.32" "0.42" "0" "0.16" "0.36" "0.14" paint "0.05")
+             (compose-part "box" "-0.1" "0.12" "0" "0.14" "0.2" "0.16" accent "0"))))
+    ((string=? name "balloon")
+     (compose-join
+       (list (compose-part "sphere" "0" "0.68" "0" "0.5" "0.55" "0.5" paint "0.25")
+             (compose-part "cone" "0" "0.38" "0" "0.1" "0.1" "0.1" accent "0.1")
+             (compose-part "cylinder" "0" "0.2" "0" "0.05" "0.28" "0.05" "0.95 0.95 0.98" "0"))))
+    ((string=? name "star")
+     (compose-join
+       (list (compose-part "gem" "0" "0.55" "0" "0.7" "0.7" "0.25" paint "0.35")
+             (compose-part "gem" "0" "0.55" "0.05" "0.28" "0.28" "0.12" "1.0 0.95 0.7" "0.45"))))
+    ((string=? name "car")
+     (compose-join
+       (list (compose-part "box" "0" "0.28" "0" "0.85" "0.32" "0.42" paint "0.1")
+             (compose-part "box" "0.05" "0.52" "0" "0.4" "0.28" "0.36" accent "0.15")
+             (compose-part "sphere" "-0.24" "0.16" "0.12" "0.18" "0.18" "0.18" "0.35 0.38 0.42" "0")
+             (compose-part "sphere" "0.24" "0.16" "0.12" "0.18" "0.18" "0.18" "0.35 0.38 0.42" "0"))))
+    ((string=? name "rainbow")
+     (compose-join
+       (list (compose-part "torus" "0" "0.55" "0" "0.9" "0.72" "0.22" paint "0.2")
+             (compose-part "sphere" "0" "0.82" "0" "0.16" "0.16" "0.16" accent "0.35"))))
+    ((string=? name "sun")
+     (compose-join
+       (list (compose-part "sphere" "0" "0.55" "0" "0.62" "0.62" "0.62" "1.0 0.85 0.3" "0.45")
+             (compose-part "box" "0" "0.9" "0" "0.08" "0.14" "0.08" "1.0 0.92 0.45" "0.3")
+             (compose-part "box" "0" "0.22" "0" "0.08" "0.14" "0.08" "1.0 0.92 0.45" "0.3")
+             (compose-part "box" "-0.38" "0.55" "0" "0.16" "0.08" "0.08" "1.0 0.92 0.45" "0.3")
+             (compose-part "box" "0.38" "0.55" "0" "0.16" "0.08" "0.08" "1.0 0.92 0.45" "0.3"))))
+    ((string=? name "moon")
+     (compose-join
+       (list (compose-part "sphere" "0" "0.55" "0" "0.6" "0.6" "0.6" "0.95 0.95 0.98" "0.25")
+             (compose-part "sphere" "0.12" "0.64" "0.12" "0.16" "0.16" "0.16" accent "0.1"))))
+    ((string=? name "plane")
+     (compose-join
+       (list (compose-part "box" "0" "0.5" "0" "0.22" "0.18" "0.8" paint "0.1")
+             (compose-part "box" "0" "0.48" "0" "0.85" "0.08" "0.22" accent "0.1")
+             (compose-part "box" "0" "0.62" "-0.28" "0.08" "0.22" "0.2" accent "0.15")
+             (compose-part "sphere" "0" "0.5" "0.38" "0.16" "0.16" "0.16" "1.0 0.74 0.38" "0.25"))))
+    (else (compose-unknown variant paint accent))))
+
+(define (compose-form text)
+  (let* ((role (compose-role text))
+         (name (compose-label text))
+         (slot (compose-colour text))
+         (variant (compose-variant text))
+         (paint (compose-paint slot))
+         (accent (compose-paint (compose-slot (+ slot 3) 8)))
+         (anim (if (or (string=? role "jump") (string=? role "slide"))
+                 "none 0 0"
+                 (cond
+                   ((< variant 0.5) "bob 0.08 0.7")
+                   ((< variant 1.5) "float 0.12 0.5")
+                   (else "hop 0.1 0.6"))))
+         (body (if (or (string=? role "jump")
+                       (and (string=? role "slide") (not (string=? name "rainbow"))))
+                 (if (string=? role "jump")
+                   (compose-jump paint accent)
+                   (compose-slide paint accent))
+                 (compose-body name variant paint accent))))
+    (string-append "(thing " role " " (compose-size role)
+                   " (anim " anim ") (name " name ") " body ")")))
+
+; The form check-thing accepts, or #f when the line is empty or gloomy.
+(define (compose-thing text)
+  (if (or (not (string? text)) (= (string-length text) 0) (thing-banned? text))
+    #f
+    (let ((form (compose-form text)))
+      (let ((checked (check-thing form)))
+        (if (and (hash? checked) (hash-ref checked "ok" #f))
+          (hash-ref checked "form" form)
+          (let ((safe (check-thing COMPOSE-SAFE)))
+            (if (and (hash? safe) (hash-ref safe "ok" #f))
+              (hash-ref safe "form" COMPOSE-SAFE)
+              #f)))))))
+
+(define (compose-line name lang)
+  (let ((zh (string=? lang "zh")))
+    (cond
+      ((string=? name "dragon") (if zh "一条龙出现了" "A dragon appeared"))
+      ((string=? name "castle") (if zh "一座城堡出现了" "A castle appeared"))
+      ((string=? name "house") (if zh "一栋房子出现了" "A house appeared"))
+      ((string=? name "tree") (if zh "一棵树长出来了" "A tree grew"))
+      ((string=? name "cake") (if zh "一个蛋糕出现了" "A cake appeared"))
+      ((string=? name "flower") (if zh "一朵花开了" "A flower opened"))
+      ((string=? name "boat") (if zh "一艘船出现了" "A boat appeared"))
+      ((string=? name "fish") (if zh "一条鱼出现了" "A fish appeared"))
+      ((string=? name "cloud") (if zh "一朵云飘来了" "A cloud drifted in"))
+      ((string=? name "mushroom") (if zh "一朵蘑菇长出来了" "A mushroom grew"))
+      ((string=? name "robot") (if zh "一个机器人出现了" "A robot appeared"))
+      ((string=? name "balloon") (if zh "一个气球飘来了" "A balloon floated in"))
+      ((string=? name "star") (if zh "一颗星星出现了" "A star appeared"))
+      ((string=? name "car") (if zh "一辆小车出现了" "A little car appeared"))
+      ((string=? name "rainbow") (if zh "一道彩虹出现了" "A rainbow appeared"))
+      ((string=? name "sun") (if zh "太阳升起来了" "The sun came out"))
+      ((string=? name "moon") (if zh "月亮升起来了" "The moon came out"))
+      ((string=? name "plane") (if zh "一架飞机飞过来了" "A plane flew over"))
+      (else (if zh "画出来了" "Drew it")))))
+
+; The toys standing beside the runner. At most four. The same name replaces.
+(define (shown-name row)
+  (if (hash? row) (hash-ref row "name" "") ""))
+
+(define (shown-without rows name)
+  (let loop ((ys rows) (acc (list)))
+    (if (or (not (pair? ys)) (null? ys))
+      (reverse acc)
+      (if (string=? (shown-name (car ys)) name)
+        (loop (cdr ys) acc)
+        (loop (cdr ys) (cons (car ys) acc))))))
+
+(define (shown-has? rows name)
+  (let loop ((ys rows))
+    (if (or (not (pair? ys)) (null? ys))
+      #f
+      (if (string=? (shown-name (car ys)) name) #t (loop (cdr ys))))))
+
+(define (shown-last rows)
+  (let loop ((ys rows) (prev #f))
+    (if (or (not (pair? ys)) (null? ys))
+      prev
+      (loop (cdr ys) (car ys)))))
+
+(define (shown-but-last rows)
+  (let loop ((ys rows) (acc (list)))
+    (if (or (not (pair? ys)) (null? ys) (null? (cdr ys)))
+      (reverse acc)
+      (loop (cdr ys) (cons (car ys) acc)))))
+
+(define (shown-put rows item)
+  (let ((cur (if (pair? rows) rows (list)))
+        (name (shown-name item)))
+    (let ((kept (if (string=? name "") cur (shown-without cur name))))
+      (let ((next (append kept (list item))))
+        (hash "ok" #t "why" "fair" "rows" (if (> (length next) 4) (cdr next) next))))))
+
+; An empty name drops the newest. why is missing or fair.
+(define (shown-drop rows name)
+  (let ((cur (if (pair? rows) rows (list))))
+    (cond
+      ((or (not (pair? cur)) (null? cur))
+       (hash "ok" #f "why" "missing" "rows" (list) "name" ""))
+      ((or (not (string? name)) (string=? name ""))
+       (hash "ok" #t "why" "fair" "rows" (shown-but-last cur)
+             "name" (shown-name (shown-last cur))))
+      ((shown-has? cur name)
+       (hash "ok" #t "why" "fair" "rows" (shown-without cur name) "name" name))
+      (else (hash "ok" #f "why" "missing" "rows" cur "name" "")))))
