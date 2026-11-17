@@ -83,7 +83,7 @@ cybrid-systems/aura#5116 is fixed there).
 
 | target | report | verdict |
 |---|---|---|
-| the physics (`perf/spec.aura`) | `perf/out/report-physics-v025.txt` | `intend-met=1 KEEP=2 ROLLBACK=3 speedup-x=1.43` |
+| the physics (`perf/spec.aura`) | `perf/out/report-physics-v025.txt` | `intend-met=1 KEEP=2 ROLLBACK=3 speedup-x=1.40` |
 | the autopilot (`perf/spec-autopilot.aura`) | `perf/out/report-autopilot-v025.txt` | `intend-met=0 KEEP=2 ROLLBACK=7` |
 
 The numbers move with the machine's load: on a quiet run the same round
@@ -95,10 +95,10 @@ The physics round judges every candidate against the null of the define
 it rebinds, and the site floor reads the same define:
 
 ```
-candidate nudge-flyers-noop PASS reason=gate-pass heldout-ms=1638 ref-ms=2264 ref-target=nudge-flyers site-floor=0
-site nudge-flyers base-ms=178 cand-ms=160 floor-pct=20
-candidate step-poppers-noop PASS reason=gate-pass heldout-ms=1681 ref-ms=2274 ref-target=step-poppers site-floor=0
-site step-poppers base-ms=157 cand-ms=62 floor-pct=20
+candidate nudge-flyers-noop PASS reason=gate-pass heldout-ms=1654 ref-ms=2244 ref-target=nudge-flyers site-floor=0
+site nudge-flyers base-ms=162 cand-ms=169 floor-pct=20
+candidate step-poppers-noop PASS reason=gate-pass heldout-ms=1701 ref-ms=2289 ref-target=step-poppers site-floor=0
+site step-poppers base-ms=152 cand-ms=66 floor-pct=20
 ```
 
 Both candidates are kept on the **program** floor (`site-floor=0`): they
@@ -110,6 +110,13 @@ The reference each candidate is judged against is the null of the define
 it rebinds, measured in the same child process right before the
 candidate is applied ([aura-perf#25](https://github.com/cybrid-systems/aura-perf/issues/25)):
 the two numbers then differ by the candidate and by nothing else.
+
+This target's defines live in the **seed**, so the interleaved
+measurement (A B B A) is not available here: a target that measures its
+own tree replaces the define with `set!` and puts it back, and
+`mutate:rebind` changes the *body* — after three rebinds the program
+quietly computes something else
+([aura#5318](https://github.com/cybrid-systems/aura/issues/5318)).
 
 The autopilot round keeps nothing: `hazard-window`, `lane-clear-once`
 and `gap-window` are all `no-speedup`, and `wrong-scale` is
