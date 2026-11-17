@@ -13,6 +13,7 @@
 (require "lib/review")
 (require "lib/cards")
 (require "lib/wish")
+(require "lib/voice")
 (require "lib/thing")
 (require "lib/chase")
 (require "lib/world")
@@ -501,6 +502,13 @@
 (define level-x0 0.0)
 (define level-x1 128.0)
 (define level-bumps 0)
+; A spoken finish stays until this level ends. Sky props are names the
+; view draws. sun-hide turns off the soft disc when the child sends the sun home.
+(define goal-lock #f)
+(define props (list))
+(define sun-hide #f)
+; Toys drawn beside the runner from a spoken sentence. Not a road piece.
+(define shown (list))
 (define rival-for 0)
 ; The ward is not a player field. Fairness and the 15-field list stay put.
 (define ward-ready #t)
@@ -512,17 +520,46 @@
 (define (begin-level!)
   (set! level-x0 (player-x player))
   (set! level-bumps 0)
-  (set! level-x1 (+ level-x0 (level-span speed-now))))
+  (if goal-lock
+    #f
+    (set! level-x1 (+ level-x0 (adapt-span speed-now (player-score player) level-n)))))
+
+; A known-fair garden, painted at once. The rebind waits while a chat is up.
+(define (paint-env! i say)
+  (let ((row (wish-at i)))
+    (if (not row)
+      #f
+      (let ((form (hash-ref row "form" "")))
+        (if (scene-install! form)
+          (begin
+            (if (not (or (llm-posting?) (chat-open?)))
+              (publish-phrase! "scene-form" (scene-body form))
+              (set! rules-dirty #t))
+            (note! "KEEP" "fair" "scene" say "sky")
+            #t)
+          #f)))))
 
 (define (finish-level!)
-  (let ((played form)
-        (bumps level-bumps))
+  (let* ((played form)
+         (bumps level-bumps)
+         (plan (adapt-finish played bumps (player-score player) level-n))
+         (act (hash-ref plan "act" "scene"))
+         (scene-i (hash-ref plan "scene" -1)))
     (set! chase-recent (chase-remember chase-recent bumps))
-    (set! form (form-next played bumps))
+    (set! form (hash-ref plan "form" played))
     (set! level-n (+ level-n 1))
     (set! level-bumps 0)
+    (set! goal-lock #f)
     (advance-pace!)
     (begin-level!)
+    (let ((say (adapt-line act wish-locale)))
+      (if (and (number? scene-i) (>= scene-i 0))
+        (if (paint-env! scene-i say)
+          #f
+          (note! "KEEP" act "run" say))
+        (if (string=? act "harder")
+          (note! "KEEP" act "run" say)
+          #f)))
     (note! "KEEP" "level" "run" "Level clear")
     (queue-chase! played bumps (chase-sum chase-recent) speed-now)))
 
@@ -585,7 +622,7 @@
     (g-lock CARD-LIGHT-G)
     (else (feel-g f))))
 
-(define (apply-feel! why)
+(define (apply-feel! why . rest)
   ; The pace numbers move even while a POST is in flight. The rebind
   ; waits, because publishing a rule then wedges that call.
   ; A rewind lays the saved numbers and must not note a fresh pace step.
@@ -635,6 +672,9 @@
             #f)
           (if (not (= speed-now published-speed))
             (begin (publish-named! "rule-run-speed" speed-now) (set! published-speed speed-now))
+            #f)
+          (if (and (pair? rest) (string? (car rest)) (> (string-length (car rest)) 0))
+            (set! feel-cue (car rest))
             #f)
           (if (> (string-length feel-cue) 0)
             (begin
@@ -817,6 +857,12 @@
   (set! dream-phase 0)
   (set! hold-phase 0)
   (if (not speed-lock) (set! speed-now (feel-speed opening-feel)) #f)
+  (set! goal-lock #f)
+  (set! props (list))
+  (set! sun-hide #f)
+  (set! shown (list))
+  (set! thing-quiet #f)
+  (set! thing-shown-name "")
   (if tuned
     (begin (sync-rules!) (set! tuned #f))
     #f)
@@ -863,7 +909,9 @@
         "worth" (loot-worth loot-now)
         "motif" motif-now "scene" scene-now
         "pals" pals-rows "hero" (hero-public) "provider" llm-provider
-        "model" (active-model) "providers" (ready-providers)))
+        "model" (active-model) "providers" (ready-providers)
+        "props" props "sun-hide" sun-hide "shown" shown
+        "level" level-n "goal" level-x1 "level0" level-x0))
 
 (define (welcome-msg)
   (hash "op" "welcome" "seed" seed
@@ -886,7 +934,8 @@
         "model" (active-model) "providers" (ready-providers)
         "world" (hash-ref world-tree "tip" "")
         "thing" (if (hash? thing-live) (hash-ref thing-live "public" #f) #f)
-        "deck" deck-ids))
+        "deck" deck-ids
+        "props" props "sun-hide" sun-hide "shown" shown))
 
 ; The event is part of the hash when it is built. A later hash-set! on
 ; this value is the site cybrid-systems/aura #5274 exits from.
@@ -940,7 +989,8 @@
         "scene-busy" (if scene-busy #t #f)
         "pals-busy" (if pals-busy #t #f)
         "watchdogs" llm-watchdogs
-        "stall" (if stall-waiting #t #f)))
+        "stall" (if stall-waiting #t #f)
+        "props" props "sun-hide" sun-hide "shown" shown))
 
 (define (chunk-msg c)
   (hash "op" "chunk"
@@ -2388,6 +2438,9 @@
 (define thing-staged #f)
 (define thing-live #f)
 (define thing-prev #f)
+; A local toy is already on screen. A later model miss must not toast a failure.
+(define thing-quiet #f)
+(define thing-shown-name "")
 (define thing-bumps 0)
 (define thing-chosen-at 0.0)
 
@@ -2567,6 +2620,11 @@
         "checked" (list-ref r 4) "fair" (list-ref r 5)
         "score" (list-ref r 6) "why" (list-ref r 8)))
 
+; The picture is already beside the runner. Do not say the model failed.
+(define (thing-kept!)
+  (set! thing-quiet #f)
+  (thing-hud! "kept" (hash)))
+
 ; The round is over. Pick the best fair candidate, record it through
 ; evo:trial, check it once more on this fiber, and stage it for the next
 ; stretch boundary.
@@ -2588,10 +2646,13 @@
     (if (not best)
       (begin
         (thing-log "gen" thing-gen "none" "got" (length rows2) "passed" 0 "ms" ms)
-        (note! "ROLLBACK" (if (null? rows2) "timeout" "unfair") "thing"
-               (wish-line wish-locale (if (null? rows2) "timeout" "shape")) "thing")
-        (thing-hud! "none" (hash "got" (length rows2) "passed" 0 "ms" ms
-                                 "rows" (map thing-row-info rows2))))
+        (if thing-quiet
+          (thing-kept!)
+          (begin
+            (note! "ROLLBACK" (if (null? rows2) "timeout" "unfair") "thing"
+                   (wish-line wish-locale (if (null? rows2) "timeout" "shape")) "thing")
+            (thing-hud! "none" (hash "got" (length rows2) "passed" 0 "ms" ms
+                                     "rows" (map thing-row-info rows2))))))
       (let* ((r (car (cdr (cdr best))))
              (form (list-ref r 7))
              (score (list-ref r 6))
@@ -2636,9 +2697,12 @@
                                        "rows" (map thing-row-info rows2))))
           (begin
             (thing-log "gen" thing-gen "trial-refused" "variant" (list-ref r 1))
-            (note! "ROLLBACK" "trial" "thing" (wish-line wish-locale "shape") "thing")
-            (thing-hud! "none" (hash "got" (length rows2) "passed" passed "ms" ms
-                                     "why" "trial"))))))))
+            (if thing-quiet
+              (thing-kept!)
+              (begin
+                (note! "ROLLBACK" "trial" "thing" (wish-line wish-locale "shape") "thing")
+                (thing-hud! "none" (hash "got" (length rows2) "passed" passed "ms" ms
+                                         "why" "trial")))))))))
 
 ; Rebind thing-form. Returns "rebind", "set-code" or "fail".
 (define (thing-rebind! form)
@@ -2671,22 +2735,38 @@
       (if (string=? how "fail")
         (begin
           (thing-log "gen" (hash-ref st "gen" 0) "install-failed")
-          (note! "ROLLBACK" "commit" "thing" (wish-line wish-locale "shape") "thing")
-          (thing-hud! "none" (hash "why" "commit")))
-        (let ((pub (thing-public checked (hash-ref st "gen" 0))))
+          (if thing-quiet
+            (thing-kept!)
+            (begin
+              (note! "ROLLBACK" "commit" "thing" (wish-line wish-locale "shape") "thing")
+              (thing-hud! "none" (hash "why" "commit")))))
+        (let* ((keep-name (if (string=? thing-shown-name "")
+                            (hash-ref checked "name" "")
+                            thing-shown-name))
+               (pub (hash-set (thing-public checked (hash-ref st "gen" 0)) "name" keep-name))
+               (quiet thing-quiet))
           (set! thing-prev thing-live)
           (set! thing-live (hash "form" form "public" pub "from" id
                                  "role" (hash-ref checked "role" "")
                                  "gen" (hash-ref st "gen" 0)))
           (set! thing-bumps 0)
+          (if quiet
+            (set! shown (hash-ref (shown-put shown pub) "rows" shown))
+            #f)
+          (set! thing-quiet #f)
           (set! rules-dirty #t)
           (thing-log "gen" (hash-ref st "gen" 0) "installed" "via" how "chunk" id
                      "ms" (floor (- (now-ms) thing-t0))
                      "wait" (floor (- (now-ms) thing-chosen-at)))
           (note! "KEEP" "fair" "thing"
-                 (if (string=? wish-locale "zh")
-                   (thing-cue-zh (hash-ref checked "role" "") (hash-ref checked "name" ""))
-                   (let ((say (hash-ref st "say" ""))) (if (> (string-length say) 0) say "A new thing came along")))
+                 (cond
+                   (quiet
+                    (if (string=? wish-locale "zh") "样子更细了" "A finer look"))
+                   ((string=? wish-locale "zh")
+                    (thing-cue-zh (hash-ref checked "role" "") (hash-ref checked "name" "")))
+                   (else
+                    (let ((say (hash-ref st "say" "")))
+                      (if (> (string-length say) 0) say "A new thing came along"))))
                  "thing")
           (thing-hud! "live" (hash "via" how "chunk" id
                                    "ms" (floor (- (now-ms) thing-t0))
@@ -2759,6 +2839,119 @@
 
 ; The words are never the form. A bright line changes the picture at
 ; once, whether or not a model is awake. A gloomy line does not.
+(define (voice-hear intent)
+  (if (string=? wish-locale "zh")
+    (hash-ref intent "zh" "")
+    (hash-ref intent "en" "")))
+
+; A matched sentence changes the picture here. It does not ask the model.
+(define (voice-apply! intent)
+  (let ((act (hash-ref intent "act" ""))
+        (name (hash-ref intent "name" ""))
+        (dir (hash-ref intent "dir" 0)))
+    (cond
+      ((string=? act "add-prop")
+       (let ((got (voice-put props name)))
+         (set! props (hash-ref got "props" props))
+         (if (and (string=? name "sun") (hash-ref got "ok" #f))
+           (set! sun-hide #f)
+           #f)
+         (set! rules-dirty #t)
+         (note! (if (hash-ref got "ok" #f) "KEEP" "ROLLBACK")
+                (hash-ref got "why" "name") "voice"
+                (voice-line act name (hash-ref got "why" "name") wish-locale))))
+      ((string=? act "drop-prop")
+       (let ((got (voice-cut props name)))
+         (if (hash-ref got "ok" #f)
+           (begin
+             (set! props (hash-ref got "props" props))
+             (if (string=? name "sun") (set! sun-hide #t) #f)
+             (set! rules-dirty #t)
+             (note! "KEEP" "fair" "voice" (voice-line act name "fair" wish-locale)))
+           (if (and (string=? name "sun") (not sun-hide))
+             (begin
+               (set! sun-hide #t)
+               (set! rules-dirty #t)
+               (note! "KEEP" "fair" "voice" (voice-line act name "fair" wish-locale)))
+             (note! "ROLLBACK" "missing" "voice"
+                    (voice-line act name "missing" wish-locale))))))
+      ((string=? act "drop-pal")
+       (let ((cut (drop-kind pals-rows name)))
+         (if (not (hash-ref cut "ok" #f))
+           (note! "ROLLBACK" (hash-ref cut "why" "missing") "pals"
+                  (voice-line act name (hash-ref cut "why" "missing") wish-locale))
+           (let ((rows (hash-ref cut "rows" pals-rows))
+                 (say (voice-line act name "fair" wish-locale)))
+             (keep-pals! (roster-text rows hero-now)
+                         (hash "ok" #t "why" "fair" "rows" rows "cue" say)
+                         say hero-now #f)))))
+      ((string=? act "speed")
+       (let ((next (voice-speed-next speed-now dir)))
+         (if (< (voice-abs (- next speed-now)) 0.05)
+           (note! "KEEP" "same" "voice" (voice-line act "" "same" wish-locale))
+           (begin
+             (set! speed-lock #t)
+             (set! speed-now next)
+             (apply-feel! "voice" (voice-hear intent))))))
+      ((string=? act "form")
+       (let ((next (voice-form-step form dir)))
+         (if (= next form)
+           (note! "KEEP" "same" "voice" (voice-line act "" "same" wish-locale))
+           (begin
+             (set! form next)
+             (set! pace next)
+             (set! band next)
+             (apply-feel! "voice" (voice-hear intent))))))
+      ((string=? act "goal")
+       (set! level-x1 (voice-goal (player-x player) level-x0 level-x1 dir))
+       (set! goal-lock #t)
+       (set! rules-dirty #t)
+       (note! "KEEP" "fair" "voice" (voice-hear intent)))
+      ((string=? act "drop-thing")
+       (let ((got (shown-drop shown name)))
+         (if (not (hash-ref got "ok" #f))
+           (note! "ROLLBACK" "missing" "voice"
+                  (voice-line act name "missing" wish-locale))
+           (begin
+             (set! shown (hash-ref got "rows" shown))
+             (let ((pub (if (hash? thing-live) (hash-ref thing-live "public" #f) #f))
+                   (gone (hash-ref got "name" "")))
+               (if (and (hash? pub) (string=? gone (hash-ref pub "name" "")))
+                 (set! thing-live #f)
+                 #f))
+             (set! rules-dirty #t)
+             (note! "KEEP" "fair" "voice" (voice-line act name "fair" wish-locale))))))
+      (else #f))))
+
+; Place a toy before the model answers. The picture goes out on the wire
+; even when rebind is skipped because a chat is already in flight.
+(define (thing-show! text)
+  (let ((form (compose-thing text)))
+    (if (not (string? form))
+      #f
+      (let ((checked (check-thing form)))
+        (if (not (and (hash? checked) (hash-ref checked "ok" #f)))
+          #f
+          (begin
+            (set! thing-gen (+ thing-gen 1))
+            (let ((pub (thing-public checked thing-gen)))
+              (set! thing-shown-name (hash-ref pub "name" ""))
+              (set! shown (hash-ref (shown-put shown pub) "rows" (list)))
+              (set! thing-prev thing-live)
+              (set! thing-live (hash "form" form "public" pub "from" next-id
+                                     "role" (hash-ref checked "role" "")
+                                     "gen" thing-gen))
+              (set! thing-quiet (if (and llm-on thing-res) #t #f))
+              (set! thing-bumps 0)
+              (set! rules-dirty #t)
+              (if (not (or (llm-posting?) (chat-open?)))
+                (thing-rebind! form)
+                #f)
+              (note! "KEEP" "fair" "thing"
+                     (compose-line (hash-ref pub "name" "") wish-locale)
+                     "thing")
+              #t)))))))
+
 (define (on-wish c msg)
   (set! wish-locale (wish-lang (hash-ref msg "lang" "")))
   (if (wish-has-audio? msg)
@@ -2770,15 +2963,19 @@
         ((string=? text "") (wish-note! "ROLLBACK" "empty"))
         ((banned? text) (wish-note! "ROLLBACK" "banned"))
         (else
-         (let ((row (wish-with-lang (wish-answer text sky-r sky-g sky-b) wish-locale)))
-           (if (not row)
-             (wish-note! "ROLLBACK" "shape")
-             (begin
-               (apply-offline! row)
-               (if (wish-waiting? (hash-ref row "arm" "scene"))
-                 (wish-note! "SAY" "soon")
-                 #f)
-               (thing-start! text))))))))
+         (let ((intent (voice-intent text)))
+           (if intent
+             (voice-apply! intent)
+             (let ((row (wish-with-lang (wish-answer text sky-r sky-g sky-b) wish-locale)))
+               (if (not row)
+                 (wish-note! "ROLLBACK" "shape")
+                 (begin
+                   (apply-offline! row)
+                   (if (wish-waiting? (hash-ref row "arm" "scene"))
+                     (wish-note! "SAY" "soon")
+                     #f)))
+               (if (compose-wanted? text) (thing-show! text) #f)
+               (thing-start! text)))))))))
   (flush-notes! c)
   (if rules-dirty
     (begin (send c (rules-msg)) (set! rules-dirty #f))
@@ -3123,6 +3320,7 @@
     (set! last-ms 0)
     (set! feel-cue "")
     (set! slide-hinted #f)
+    (set! goal-lock #f)
     (set! ward-ready #t)
     (set! ward-left 0.0)
     (try (begin (begin-level!) (ensure-ahead!)) (catch (e) #f))

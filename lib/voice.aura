@@ -1,0 +1,321 @@
+; Spoken controls that do not wait on a model. A sun, a moon and a
+; plane are names the view already knows how to draw. Speed, pace and
+; the finish are numbers inside the same bounds the run already uses.
+; Any other picture is composed in lib/thing. The child's sentence is
+; only matched. It is never evaluated.
+(require "std/string" all:)
+(require "lib/phys")
+(require "lib/thing")
+
+(define voice-speeds (list 8.0 10.0 12.0 13.0 14.0))
+
+(define (voice-abs x)
+  (if (< x 0) (- 0 x) x))
+
+(define (voice-has? text w)
+  (and (string? text) (string? w) (>= (string-index text w 0) 0)))
+
+(define (voice-word? low w)
+  (voice-has? (string-append " " low " ") (string-append " " w " ")))
+
+(define (voice-prop? name)
+  (or (string=? name "sun") (string=? name "moon") (string=? name "plane")))
+
+(define (voice-member? xs name)
+  (let loop ((ys xs))
+    (if (or (not (pair? ys)) (null? ys))
+      #f
+      (if (and (string? (car ys)) (string=? (car ys) name))
+        #t
+        (loop (cdr ys))))))
+
+(define (voice-without xs name)
+  (let loop ((ys xs) (acc (list)))
+    (if (or (not (pair? ys)) (null? ys))
+      (reverse acc)
+      (if (and (string? (car ys)) (string=? (car ys) name))
+        (loop (cdr ys) acc)
+        (loop (cdr ys) (cons (car ys) acc))))))
+
+; At most three sky props. A second ask for the same one stays.
+(define (voice-put props name)
+  (let ((cur (if (pair? props) props (list))))
+    (cond
+      ((not (voice-prop? name)) (hash "ok" #f "why" "name" "props" cur))
+      ((voice-member? cur name) (hash "ok" #t "why" "have" "props" cur))
+      ((>= (length cur) 3) (hash "ok" #f "why" "full" "props" cur))
+      (else (hash "ok" #t "why" "fair" "props" (append cur (list name)))))))
+
+(define (voice-cut props name)
+  (let ((cur (if (pair? props) props (list))))
+    (if (voice-member? cur name)
+      (hash "ok" #t "why" "fair" "props" (voice-without cur name))
+      (hash "ok" #f "why" "missing" "props" cur))))
+
+(define (voice-remove? text low)
+  (or (voice-has? text "去掉") (voice-has? text "拿掉") (voice-has? text "不要")
+      (voice-has? text "删除") (voice-has? text "移除") (voice-has? text "关掉")
+      (voice-has? low "remove") (voice-has? low "take away")))
+
+; Drop whatever was drawn last, when the sentence names nothing else.
+(define (voice-drop-last? text low)
+  (or (voice-has? text "不要了") (voice-has? text "去掉它") (voice-has? text "去掉这个")
+      (voice-has? text "拿掉它") (voice-has? text "拿掉这个")
+      (voice-has? low "remove it") (voice-has? low "take it away")))
+
+(define (voice-prop-name text low)
+  (cond
+    ((or (voice-has? text "太阳") (voice-word? low "sun")) "sun")
+    ((or (voice-has? text "月亮") (voice-word? low "moon")) "moon")
+    ((or (voice-has? text "飞机") (voice-word? low "plane") (voice-word? low "airplane")) "plane")
+    (else "")))
+
+; Longer words first, so 小猫 is a kitten and not a leftover 猫.
+(define (voice-pal-kind text low)
+  (cond
+    ((or (voice-has? text "小猫") (voice-word? low "kitten") (voice-word? low "kitty")) "kitten")
+    ((or (voice-has? text "兔子") (voice-has? text "兔") (voice-word? low "bunny") (voice-word? low "rabbit")) "bunny")
+    ((or (voice-has? text "小狗") (voice-has? text "狗") (voice-word? low "puppy") (voice-word? low "dog")) "puppy")
+    ((or (voice-has? text "小鸟") (voice-has? text "鸟") (voice-word? low "bird")) "bird")
+    ((or (voice-has? text "蝴蝶") (voice-word? low "butterfly")) "butterfly")
+    ((or (voice-has? text "青蛙") (voice-word? low "frog")) "frog")
+    ((or (voice-has? text "鸭子") (voice-has? text "鸭") (voice-word? low "duck")) "duck")
+    ((or (voice-has? text "狐狸") (voice-word? low "fox")) "fox")
+    ((or (voice-has? text "乌龟") (voice-word? low "turtle")) "turtle")
+    ((or (voice-has? text "蜜蜂") (voice-word? low "bee")) "bee")
+    ((or (voice-has? text "出租车") (voice-word? low "taxi")) "taxi")
+    ((or (voice-has? text "赛车") (voice-word? low "racer")) "racer")
+    ((or (voice-has? text "货车") (voice-word? low "van")) "van")
+    ((or (voice-has? text "马车") (voice-word? low "wagon")) "wagon")
+    ((or (voice-has? text "汽车") (voice-has? text "小车") (voice-word? low "car")) "car")
+    ((voice-has? text "猫") "kitten")
+    (else "")))
+
+(define (voice-row act name dir zh en)
+  (hash "act" act "name" name "dir" dir "zh" zh "en" en))
+
+(define (voice-speed-ask? text low)
+  (or (voice-has? text "快点") (voice-has? text "加速") (voice-has? text "跑快")
+      (voice-has? text "更快") (voice-word? low "faster")))
+
+(define (voice-slow-ask? text low)
+  (or (voice-has? text "慢点") (voice-has? text "减速") (voice-has? text "更慢")
+      (voice-has? text "慢一") (voice-word? low "slower")))
+
+(define (voice-hard-ask? text low)
+  (or (voice-has? text "难一点") (voice-has? text "更难") (voice-has? text "难度高")
+      (voice-has? text "难一些") (voice-word? low "harder")))
+
+(define (voice-easy-ask? text low)
+  (or (voice-has? text "简单一点") (voice-has? text "更简单") (voice-has? text "容易一点")
+      (voice-has? text "难度低") (voice-word? low "easier")))
+
+; A known sky object, a friend to send home, a pace, or the finish.
+; Anything else is #f and the garden wish still answers.
+(define (voice-intent text)
+  (if (or (not (string? text)) (= (string-length text) 0))
+    #f
+    (let* ((low (string-downcase text))
+           (prop (voice-prop-name text low))
+           (pal (voice-pal-kind text low))
+           (drop (voice-remove? text low)))
+      (cond
+        ((and drop (not (string=? prop "")))
+         (voice-row "drop-prop" prop 0 "拿下去了" "That one went away"))
+        ((not (string=? prop ""))
+         (voice-row "add-prop" prop 1 "升起来了" "That one came out"))
+        ((and drop (not (string=? pal "")))
+         (voice-row "drop-pal" pal 0 "朋友回家了" "That friend went home"))
+        ; 不要快点 is slower, not a removal and not a faster step.
+        ((and drop (voice-speed-ask? text low))
+         (voice-row "speed" "" -1 "跑得慢一点了" "A gentler pace"))
+        ((and drop (voice-slow-ask? text low))
+         (voice-row "speed" "" 1 "跑得更快了" "Faster now"))
+        ((voice-speed-ask? text low)
+         (voice-row "speed" "" 1 "跑得更快了" "Faster now"))
+        ((voice-slow-ask? text low)
+         (voice-row "speed" "" -1 "跑得慢一点了" "A gentler pace"))
+        ((voice-hard-ask? text low)
+         (voice-row "form" "" 1 "难度高了一点" "A little harder"))
+        ((voice-easy-ask? text low)
+         (voice-row "form" "" -1 "难度低了一点" "A little easier"))
+        ((voice-has? text "终点")
+         (let ((d (cond
+                    ((voice-has? text "远") 1)
+                    ((voice-has? text "近") -1)
+                    (else 0))))
+           (voice-row "goal" "" d
+                      (cond
+                        ((> d 0) "终点远了一些")
+                        ((< d 0) "终点近了一些")
+                        (else "终点就在前面"))
+                      (cond
+                        ((> d 0) "The finish is farther")
+                        ((< d 0) "The finish is closer")
+                        (else "The finish is just ahead")))))
+        ((voice-word? low "finish")
+         (let ((d (cond
+                    ((voice-word? low "farther") 1)
+                    ((voice-word? low "closer") -1)
+                    (else 0))))
+           (voice-row "goal" "" d
+                      (cond
+                        ((> d 0) "终点远了一些")
+                        ((< d 0) "终点近了一些")
+                        (else "终点就在前面"))
+                      (cond
+                        ((> d 0) "The finish is farther")
+                        ((< d 0) "The finish is closer")
+                        (else "The finish is just ahead")))))
+        ((and drop (or (voice-drop-last? text low)
+                       (not (string=? (compose-name text) ""))))
+         (voice-row "drop-thing" (compose-name text) 0 "拿下去了" "That one went away"))
+        (else #f)))))
+
+; The line the child hears. why is fair, have, full, missing, last, or same.
+(define (voice-line act name why lang)
+  (let ((zh (string=? lang "zh")))
+    (cond
+      ((and (string=? act "add-prop") (string=? why "have"))
+       (if zh "已经在那里了" "That one is already out"))
+      ((and (string=? act "add-prop") (string=? why "full"))
+       (if zh "天上已经有三样了" "The sky is full"))
+      ((and (string=? act "add-prop") (string=? name "sun"))
+       (if zh "太阳升起来了" "The sun came out"))
+      ((and (string=? act "add-prop") (string=? name "moon"))
+       (if zh "月亮升起来了" "The moon came out"))
+      ((and (string=? act "add-prop") (string=? name "plane"))
+       (if zh "一架飞机飞过来了" "A plane flew over"))
+      ((and (string=? act "drop-prop") (string=? why "missing"))
+       (if zh "现在没有这个" "That one is not out"))
+      ((and (string=? act "drop-prop") (string=? name "sun"))
+       (if zh "太阳落下去了" "The sun went down"))
+      ((and (string=? act "drop-prop") (string=? name "moon"))
+       (if zh "月亮落下去了" "The moon went down"))
+      ((and (string=? act "drop-prop") (string=? name "plane"))
+       (if zh "飞机飞走了" "The plane flew away"))
+      ((and (string=? act "drop-pal") (string=? why "missing"))
+       (if zh "现在没有这个朋友" "That friend is not here"))
+      ((and (string=? act "drop-pal") (string=? why "last"))
+       (if zh "至少留一个朋友一起跑" "One friend stays to run with you"))
+      ((and (string=? act "drop-pal") (string=? why "fair"))
+       (if zh "这个朋友回家了" "That friend went home"))
+      ((string=? why "same")
+       (if zh "已经是这样了" "That is already set"))
+      ((string=? act "speed")
+       (if (> (if (number? why) why 0) 0)
+         (if zh "跑得更快了" "Faster now")
+         (if zh "跑得慢一点了" "A gentler pace")))
+      ((string=? act "form")
+       (if (> (if (number? why) why 0) 0)
+         (if zh "难度高了一点" "A little harder")
+         (if zh "难度低了一点" "A little easier")))
+      ((and (string=? act "goal") (number? why) (> why 0))
+       (if zh "终点远了一些" "The finish is farther"))
+      ((and (string=? act "goal") (number? why) (< why 0))
+       (if zh "终点近了一些" "The finish is closer"))
+      ((string=? act "goal")
+       (if zh "终点就在前面" "The finish is just ahead"))
+      ((and (string=? act "drop-thing") (string=? why "missing"))
+       (if zh "现在没有这个" "That one is not out"))
+      ((string=? act "drop-thing")
+       (if zh "拿下去了" "That one went away"))
+      (else (if zh "好" "Okay")))))
+
+; The next feel speed in that direction. 8 and 14 stay put at the ends.
+; A speed between two rungs moves to the neighbour on that side.
+(define (voice-speed-next now dir)
+  (let ((v (if (and (number? now) (> now 0.1)) (exact->inexact now) 8.0)))
+    (if (and (number? dir) (> dir 0))
+      (let loop ((xs voice-speeds))
+        (cond
+          ((null? xs) 14.0)
+          ((> (car xs) (+ v 0.01)) (car xs))
+          (else (loop (cdr xs)))))
+      (let loop ((xs (reverse voice-speeds)))
+        (cond
+          ((null? xs) 8.0)
+          ((< (car xs) (- v 0.01)) (car xs))
+          (else (loop (cdr xs))))))))
+
+; Exact 0..4. The feel table compares with =, and an inexact 2.0 misses every row.
+(define (voice-band n)
+  (cond
+    ((not (number? n)) 0)
+    ((< n 0.5) 0)
+    ((< n 1.5) 1)
+    ((< n 2.5) 2)
+    ((< n 3.5) 3)
+    (else 4)))
+
+(define (voice-form-step form dir)
+  (let ((f (voice-band form)))
+    (if (and (number? dir) (> dir 0))
+      (if (>= f 4) 4 (+ f 1))
+      (if (<= f 0) 0 (- f 1)))))
+
+; dir 0 places the arch a short way ahead. 1 pushes it out, -1 pulls it in.
+; It stays in front of the runner, and inside the course the level already uses.
+(define (voice-goal x x0 x1 dir)
+  (let ((px (if (number? x) (exact->inexact x) 0.0))
+        (a (if (number? x0) (exact->inexact x0) 0.0))
+        (b (if (number? x1) (exact->inexact x1) 128.0))
+        (d (if (number? dir) dir 0)))
+    (let ((want (cond
+                  ((> d 0) (+ b 32.0))
+                  ((< d 0) (- b 32.0))
+                  (else (+ px 56.0))))
+          (lo (max (+ px 18.0) (+ a 48.0)))
+          (hi (+ a 220.0)))
+      (max lo (min hi want)))))
+
+; Points per level. The HUD score, not the distance.
+(define (adapt-rate points level)
+  (if (and (number? points) (number? level) (> level 0))
+    (/ (max 0.0 (exact->inexact points)) (exact->inexact level))
+    0.0))
+
+; One change for the next level. A low score, or two bumps, eases the
+; pace and opens the bright cloud garden. A clean odd level steps the
+; pace up. An even level, or a single bump, keeps the pace and changes
+; the garden instead. scene -1 means the garden stays.
+(define (adapt-finish form bumps points level)
+  (let ((f (voice-band form))
+        (n (if (and (number? bumps) (> bumps 1.5)) 2 (if (and (number? bumps) (> bumps 0.5)) 1 0)))
+        (lv (cond
+              ((not (number? level)) 1)
+              ((< level 1.5) 1)
+              ((< level 2.5) 2)
+              ((< level 3.5) 3)
+              ((< level 4.5) 4)
+              ((< level 5.5) 5)
+              (else 6)))
+        (rate (adapt-rate points level)))
+    (cond
+      ((or (>= n 2) (< rate 25.0))
+       (hash "form" (max 0 (- f 1)) "act" "ease" "scene" 5))
+      ((and (<= n 0) (= (modulo lv 2) 1))
+       (hash "form" (min 4 (+ f 1)) "act" "harder" "scene" -1))
+      (else
+       (hash "form" f "act" "scene" "scene" (modulo lv 6))))))
+
+; The opening level keeps the plain span. Later levels stretch a little
+; when the score is low and shorten a little when it is high.
+(define (adapt-span pace points level)
+  (let ((base (level-span pace)))
+    (if (or (not (number? level)) (<= level 1)
+            (not (number? points)) (<= points 0.0))
+      base
+      (let ((rate (adapt-rate points level)))
+        (let ((k (cond
+                   ((< rate 25.0) 1.12)
+                   ((>= rate 80.0) 0.92)
+                   (else 1.0))))
+          (min 220.0 (max 96.0 (* base k))))))))
+
+(define (adapt-line act lang)
+  (let ((zh (string=? lang "zh")))
+    (cond
+      ((string=? act "ease") (if zh "这一关轻松一点" "A gentler path"))
+      ((string=? act "harder") (if zh "这一关难了一点" "A little harder"))
+      (else (if zh "这一关换了风景" "A new garden")))))

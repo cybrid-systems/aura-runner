@@ -1,4 +1,4 @@
-import { drawThing, growOf, animOf } from "./thing.mjs";
+import { drawThing, growOf, animOf, showBox } from "./thing.mjs";
 
 // Third-person WebGL2 view of the Lumen garden. One instanced draw of
 // unit cubes, shaded as beveled toys, spheres and seeds. The sim's
@@ -398,6 +398,7 @@ precision highp float;
 uniform vec3 uSky0; uniform vec3 uSky1; uniform vec3 uHill; uniform vec3 uHill2;
 uniform vec3 uSunCol; uniform vec2 uSun; uniform vec2 uRes;
 uniform float uTime; uniform float uCamZ; uniform float uYaw; uniform float uFov;
+uniform float uSunAmt;
 out vec4 o;
 void main() {
   vec2 uv = gl_FragCoord.xy / uRes;
@@ -418,8 +419,9 @@ void main() {
   c = mix(c, vec3(1.0, 0.95, 0.88), smoothstep(0.2, 0.9, cloud) * smoothstep(0.4, 0.75, uv.y) * 0.22);
   vec2 sun = vec2(x, uv.y) - uSun;
   float sd = length(sun);
-  c += uSunCol * smoothstep(0.14, 0.0, sd) * 0.5;
-  c += vec3(1.0, 0.97, 0.9) * smoothstep(0.035, 0.0, sd);
+  float sunAmt = max(uSunAmt, 0.0);
+  c += uSunCol * smoothstep(0.14, 0.0, sd) * 0.5 * sunAmt;
+  c += vec3(1.0, 0.97, 0.9) * smoothstep(0.035, 0.0, sd) * sunAmt;
   o = vec4(c, 1.0);
 }`;
 
@@ -547,6 +549,26 @@ void main() {
   o = vec4(mix(col, uFog, fog), 1.0);
 }`;
 
+export const SKY_KINDS = ["sun", "moon", "plane"];
+
+// Which sky bodies to draw, and how strong the shader disc is.
+// 0 hides the disc, 1 is the soft opening sun, 1.7 is a spoken sun.
+export function visibleSky(props, sunHide) {
+  const list = [];
+  const raw = Array.isArray(props) ? props : [];
+  for (const name of raw) {
+    if (SKY_KINDS.includes(name) && !list.includes(name)) list.push(name);
+    if (list.length >= 3) break;
+  }
+  const sun = list.includes("sun");
+  return {
+    sun,
+    moon: list.includes("moon"),
+    plane: list.includes("plane"),
+    shader: sunHide && !sun ? 0 : sun ? 1.7 : 1,
+  };
+}
+
 export function createRenderer(canvas) {
   const gl = canvas.getContext("webgl2", {
     alpha: false,
@@ -597,6 +619,7 @@ export function createRenderer(canvas) {
     camZ: gl.getUniformLocation(sky, "uCamZ"),
     yaw: gl.getUniformLocation(sky, "uYaw"),
     fov: gl.getUniformLocation(sky, "uFov"),
+    sunAmt: gl.getUniformLocation(sky, "uSunAmt"),
     proj: gl.getUniformLocation(mesh, "uProj"),
     view: gl.getUniformLocation(mesh, "uView"),
     eye: gl.getUniformLocation(mesh, "uEye"),
@@ -1059,6 +1082,8 @@ export function createRenderer(canvas) {
     gl.uniform1f(u.camZ, camS);
     gl.uniform1f(u.yaw, psi);
     gl.uniform1f(u.fov, camFov);
+    const skyShow = visibleSky(st.props, st.sunHide);
+    gl.uniform1f(u.sunAmt, skyShow.shader);
     gl.uniform2f(u.res, w, h);
     gl.bindVertexArray(null);
     gl.bindBuffer(gl.ARRAY_BUFFER, tri);
@@ -1626,6 +1651,53 @@ export function createRenderer(canvas) {
       }
     }
 
+    // Spoken toys stand beside the road, in the same frame as the runner.
+    // They are pictures only: the lateral offset keeps them off the lanes.
+    const roster = Array.isArray(st.shown) ? st.shown : [];
+    for (let i = 0; i < roster.length && i < 4; i++) {
+      const toy = roster[i];
+      if (!toy || !toy.parts) continue;
+      const box = showBox(toy, i);
+      const at = onRoad(pz + box.ahead, box.lat);
+      drawThing(push, toy, {
+        x: at.x, y: box.y, z: at.z, psi: at.psi,
+        w: box.w, h: box.h, d: box.d,
+      }, { grow: growOf(toy.id, nowMs, reduced), anim: thingAnim(toy, i * 0.7) });
+    }
+
+    // Spoken sun, moon and plane sit in the view. The camera looks slightly
+    // down, so these heights stay inside the frame instead of above it.
+    const skyNow = visibleSky(st.props, st.sunHide);
+    if (skyNow.sun) {
+      const at = onRoad(pz + 7, -5.2);
+      const y = 5.0;
+      push(at.x, y, at.z, 2.2, 2.2, 2.2, 1, [1, 0.86, 0.32], 0.18, 0.95, at.psi);
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2 + (reduced ? 0 : tTime * 0.3);
+        const ray = onRoad(pz + 7 + Math.cos(a) * 0.15, -5.2 + Math.sin(a) * 1.7);
+        push(ray.x, y + Math.sin(a) * 1.45, ray.z, 0.16, 0.55, 0.16, 0, [1, 0.93, 0.55], 0.3, 0.75, at.psi);
+      }
+    }
+    if (skyNow.moon) {
+      const at = onRoad(pz + 9, 5.8);
+      const y = 5.3;
+      push(at.x, y, at.z, 1.7, 1.7, 1.7, 1, [0.93, 0.95, 1], 0.22, 0.62, at.psi);
+      const crater = onRoad(pz + 9.1, 6.15);
+      push(crater.x, y + 0.2, crater.z, 0.36, 0.36, 0.36, 1, [0.75, 0.8, 0.95], 0.4, 0.2, at.psi);
+    }
+    if (skyNow.plane) {
+      const sway = reduced ? 0 : Math.sin(tTime * 0.7) * 2.4;
+      const bob = reduced ? 0 : Math.sin(tTime * 1.5) * 0.25;
+      const at = onRoad(pz + 16, sway);
+      const y = 3.8 + bob;
+      const yaw = at.psi;
+      push(at.x, y, at.z, 0.34, 0.26, 1.45, 0, [0.96, 0.98, 1], 0.32, 0.22, yaw);
+      push(at.x, y, at.z, 2.15, 0.08, 0.38, 0, [0.55, 0.78, 0.98], 0.32, 0.16, yaw);
+      const tail = onRoad(pz + 15.35, sway);
+      push(tail.x, y + 0.26, tail.z, 0.08, 0.4, 0.26, 0, [0.98, 0.55, 0.42], 0.32, 0.14, yaw);
+      const nose = onRoad(pz + 16.7, sway);
+      push(nose.x, y, nose.z, 0.2, 0.2, 0.2, 1, [1, 0.74, 0.38], 0.28, 0.28, yaw);
+    }
     drawFinish(st.goal);
 
     if (st.event === "ward") burst(rx, py + 0.7, rz, [0.72, 0.9, 1], 8, 0.04, 4);

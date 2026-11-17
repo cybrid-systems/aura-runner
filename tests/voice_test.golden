@@ -1,0 +1,80 @@
+sun add-prop sun 1
+moon add-prop moon 1
+plane add-prop plane 1
+sun-en add-prop sun 1
+drop-sun drop-prop sun 0
+drop-moon drop-prop moon 0
+kitten drop-pal kitten 0
+fox drop-pal fox 0
+fast speed  1
+slow speed  -1
+hard form  1
+easy form  -1
+goal goal  0
+far goal  1
+near goal  -1
+star none
+pink none
+hello none
+sunny none
+speed-up 10000.0
+speed-top 14000.0
+speed-down 13000.0
+speed-mid 10000.0
+form-up 1
+form-cap 4
+form-floor 0
+goal-set 66000.0
+goal-near 118000.0
+goal-far 160000.0
+goal-cap 220000.0
+low ease 0 5
+odd harder 1 -1
+even scene 1 2
+bumps ease 1 5
+hold scene 1 2
+cap harder 4 -1
+span-open 128000.0
+span-low 143360.0
+span-high 117760.0
+span-top 202400.0
+put 1
+have have
+two 2
+full have
+cut 1
+miss missing
+drop 1
+drop-miss missing
+drop-last last
+fox 1
+bee 1
+line-zh 1
+line-miss 1
+not-fast speed  -1
+drop-dragon drop-thing dragon 0
+drop-it drop-thing  0
+draw-dragon none
+dragon 1 dragon pal
+house 1 house decor
+robot 1 robot decor
+unknown 1 toy1 decor
+cloud 1 cloud decor
+jump 1 toy1 jump
+slide 1 toy0 slide
+differ 1
+name-garden 
+name-flower flower
+name-sunny 
+name-house house
+want-dragon 1
+want-pink 0
+want-hello 0
+want-cloud 1
+want-star 1
+shown-n 2
+shown-top dragon
+shown-drop fair 1
+shown-miss missing
+shown-last fair house
+shown-cap 4 robot

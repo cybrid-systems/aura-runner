@@ -332,6 +332,28 @@
                 n
                 (+ n 1)))))))
 
+; Send one kind home. The last friend stays, so the path is never empty.
+(define (drop-kind rows kind)
+  (if (or (not (string? kind)) (string=? kind "") (not (pair? rows)))
+    (hash "ok" #f "why" "missing" "rows" (if (pair? rows) rows (list)))
+    (let ((n (let loop ((xs rows) (k 0))
+               (if (null? xs)
+                 k
+                 (loop (cdr xs)
+                       (if (string=? (hash-ref (car xs) "kind" "") kind) (+ k 1) k)))))
+          (total (length rows)))
+      (cond
+        ((= n 0) (hash "ok" #f "why" "missing" "rows" rows))
+        ((<= (- total n) 0) (hash "ok" #f "why" "last" "rows" rows))
+        (else
+         (let loop ((xs rows) (acc (list)))
+           (if (null? xs)
+             (let ((kept (reverse acc)))
+               (hash "ok" #t "why" "fair" "rows" kept "form" (pals-text kept)))
+             (if (string=? (hash-ref (car xs) "kind" "") kind)
+               (loop (cdr xs) acc)
+               (loop (cdr xs) (cons (car xs) acc))))))))))
+
 ; Add incoming rows onto the roster. An existing name is replaced.
 ; The cue names the first newcomer, or a quiet change when nobody new arrived.
 (define (merge-pals rows incoming)
