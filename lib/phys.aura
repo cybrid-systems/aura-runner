@@ -509,6 +509,19 @@
     (or (> px (+ right 1.0))
         (< (+ (+ px (piece-w q)) 1.0) left))))
 
+; The piece list comes back unchanged unless a coin was picked up, so
+; the walk does not copy it.
+;
+; The old body consed every piece onto an accumulator and rebuilt the
+; list at the end: a cons, a reverse and an append per piece, every
+; frame. The game walks the pieces 600 times per course, and most
+; frames touch no coin at all — the list comes back the same.
+;
+; Only a coin changes the list. A bump, a spring and a death change the
+; player and the event, not the pieces. So the walk below keeps no
+; accumulator at all: it remembers the index of a picked-up coin and
+; rebuilds the list once, when a coin was picked up.
+
 (define (collide p pieces rules)
   (let* ((forgive (hash-ref rules "forgive"))
          (ph (hash-ref rules "ph"))
@@ -521,55 +534,67 @@
          (right (- (+ (player-x p) (/ pw 2.0)) forgive))
          (bottom (+ (player-y p) forgive))
          (top (- (+ (player-y p) h) forgive)))
-    (let loop ((ps pieces) (acc (list)) (player p) (event "ok") (dead #f))
+    (let loop ((ps pieces) (n 0) (coins (list)) (player p) (event "ok") (dead #f))
       (if (or (null? ps) dead)
-        (list player (append (reverse acc) ps) (if dead "dead" event))
+        ; The list is rebuilt once, when a coin was picked up: the
+        ; coins carry their index and their new piece.
+        (let ((out (if (null? coins)
+                       pieces
+                       (let rebuild ((xs pieces) (i 0) (cs coins) (acc (list)))
+                         (if (null? xs)
+                             (reverse acc)
+                             (if (and (pair? cs) (= (car (car cs)) i))
+                                 (rebuild (cdr xs) (+ i 1) (cdr cs) (cons (cdr (car cs)) acc))
+                                 (rebuild (cdr xs) (+ i 1) cs (cons (car xs) acc))))))))
+          (list player out (if dead "dead" event)))
         (let ((q (car ps)))
           (if (collide-far? q left right)
-            (loop (cdr ps) (cons q acc) player event #f)
+            (loop (cdr ps) (+ n 1) coins player event #f)
             (let* ((k (piece-k q))
-               (qlane (piece-lane q))
-               (px (piece-x q))
-               (wide (piece-w q))
-               (y1 (piece-y q))
-               (span (cond
-                       ((= k 4.0) (gate-span px wide))
-                       ((or (= k 8.0) (= k 10.0))
-                        (let ((mid (+ px (* wide 0.5)))
-                              (half (if (= k 10.0) RIVAL-HALF FLY-HALF)))
-                          (cons (- mid half) (+ mid half))))
-                       ((= k 7.0)
-                        (let* ((mid (+ px (* wide 0.5)))
-                               (half (min (* wide 0.5) POT-HALF)))
-                          (cons (- mid half) (+ mid half))))
-                       (else (cons px (+ px wide)))))
-               (x1 (car span))
-               (x2 (cdr span))
-               (y2 (if (= k 7.0) (min (+ y1 (piece-h q)) POT-TOP) (+ y1 (piece-h q))))
-               (side (if (or (= k 7.0) (= k 8.0) (= k 10.0))
-                       (meets-side? (player-lx p) qlane
-                                    (if (= k 7.0) POT-REACH RIVAL-REACH))
-                       (hits-lane? q lane)))
-               (hit (and side (rects-overlap? left bottom right top x1 y1 x2 y2))))
-          (cond
-            ((and hit (or (= k 3.0) (= k 4.0) (= k 7.0) (= k 8.0) (= k 9.0) (= k 10.0)))
-             (if (strict? rules)
-               (loop (cdr ps) (cons q acc) (pset player 5 0.0) "dead" #t)
-               (if (> (player-grace player) 0.0)
-                 (loop (cdr ps) (cons q acc) player event #f)
-                 (loop (cdr ps) (cons q acc) (pay-bump player) "bump" #f))))
-            ((and hit (= k 5.0))
-             (loop (cdr ps)
-                   (cons (piece 0.0 x1 (piece-w q) (piece-h q) y1 (piece-lane q)) acc)
-                   (pset player 6 (+ (player-score player) (pickup-worth rules)))
-                   "coin"
-                   #f))
-            ((and hit (= k 6.0) (<= (player-y player) 0.05) (<= (player-vy player) 0.0))
-             (loop (cdr ps) (cons q acc)
-                   (pset (pset (pset player 2 (* jump 1.28)) 3 0.0) 14 0.0)
-                   "spring"
-                   #f))
-            (else (loop (cdr ps) (cons q acc) player event #f))))))))))
+                   (qlane (piece-lane q))
+                   (px (piece-x q))
+                   (wide (piece-w q))
+                   (y1 (piece-y q))
+                   (span (cond
+                           ((= k 4.0) (gate-span px wide))
+                           ((or (= k 8.0) (= k 10.0))
+                            (let ((mid (+ px (* wide 0.5)))
+                                  (half (if (= k 10.0) RIVAL-HALF FLY-HALF)))
+                              (cons (- mid half) (+ mid half))))
+                           ((= k 7.0)
+                            (let* ((mid (+ px (* wide 0.5)))
+                                   (half (min (* wide 0.5) POT-HALF)))
+                              (cons (- mid half) (+ mid half))))
+                           (else (cons px (+ px wide)))))
+                   (x1 (car span))
+                   (x2 (cdr span))
+                   (y2 (if (= k 7.0) (min (+ y1 (piece-h q)) POT-TOP) (+ y1 (piece-h q))))
+                   (side (if (or (= k 7.0) (= k 8.0) (= k 10.0))
+                           (meets-side? (player-lx p) qlane
+                                        (if (= k 7.0) POT-REACH RIVAL-REACH))
+                           (hits-lane? q lane)))
+                   (hit (and side (rects-overlap? left bottom right top x1 y1 x2 y2))))
+              (cond
+                ((and hit (or (= k 3.0) (= k 4.0) (= k 7.0) (= k 8.0) (= k 9.0) (= k 10.0)))
+                 (if (strict? rules)
+                   (loop (cdr ps) (+ n 1) coins (pset player 5 0.0) "dead" #t)
+                   (if (> (player-grace player) 0.0)
+                     (loop (cdr ps) (+ n 1) coins player event #f)
+                     (loop (cdr ps) (+ n 1) coins (pay-bump player) "bump" #f))))
+                ((and hit (= k 5.0))
+                 (loop (cdr ps) (+ n 1)
+                       (append coins
+                               (list (cons n (piece 0.0 x1 (piece-w q) (piece-h q) y1 (piece-lane q)))))
+                       (pset player 6 (+ (player-score player) (pickup-worth rules)))
+                       "coin"
+                       #f))
+                ((and hit (= k 6.0) (<= (player-y player) 0.05) (<= (player-vy player) 0.0))
+                 (loop (cdr ps) (+ n 1) coins
+                       (pset (pset (pset player 2 (* jump 1.28)) 3 0.0) 14 0.0)
+                       "spring"
+                       #f))
+                (else (loop (cdr ps) (+ n 1) coins player event #f)))))))))
+)
 
 ; Pickup points live on the player. Distance is only the server's
 ; running total; the picture scores the pickups themselves.

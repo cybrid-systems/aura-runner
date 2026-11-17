@@ -74,7 +74,7 @@
           "site" (hash-ref mined "site" "")
           "prefix" (hash-ref mined "prefix" '())
           "order" (list "nudge-flyers-noop" "step-poppers-noop"
-                        "collide-slack" "wrong-scale")
+                        "collide-nocopy" "collide-slack" "wrong-scale")
           "per-round" 2)))
 
 ; The worldline measurement. The runtime asks the target program for the
