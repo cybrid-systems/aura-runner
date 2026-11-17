@@ -79,6 +79,19 @@ Hitting a hurdle, a gate, or a pot does not end the run. The runner slows for a 
 
 A kept phrase is published with `(mutate :rebind)`. `set-code` runs only when a rebind refuses.
 
+## Wished objects
+
+A wish also asks the model for one small object. The keyword answer still lands at once; the object follows a few seconds later.
+
+- The core starts `LUMEN_THING_FIBERS` fibers (default 4). Each asks for the object with its own hint and temperature (simple 0.3, detail 0.7, cute 0.9, bold 1.1).
+- A reply is data, never code: `(thing ROLE SIZE (anim KIND AMP RATE) (name WORD) (part SHAPE X Y Z SX SY SZ R G B GLOW) ...)`. `ROLE` is `pickup`, `jump`, `slide`, `decor` or `pal`. `SHAPE` is `box`, `sphere`, `cylinder`, `cone`, `torus` or `gem`. Up to 8 parts, all inside the unit box, with bright colours and capped glow and motion. Jump and slide objects stay still or barely bob.
+- `check-thing` refuses anything outside those bounds and any banned word. The fiber then plays a short stretch with the object at its size and keeps it only if the autopilot clears it.
+- Replies after `LUMEN_THING_DEADLINE_MS` (default 11000) are dropped. The rest are scored on intent (role, colour, shape asked for), difficulty, richness and margin. The best one goes through `evo:trial`, and the HUD shows it.
+- It goes live through `publish-rule!` on the next new chunk, never mid-chunk. Two bumps on its first chunks, or the browser failing to draw it, roll it back.
+- The view draws it inside the hit box of its role, so it grows in without changing fairness.
+
+`node scripts/check-thing-e2e.mjs` runs this against a mock model. `THING_LIVE=1` with a configured provider runs ten Chinese wishes instead, and `THING_LONG_S=150` adds a long run.
+
 ## Layout
 
 - `core/main.aura` — TCP newline-JSON server, simulation, proposals
@@ -88,6 +101,7 @@ A kept phrase is published with `(mutate :rebind)`. `set-code` runs only when a 
 - `scripts/play-review.aura` — plays the seeded stretches and prints those notes
 - `lib/scene.aura` — garden phrase
 - `lib/pals.aura` — companions and the runner's look
+- `lib/thing.aura` — the wished object: spec checker, fairness and scoring
 - `web/` — WebGL2 view
 - `bridge/server.mjs` — static files and the WebSocket bridge
 - `./run.sh` — one command
@@ -103,6 +117,7 @@ node scripts/check-lanes.mjs
 node scripts/smoke.mjs
 node scripts/mock-llm-e2e.mjs
 node scripts/check-probe.mjs
+node scripts/check-thing-e2e.mjs
 bash scripts/check-install.sh
 ```
 

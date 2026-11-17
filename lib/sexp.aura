@@ -66,8 +66,9 @@
       (and (>= c 48) (<= c 57))
       (= c 45)))
 
+; A leading minus is part of the number. Every caller still range-checks.
 (define (parse-num s i n)
-  (let loop ((k i) (dot #f) (digits 0))
+  (let loop ((k (if (= (string-ref s i) 45) (+ i 1) i)) (dot #f) (digits 0))
     (if (>= k n)
       (finish-num s i k dot digits)
       (let ((c (string-ref s k)))

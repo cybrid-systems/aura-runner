@@ -9,6 +9,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+// The core compiles before it prints PORT; that takes about 8 s on a loaded box.
+const AURA_START_MS = Number(process.env.AURA_START_MS || 30000);
 
 function cleanEnv(env) {
   delete env.LUMEN_DEEPSEEK_KEY;
@@ -129,7 +131,7 @@ function startAura(log, base) {
     const tick = () => {
       if (text.includes("PORT ")) resolve(text);
       else if (child.exitCode !== null) reject(new Error("aura exited\n" + text));
-      else if (Date.now() - t0 > 8000) reject(new Error("aura timeout\n" + text));
+      else if (Date.now() - t0 > AURA_START_MS) reject(new Error("aura timeout\n" + text));
       else setTimeout(tick, 40);
     };
     tick();

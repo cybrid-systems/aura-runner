@@ -13,6 +13,7 @@
 (require "lib/review")
 (require "lib/cards")
 (require "lib/wish")
+(require "lib/thing")
 (require "lib/chase")
 (require "lib/world")
 (require "lib/primer")
@@ -163,8 +164,11 @@
   (rules-of g-now jump-now speed-now slide-now coyote-now forgive-now
             (loot-worth loot-now) air-now magnet-now))
 
+(define thing-src-now "")
 (define (full-src)
-  (hot-source g-now jump-now slide-now speed-now coyote-now forgive-now hue-now motif-now scene-now pals-now air-now magnet-now))
+  (string-append
+    "(define (thing-form) \"" thing-src-now "\")\n"
+    (hot-source g-now jump-now slide-now speed-now coyote-now forgive-now hue-now motif-now scene-now pals-now air-now magnet-now)))
 
 (define (rule-body n)
   (string-append "(lambda () " (num-src n) ")"))
@@ -685,10 +689,13 @@
          (rival (rival-for-chunk x0 x1))
          (with (append placed
                        (if toss (list toss) (list))
-                       (if rival (list rival) (list)))))
+                       (if rival (list rival) (list))))
+         (installed (thing-boundary! id))
+         (thing (thing-for-chunk id)))
     (set! chunks (append chunks (list (hash "id" id "x0" x0 "x1" x1
                                             "band" b "origin" origin "hue" h
                                             "margin" margin
+                                            "thing" thing
                                             "pieces" with))))
     (set! world (append world with))
     (set! next-x x1)
@@ -746,6 +753,9 @@
     (set! rules-dirty #t)))
 
 (define (reset-run!)
+  ; A kept thing stays with the world. The new road carries it from 0.
+  (if (hash? thing-live) (set! thing-live (hash-set thing-live "from" 0)) #f)
+  (set! thing-bumps 0)
   ; A death used to leave llm-busy set, so the next run never asked again.
   (set! llm-busy #f)
   (set! motif-busy #f)
@@ -875,6 +885,7 @@
         "pals" pals-rows "hero" (hero-public) "provider" llm-provider
         "model" (active-model) "providers" (ready-providers)
         "world" (hash-ref world-tree "tip" "")
+        "thing" (if (hash? thing-live) (hash-ref thing-live "public" #f) #f)
         "deck" deck-ids))
 
 ; The event is part of the hash when it is built. A later hash-set! on
@@ -939,6 +950,7 @@
         "band" (hash-ref c "band")
         "origin" (hash-ref c "origin")
         "hue" (hash-ref c "hue")
+        "thing" (hash-ref c "thing" #f)
         "pieces" (hash-ref c "pieces")))
 
 ; all? resends every chunk still on the server. A reconnect cannot
@@ -2351,6 +2363,394 @@
       ((string=? arm "pals") (consider-pals! form say))
       (else (consider-form! form say)))))
 
+; ---------------------------------------------------------------- things
+; A spoken wish also asks the model for a new thing (lib/thing.aura).
+; The keyword picture above is the placeholder, on screen at once.
+; Several fibers ask in parallel, each with its own prompt variant and
+; temperature, and each checks and scores its own reply off the tick.
+; The tick closes the round at the deadline, records the winner with
+; evo:trial, and stages it. The next stretch that is laid installs it
+; with (mutate :rebind) on thing-form, so a stretch already on the road
+; never changes. Two stumbles on the first stretches that carry a new
+; hurdle or gate, or a browser that cannot draw it, put the previous
+; thing back.
+(define thing-res #f)
+(define thing-gen 0)
+(define thing-open #f)
+(define thing-t0 0.0)
+(define thing-rows (list))
+(define thing-text "")
+(define thing-role "")
+(define thing-asked 0)
+(define thing-late 0)
+; Fibers spawned and not yet heard from, across rounds.
+(define thing-out 0)
+(define thing-staged #f)
+(define thing-live #f)
+(define thing-prev #f)
+(define thing-bumps 0)
+(define thing-chosen-at 0.0)
+
+(define (env-num name fallback)
+  (let ((raw (try (getenv name) (catch (e) ""))))
+    (let ((n (if (and (string? raw) (> (string-length raw) 0)) (string->number raw) #f)))
+      (if (and (number? n) (> n 0)) n fallback))))
+
+(define (thing-fibers) (max 1 (min 4 (floor (env-num "LUMEN_THING_FIBERS" 4)))))
+(define (thing-deadline-ms) (exact->inexact (env-num "LUMEN_THING_DEADLINE_MS" 11000)))
+
+(define (now-ms) (exact->inexact (monotonic-ms)))
+
+(define (live-thing)
+  (let ((got (try (thing-form) (catch (e) ""))))
+    (if (string? got) got "")))
+
+(define (thing-body text)
+  (string-append "(lambda () \"" (if (string? text) text "") "\")"))
+
+(define (thing-log . xs)
+  (display "THING")
+  (let loop ((ys xs))
+    (if (null? ys)
+      (newline)
+      (begin (display " ") (display (car ys)) (loop (cdr ys))))))
+
+; A HUD row for the browser. It rides out with the decision notes.
+(define (thing-hud! phase . rest)
+  (set! pending
+    (cons (hash "op" "thing" "phase" phase "gen" thing-gen
+                "asked" thing-asked
+                "info" (if (pair? rest) (car rest) (hash))
+                "live" (if (hash? thing-live) (hash-ref thing-live "public" #f) #f))
+          pending)))
+
+; The workers post straight to the chat endpoint: the probed provider's
+; key and URL, or LLM_API_KEY / LLM_BASE_URL / LLM_MODEL. The child's
+; words were already cleaned and filtered, and the reply is only read
+; through check-thing.
+(define (thing-endpoint)
+  (if (provider-ready? llm-provider)
+    (list (provider-key llm-provider) (provider-url llm-provider) (active-model))
+    (list (env-str "LLM_API_KEY")
+          (let ((b (env-str "LLM_BASE_URL"))) (if (string=? b "") "https://api.deepseek.com/v1" b))
+          (let ((m (env-str "LLM_MODEL"))) (if (string=? m "") "deepseek-chat" m)))))
+
+(define (thing-chat sys user temp timeout-s ep)
+  (let ((body (json-encode
+                (hash "model" (list-ref ep 2)
+                      "max_tokens" 900
+                      "temperature" temp
+                      "reasoning_effort" "minimal"
+                      "messages"
+                      (list (hash "role" "system" "content" sys)
+                            (hash "role" "user" "content" user))))))
+    (let ((raw (try (http-post (chat-url (list-ref ep 1)) body (list-ref ep 0) timeout-s)
+                    (catch (e) ""))))
+      (let ((ans (try (parse-chat (if (string? raw) raw "")) (catch (e) #f))))
+        (if (hash? ans) ans (hash "ok" #f "error" "llm" "content" ""))))))
+
+; One candidate. Everything the tick needs comes back as a list of
+; atoms: gen, variant, reply ms, scored ms, checked, fair, score, form,
+; why, the model's sentence, margin, geometry, budget.
+(define (thing-worker res gen i text role rules band t0 timeout-s ep)
+  (lambda ()
+    (let ((sent (try (thing-work res gen i text role rules band t0 timeout-s ep)
+                     (catch (e) #f))))
+      (if sent
+        #t
+        (channel:send res
+          (list gen i (- (now-ms) t0) (- (now-ms) t0) 0 0 0.0 "" "error" "" 0.0 1.0 1.0))))))
+
+(define (thing-work res gen i text role rules band t0 timeout-s ep)
+  (begin
+    (let* ((ans (thing-chat THING-SYS (thing-user text role i) (thing-variant-temp i) timeout-s ep))
+           (got (- (now-ms) t0))
+           (llm-ok (and (hash? ans) (hash-ref ans "ok" #f)))
+           (content (if llm-ok (hash-ref ans "content" "") ""))
+           (checked (if llm-ok (check-thing content) (thing-refuse "llm")))
+           (ok (hash-ref checked "ok" #f))
+           (fair (if ok
+                   (thing-fair (hash-ref checked "role" "") (hash-ref checked "size" 0.0) rules)
+                   (hash "fair" #f "why" (hash-ref checked "why" "shape")
+                         "margin" 0.0 "geometry" 1.0 "budget" 1.0)))
+           (score (thing-score checked fair text band)))
+      (channel:send res
+        (list gen i got (- (now-ms) t0)
+              (if ok 1 0) (if (hash-ref fair "fair" #f) 1 0) score
+              (if ok (hash-ref checked "form" "") "")
+              (if llm-ok (hash-ref fair "why" "") (string-append "llm " (hash-ref ans "error" "")))
+              (say-line content)
+              (hash-ref fair "margin" 0.0) (hash-ref fair "geometry" 1.0) (hash-ref fair "budget" 1.0)))
+      #t)))
+
+(define (thing-start! text)
+  (if (not (and llm-on thing-res))
+    #f
+    (let ((n (thing-fibers))
+          (rules (rules-hash))
+          (b band)
+          (t0 (now-ms))
+          (timeout-s (+ 2.0 (/ (thing-deadline-ms) 1000.0)))
+          (ep (thing-endpoint)))
+      ; A new wish closes the round before it. Its late replies are dropped.
+      (set! thing-gen (+ thing-gen 1))
+      (set! thing-open #t)
+      (set! thing-t0 t0)
+      (set! thing-rows (list))
+      (set! thing-text text)
+      (set! thing-role (wish-role-of text))
+      (set! thing-asked n)
+      (set! thing-out (+ thing-out n))
+      (let ((gen thing-gen) (role thing-role))
+        (let loop ((i 0))
+          (if (< i n)
+            (begin
+              (fiber:spawn (thing-worker thing-res gen i text role rules b t0 timeout-s ep))
+              (loop (+ i 1)))
+            #f)))
+      (thing-log "gen" thing-gen "start" "fibers" n "role" (if (string=? thing-role "") "any" thing-role))
+      (thing-hud! "thinking" (hash "fibers" n "role" thing-role)))))
+
+(define (thing-row-gen r) (list-ref r 0))
+(define (thing-row-ms r) (list-ref r 2))
+
+; Every reply waiting on the channel. A reply from an older round, or
+; one that came after its round closed, is counted and dropped.
+(define (thing-drain!)
+  (let loop ()
+    (let ((m (channel:try-recv thing-res)))
+      (if (and m (pair? m))
+        (begin
+          (set! thing-out (max 0 (- thing-out 1)))
+          (if (and thing-open (= (thing-row-gen m) thing-gen)
+                   (<= (thing-row-ms m) (thing-deadline-ms)))
+            (set! thing-rows (append thing-rows (list m)))
+            (begin
+              (set! thing-late (+ thing-late 1))
+              (thing-log "gen" (thing-row-gen m) "late" "variant" (list-ref m 1)
+                         "ms" (floor (thing-row-ms m)))))
+          (loop))
+        #f))))
+
+(define (thing-count-fair rows)
+  (let loop ((rs rows) (n 0))
+    (if (null? rs) n (loop (cdr rs) (if (= (list-ref (car rs) 5) 1) (+ n 1) n)))))
+
+; The workers' own Aura code (prompt checks, check-thing, the autopilot)
+; only runs while this fiber yields. Give them a short slice each tick
+; while any is out; the browser predicts motion, so the tick can wait.
+(define (thing-slice-ms) (exact->inexact (env-num "LUMEN_THING_SLICE_MS" 8)))
+(define (thing-share!)
+  (let ((until (+ (now-ms) (thing-slice-ms))))
+    (let loop ((k 0))
+      (try (fiber:yield) (catch (e) #f))
+      (if (and (< k 4000) (< (now-ms) until))
+        (loop (+ k 1))
+        k))))
+
+(define (thing-poll! c)
+  (if (not thing-res)
+    #f
+    (begin
+      ; http-post in a worker only moves while this fiber yields, the same
+      ; as the phrase workers. One yield a tick while any worker is out.
+      (if (> thing-out 0) (thing-share!) #f)
+      (if (> thing-out 0) (thing-drain!) #f)
+      (if (and thing-open
+               (or (>= (length thing-rows) thing-asked)
+                   (> (- (now-ms) thing-t0) (thing-deadline-ms))))
+        (thing-close!)
+        #f))))
+
+(define (thing-row-info r)
+  (hash "variant" (list-ref r 1) "ms" (floor (list-ref r 2))
+        "checked" (list-ref r 4) "fair" (list-ref r 5)
+        "score" (list-ref r 6) "why" (list-ref r 8)))
+
+; The round is over. Pick the best fair candidate, record it through
+; evo:trial, check it once more on this fiber, and stage it for the next
+; stretch boundary.
+(define (thing-close!)
+  (set! thing-open #f)
+  (let* ((rows (thing-in-time thing-rows thing-t0 (+ thing-t0 (thing-deadline-ms))))
+         (rows2 (if (null? rows) thing-rows rows))
+         (passed (thing-count-fair rows2))
+         (best (thing-pick (map (lambda (r) (list (list-ref r 1) (list-ref r 6) r)) rows2)))
+         (ms (floor (- (now-ms) thing-t0))))
+    (let loop ((rs rows2))
+      (if (null? rs)
+        #f
+        (let ((r (car rs)))
+          (thing-log "gen" thing-gen "cand" (list-ref r 1) "ms" (floor (list-ref r 2))
+                     "checked" (list-ref r 4) "fair" (list-ref r 5) "score" (list-ref r 6)
+                     "why" (list-ref r 8))
+          (loop (cdr rs)))))
+    (if (not best)
+      (begin
+        (thing-log "gen" thing-gen "none" "got" (length rows2) "passed" 0 "ms" ms)
+        (note! "ROLLBACK" (if (null? rows2) "timeout" "unfair") "thing"
+               (wish-line wish-locale (if (null? rows2) "timeout" "shape")) "thing")
+        (thing-hud! "none" (hash "got" (length rows2) "passed" 0 "ms" ms
+                                 "rows" (map thing-row-info rows2))))
+      (let* ((r (car (cdr (cdr best))))
+             (form (list-ref r 7))
+             (score (list-ref r 6))
+             (cand (evo:candidate form (hash "id" (string-append "t" (int-str thing-gen) "-" (int-str (list-ref r 1)))
+                                             "target" "thing-form")))
+             (trial (begin
+                      (set! trial-open #t)
+                      (let ((t (try (evo:trial cand
+                                               (hash "timeout-ms" 1500
+                                                     "apply" (lambda (c) #t)
+                                                     "evaluate"
+                                                     (lambda (c)
+                                                       (hash "status" "ok"
+                                                             "objectives" (hash "fair" 1.0 "score" score)
+                                                             "constraints"
+                                                             (hash "budget" (list-ref r 12)
+                                                                   "geometry" (list-ref r 11)
+                                                                   "reachable" 0.0 "safe" 0.0)
+                                                             "behavior" (hash "band" (exact->inexact band))))))
+                                    (catch (e) #f))))
+                        (set! trial-open #f)
+                        t)))
+             (again (check-thing form)))
+        (if (and trial (evo:trial-ok? trial) (evo:feasible? trial) (hash-ref again "ok" #f))
+          (begin
+            (set! thing-staged
+                  (hash "form" (hash-ref again "form" form)
+                        "checked" again
+                        "say" (list-ref r 9)
+                        "score" score
+                        "variant" (list-ref r 1)
+                        "passed" passed
+                        "got" (length rows2)
+                        "gen" thing-gen))
+            (set! thing-chosen-at (now-ms))
+            (thing-log "gen" thing-gen "chosen" "variant" (list-ref r 1) "score" score
+                       "passed" passed "got" (length rows2) "ms" ms)
+            (thing-hud! "chosen" (hash "variant" (list-ref r 1) "score" score
+                                       "passed" passed "got" (length rows2) "ms" ms
+                                       "name" (hash-ref again "name" "")
+                                       "role" (hash-ref again "role" "")
+                                       "rows" (map thing-row-info rows2))))
+          (begin
+            (thing-log "gen" thing-gen "trial-refused" "variant" (list-ref r 1))
+            (note! "ROLLBACK" "trial" "thing" (wish-line wish-locale "shape") "thing")
+            (thing-hud! "none" (hash "got" (length rows2) "passed" passed "ms" ms
+                                     "why" "trial"))))))))
+
+; Rebind thing-form. Returns "rebind", "set-code" or "fail".
+(define (thing-rebind! form)
+  (let ((prev thing-src-now))
+    (set! thing-src-now form)
+    (let ((how (publish-rule! "thing-form" (thing-body form) (full-src))))
+      (if (and (not (string=? how "fail")) (string=? (live-thing) form))
+        (begin (set! rule-rev (+ rule-rev 1)) how)
+        (begin (set! thing-src-now prev) "fail")))))
+
+(define (thing-cue-zh role name)
+  (cond
+    ((string=? role "pickup") "新的宝贝出现在路上")
+    ((string=? role "jump") "前面有新的跳跳障碍")
+    ((string=? role "slide") "前面有新的滑铲门")
+    ((string=? role "decor") "路边长出了新东西")
+    ((string=? role "pal") "一个新朋友跑来了")
+    (else "新东西来了")))
+
+; Called as a stretch is laid, before its pieces are fixed. This is the
+; only place a staged thing goes live.
+(define (thing-boundary! id)
+  (if (not (hash? thing-staged))
+    #f
+    (let* ((st thing-staged)
+           (form (hash-ref st "form" ""))
+           (checked (hash-ref st "checked" #f))
+           (how (thing-rebind! form)))
+      (set! thing-staged #f)
+      (if (string=? how "fail")
+        (begin
+          (thing-log "gen" (hash-ref st "gen" 0) "install-failed")
+          (note! "ROLLBACK" "commit" "thing" (wish-line wish-locale "shape") "thing")
+          (thing-hud! "none" (hash "why" "commit")))
+        (let ((pub (thing-public checked (hash-ref st "gen" 0))))
+          (set! thing-prev thing-live)
+          (set! thing-live (hash "form" form "public" pub "from" id
+                                 "role" (hash-ref checked "role" "")
+                                 "gen" (hash-ref st "gen" 0)))
+          (set! thing-bumps 0)
+          (set! rules-dirty #t)
+          (thing-log "gen" (hash-ref st "gen" 0) "installed" "via" how "chunk" id
+                     "ms" (floor (- (now-ms) thing-t0))
+                     "wait" (floor (- (now-ms) thing-chosen-at)))
+          (note! "KEEP" "fair" "thing"
+                 (if (string=? wish-locale "zh")
+                   (thing-cue-zh (hash-ref checked "role" "") (hash-ref checked "name" ""))
+                   (let ((say (hash-ref st "say" ""))) (if (> (string-length say) 0) say "A new thing came along")))
+                 "thing")
+          (thing-hud! "live" (hash "via" how "chunk" id
+                                   "ms" (floor (- (now-ms) thing-t0))
+                                   "variant" (hash-ref st "variant" 0)
+                                   "score" (hash-ref st "score" 0.0)
+                                   "passed" (hash-ref st "passed" 0)
+                                   "got" (hash-ref st "got" 0))))))))
+
+(define (thing-rollback! why)
+  (if (not (hash? thing-live))
+    #f
+    (let* ((back (if (hash? thing-prev) (hash-ref thing-prev "form" "") ""))
+           (how (thing-rebind! back)))
+      (thing-log "gen" (hash-ref thing-live "gen" 0) "rollback" why "via" how)
+      (set! thing-live (if (hash? thing-prev)
+                         (hash "form" back "public" (hash-ref thing-prev "public" #f)
+                               "from" next-id "role" (hash-ref thing-prev "role" "")
+                               "gen" (hash-ref thing-prev "gen" 0))
+                         #f))
+      (set! thing-prev #f)
+      (set! thing-bumps 0)
+      (set! rules-dirty #t)
+      (note! "ROLLBACK" why "thing"
+             (if (string=? wish-locale "zh") "换回了上一个样子" "The previous look came back")
+             "thing")
+      (thing-hud! "rollback" (hash "why" why)))))
+
+(define (chunk-id-at x)
+  (let loop ((cs chunks))
+    (if (null? cs)
+      -1
+      (let ((ch (car cs)))
+        (if (and (>= x (hash-ref ch "x0" 0.0)) (< x (hash-ref ch "x1" 0.0)))
+          (hash-ref ch "id" -1)
+          (loop (cdr cs)))))))
+
+; A stumble on one of the first three stretches that carry a new hurdle
+; or gate counts against it. Two put the previous thing back.
+(define (thing-watch! ev)
+  (if (and (hash? thing-live)
+           (or (string=? ev "bump") (string=? ev "oops"))
+           (or (string=? (hash-ref thing-live "role" "") "jump")
+               (string=? (hash-ref thing-live "role" "") "slide")))
+    (let ((id (chunk-id-at (player-x player)))
+          (from (hash-ref thing-live "from" 0)))
+      (if (and (>= id from) (< id (+ from 3)))
+        (begin
+          (set! thing-bumps (+ thing-bumps 1))
+          (if (>= thing-bumps 2) (thing-rollback! "bumps") #f))
+        #f))
+    #f))
+
+(define (thing-for-chunk id)
+  (if (and (hash? thing-live) (>= id (hash-ref thing-live "from" 0)))
+    (hash-ref thing-live "public" #f)
+    #f))
+
+(define (on-thing-bad c msg)
+  (let ((gen (hash-ref msg "gen" -1)))
+    (if (and (hash? thing-live) (number? gen) (= gen (hash-ref thing-live "gen" -2)))
+      (thing-rollback! "render")
+      #f)
+    (flush-notes! c)))
+
 (define (wish-waiting? arm)
   (cond
     ((string=? arm "scene") (pair? wait-scene))
@@ -2377,7 +2777,8 @@
                (apply-offline! row)
                (if (wish-waiting? (hash-ref row "arm" "scene"))
                  (wish-note! "SAY" "soon")
-                 #f))))))))
+                 #f)
+               (thing-start! text))))))))
   (flush-notes! c)
   (if rules-dirty
     (begin (send c (rules-msg)) (set! rules-dirty #f))
@@ -2815,6 +3216,8 @@
       (note! "BUMP" ev "run"
              (if (string=? ev "oops") "Back on the path" "Oops! Keep going"))
       #f)
+    (thing-watch! ev)
+    (thing-poll! c)
     (advance-pace!)
     (maybe-hold!)
     (maybe-cards!)
@@ -3043,6 +3446,7 @@
       ((string=? op "primer") (on-primer c msg))
       ((string=? op "propose") (on-propose c msg))
       ((string=? op "wish") (on-wish c msg))
+      ((string=? op "thing-bad") (on-thing-bad c msg))
       ((string=? op "provider") (on-provider c msg))
       ((string=? op "audit") (on-audit c msg))
       ((string=? op "rewind") (on-rewind c msg))
@@ -3118,6 +3522,7 @@
         (set! scene-res (channel:create 2))
         (set! pals-req (channel:create 2))
         (set! pals-res (channel:create 2))
+        (set! thing-res (channel:create 16))
         (fiber:spawn (lambda () (llm-worker motif-req motif-res SYS "motif")))
         (fiber:spawn (lambda () (llm-worker scene-req scene-res SCENE-SYS "scene")))
         (fiber:spawn (lambda () (llm-worker pals-req pals-res PALS-SYS "pals"))))
