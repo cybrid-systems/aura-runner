@@ -1,6 +1,6 @@
 rebind-before 1
-trial-good 1 1
-trial-bad 1 0
+trial-good 1 1 ok
+trial-bad 0 0 infeasible
 live-before 
 rebind-after 1
 keep-unfair 0

@@ -26,9 +26,7 @@ The badge (`LUMEN-42`) is the seed. Open `http://127.0.0.1:8080/?seed=42` for th
 
 Hold Space and say what you want to see. Let go and those words go out. The game receives the words, not the sound. A bright line changes the picture at once: a pink, blue, gold, or violet sky, flowers, a star, a gate, or a small friend. Any other bright line still picks a new garden, and steps to another one if that garden is already on screen. A gloomy line is turned away and the picture stays.
 
-Cards sit above that badge. Clearing level 1, level 2, and level 3 adds 轻轻的, 再跳一下, and 吸过来. A star pickup adds the last one early. 用这几张 tries the set on a slice of the run and does not change the feel until it is kept. A set that cannot be cleared, or a gravity outside 18 to 40, is turned away and the previous cards stay. A shared link is `?seed=` plus `cards=light.1,double.1,magnet.1`.
-
-进阶 on a card you already have shows that one rule. Changing its number tries the run, and the number stays only when the trial gets through. A number outside 18 to 40, or a line that is not that one rule, is turned away and the previous number stays. The road keeps moving while the box is open.
+The road keeps its hurdles, gates, and blocks. Hold Space and say 加速 to step the pace up (8, 10, 12, 13, 14). 慢一点 steps it down.
 
 A friend on the path keeps up with the run. It changes its speed, how often it switches lanes, or where it appears, one small step at a time, and only after a short trial still gets through. A miss puts the previous step back. The opening lesson has none. The three looks stay a fox, a bird, and a beetle.
 

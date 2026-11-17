@@ -603,9 +603,6 @@ function grantCard(id) {
 }
 
 function noteCardGrants() {
-  if (levelN >= 2) grantCard("light");
-  if (levelN >= 3) grantCard("double");
-  if (levelN >= 4) grantCard("magnet");
 }
 
 function sendDeck(ids) {
@@ -742,13 +739,6 @@ function connect() {
       if (typeof msg.world === "string") {
         worldline = { ...worldline, tip: msg.world };
         saveWorld(localStorage, worldline);
-      }
-      const rewound = typeof msg.world === "string" && msg.world.length > 0;
-      if (rewound) applyServerDeck(Array.isArray(msg.deck) ? msg.deck : []);
-      else {
-        cardPick = cardBook.equipped.slice();
-        paintCards();
-        if (cardBook.equipped.length) sendDeck(cardBook.equipped);
       }
       if (!notesEl.hidden) paintNotes();
     } else if (msg.op === "resync") {
@@ -1013,7 +1003,6 @@ function frame(now) {
       if (ev === "coin") {
         audio.pickup(loot);
         spark = "coin";
-        if (loot === "star") grantCard("magnet");
         const got = awardPickup(rules.worth, combo, comboUntil, now, grade, gradeBank);
         combo = got.combo;
         comboUntil = got.comboUntil;
