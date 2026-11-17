@@ -238,6 +238,22 @@ html, body {
   box-shadow: 0 8px 22px rgba(92, 52, 20, 0.16);
 }
 #said[hidden] { display: none; }
+#thing-hud {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(176px, calc(env(safe-area-inset-bottom) + 166px));
+  max-width: min(300px, 74vw);
+  margin: 0;
+  padding: 6px 12px;
+  border-radius: 14px;
+  background: rgba(255, 252, 244, 0.9);
+  color: var(--ink);
+  font: 600 13px/1.3 ui-rounded, "Segoe UI", system-ui, sans-serif;
+  text-align: right;
+  pointer-events: none;
+}
+#thing-hud[data-busy="1"]::before { content: "✦ "; }
+#thing-hud[hidden] { display: none; }
 #badge {
   position: fixed;
   left: max(16px, env(safe-area-inset-left));

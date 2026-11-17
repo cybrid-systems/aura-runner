@@ -6,6 +6,8 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+// The core compiles before it prints PORT; that takes about 8 s on a loaded box.
+const AURA_START_MS = Number(process.env.AURA_START_MS || 30000);
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const aura = process.env.AURA_BIN || "aura";
@@ -87,7 +89,7 @@ try {
     const tick = () => {
       if (logText.includes("PORT ")) resolve();
       else if (child.exitCode !== null) reject(new Error("aura exited\n" + logText));
-      else if (Date.now() - t0 > 8000) reject(new Error("aura timeout\n" + logText));
+      else if (Date.now() - t0 > AURA_START_MS) reject(new Error("aura timeout\n" + logText));
       else setTimeout(tick, 40);
     };
     tick();
