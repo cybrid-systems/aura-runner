@@ -167,9 +167,10 @@ async function drive() {
     let sawSay = false;
     let sawRunner = false;
     let maxChunks = 0;
-    // The x86 nightly can spend this whole window before the kept garden
+    // The x86 nightly can spend most of this window before the kept garden
     // and the runner are both on the wire. Stop as soon as they are.
-    const deadline = Date.now() + 75000;
+    // On a two-core runner the kept phrase lands at about 72 s on main.
+    const deadline = Date.now() + Number(process.env.MOCK_WINDOW_MS || 120000);
     while (Date.now() < deadline && !(sawMotif && sawScene && sawCue && sawPal && sawShape && sawSay && sawRunner)) {
       io.send({ op: "tick", jump: 0, slide: 0, lane: 0 });
       batch = await readUntil(io, (m) => m.op === "state", 40);
