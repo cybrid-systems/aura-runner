@@ -4,6 +4,8 @@ import { createRenderer } from "./render.mjs";
 import { createInput } from "./input.mjs";
 import { createAudio } from "./audio.mjs";
 import { installWish } from "./wish.mjs";
+import { validThing } from "./thing.mjs";
+import { installThingHud } from "./thinghud.mjs";
 import { adoptDecision, loadWorld, paintWorld, saveWorld } from "./world.mjs";
 
 const canvas = document.getElementById("view");
@@ -124,6 +126,7 @@ let worldline = loadWorld(localStorage);
 const saidRows = [];
 let ws;
 let connected = false;
+const thingHud = installThingHud();
 let booted = false;
 
 function num(v, fallback) {
@@ -297,13 +300,36 @@ function remember(msg) {
   else showCue(cue);
 }
 
+// A chunk may carry a generated thing. It is checked here once; a thing
+// this page cannot draw is reported so the core puts the previous one back.
+let thingChunks = [];
+const thingSeen = new Map();
+function chunkThing(raw) {
+  if (!raw) return null;
+  const key = raw.id;
+  if (thingSeen.has(key)) return thingSeen.get(key);
+  const t = validThing(raw);
+  thingSeen.set(key, t);
+  if (thingSeen.size > 16) thingSeen.delete(thingSeen.keys().next().value);
+  if (!t && connected && ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ op: "thing-bad", gen: key }));
+  }
+  return t;
+}
+
 function addChunk(msg) {
   if (seenChunks.has(msg.id)) return;
   seenChunks.add(msg.id);
   const born = msg.origin === "motif" ? performance.now() : 0;
+  const thing = chunkThing(msg.thing);
+  if (thing) {
+    thingChunks.push({ id: msg.id, x0: msg.x0, x1: msg.x1, thing });
+    if (thingChunks.length > 12) thingChunks.shift();
+  }
   for (const q of msg.pieces) {
     const copy = q.slice();
     if (born) copy.born = born;
+    if (thing) copy.thing = thing;
     pieces.push(copy);
   }
 }
@@ -332,6 +358,7 @@ function resetLocal() {
   player.set(p);
   pieces = [];
   seenChunks = new Set();
+  thingChunks = [];
   alive = true;
   acc = 0;
   combo = 0;
@@ -731,6 +758,8 @@ function connect() {
       if (window.__lumenOnDecision) window.__lumenOnDecision(msg);
       if (msg.kind === "KEEP" && (msg.arm === "motif" || msg.arm === "scene" || msg.arm === "pals")) audio.keep();
       if (msg.kind === "ROLLBACK") rejectSpark = true;
+    } else if (msg.op === "thing") {
+      thingHud.show(msg);
     } else if (msg.op === "primer" && msg.status === "same") {
       endPrimerWait();
     } else if (msg.op === "err" && msg.why === "rewind") {
@@ -1019,6 +1048,7 @@ function frame(now) {
         near: nearSpark, reject: rejectSpark,
         scene: sceneView, stumble: stumble / 1500, pals, hero, bend, loot,
         goal: levelGoal,
+        thingChunks,
         gear: gearTier(),
         ward: wardReady ? 1 : Math.max(0, (WARD_WAIT - wardLeft) / WARD_WAIT),
       });

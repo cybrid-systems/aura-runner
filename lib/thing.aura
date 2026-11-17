@@ -1,0 +1,533 @@
+; A generated thing is data, never code. The model writes one
+; s-expression built from a short list of shapes and numbers:
+;
+;   (thing ROLE SIZE (anim KIND AMP RATE)
+;          (part SHAPE X Y Z SX SY SZ R G B GLOW) ...)
+;
+; ROLE   pickup | jump | slide | decor | pal
+; SIZE   the road number for that role (pickup height, hurdle height,
+;        gate bottom, decor scale, friend scale), each with its own range
+; anim   optional. KIND none | spin | bob | hop | float
+; part   SHAPE box | sphere | cylinder | cone | torus | gem. X Y Z is
+;        the centre in a unit box (x and z -0.5..0.5, y 0..1), SX SY SZ
+;        the size in that box, R G B a bright colour, GLOW 0..0.6.
+;
+; The renderer fits that unit box onto the role's real hit box, so the
+; picture is never bigger or smaller than what the runner meets.
+; sexp-parse has no strings, quotes or comments, so nothing here can
+; reach eval, mutate or I/O. check-thing refuses anything outside the
+; caps below.
+(require "std/string" all:)
+(require "lib/sexp")
+(require "lib/gen")
+
+(define THING-MAX-PARTS 8)
+(define THING-MIN-SIZE 0.05)
+(define THING-SLACK 0.02)
+(define THING-LUMA 0.30)
+(define THING-GLOW 0.6)
+
+(define thing-roles (list "pickup" "jump" "slide" "decor" "pal"))
+(define thing-shapes (list "box" "sphere" "cylinder" "cone" "torus" "gem"))
+(define thing-anims (list "none" "spin" "bob" "hop" "float"))
+
+(define (thing-member? s xs)
+  (let loop ((ys xs))
+    (if (null? ys)
+      #f
+      (if (string=? (car ys) s) #t (loop (cdr ys))))))
+
+(define (thing-index s xs)
+  (let loop ((ys xs) (i 0))
+    (if (null? ys)
+      -1
+      (if (string=? (car ys) s) i (loop (cdr ys) (+ i 1))))))
+
+(define (thing-in? v lo hi)
+  (and (number? v) (>= v lo) (<= v hi)))
+
+; SIZE range per role. A hurdle a child can clear, a gate with daylight
+; under it, a pickup the body can reach.
+(define (thing-size-lo role)
+  (cond
+    ((string=? role "pickup") 0.8)
+    ((string=? role "jump") 0.3)
+    ((string=? role "slide") 0.62)
+    ((string=? role "decor") 0.6)
+    (else 0.5)))
+
+(define (thing-size-hi role)
+  (cond
+    ((string=? role "pickup") 1.6)
+    ((string=? role "jump") 0.6)
+    ((string=? role "slide") 0.9)
+    ((string=? role "decor") 2.0)
+    (else 1.0)))
+
+; Something on the road holds still inside its hit box. A spin keeps
+; the box; a bob may lift only a little. Friends and decor may hop.
+(define (thing-anim-ok? role kind amp rate)
+  (and (thing-member? kind thing-anims)
+       (thing-in? amp 0.0 0.3)
+       (thing-in? rate 0.0 3.0)
+       (if (or (string=? role "jump") (string=? role "slide"))
+         (or (string=? kind "none") (string=? kind "spin")
+             (and (string=? kind "bob") (<= amp 0.05)))
+         #t)))
+
+(define (thing-refuse why)
+  (hash "ok" #f "why" why "role" "" "size" 0.0
+        "anim" (list "none" 0.0 0.0) "parts" (list) "count" 0))
+
+(define (thing-nums xs n)
+  (let loop ((ys xs) (k 0) (acc (list)))
+    (if (= k n)
+      (if (null? ys) (reverse acc) #f)
+      (if (or (null? ys) (not (number? (car ys))))
+        #f
+        (loop (cdr ys) (+ k 1) (cons (exact->inexact (car ys)) acc))))))
+
+(define (thing-luma r g b)
+  (+ (* 0.25 r) (* 0.5 g) (* 0.25 b)))
+
+; One part: (part SHAPE X Y Z SX SY SZ R G B GLOW). GLOW may be left out.
+; Returns (shape-index x y z sx sy sz r g b glow) or a refusal string.
+(define (thing-part sp)
+  (if (or (not (pair? sp)) (not (string? (car sp))) (not (string=? (car sp) "part"))
+          (not (pair? (cdr sp))) (not (string? (car (cdr sp)))))
+    "shape"
+    (let ((shape (car (cdr sp)))
+          (raw (cdr (cdr sp))))
+      (if (not (thing-member? shape thing-shapes))
+        "part-shape"
+        (let ((nums (or (thing-nums raw 10)
+                        (let ((nine (thing-nums raw 9)))
+                          (if nine (append nine (list 0.0)) #f)))))
+          (if (not nums)
+            "part-numbers"
+            (let ((x (list-ref nums 0)) (y (list-ref nums 1)) (z (list-ref nums 2))
+                  (sx (list-ref nums 3)) (sy (list-ref nums 4)) (sz (list-ref nums 5))
+                  (r (list-ref nums 6)) (g (list-ref nums 7)) (b (list-ref nums 8))
+                  (glow (list-ref nums 9)))
+              (cond
+                ((or (not (thing-in? sx THING-MIN-SIZE 1.0))
+                     (not (thing-in? sy THING-MIN-SIZE 1.0))
+                     (not (thing-in? sz THING-MIN-SIZE 1.0)))
+                 "part-size")
+                ((or (> (+ (abs x) (* 0.5 sx)) (+ 0.5 THING-SLACK))
+                     (> (+ (abs z) (* 0.5 sz)) (+ 0.5 THING-SLACK))
+                     (< (- y (* 0.5 sy)) (- 0.0 THING-SLACK))
+                     (> (+ y (* 0.5 sy)) (+ 1.0 THING-SLACK)))
+                 "part-outside")
+                ((or (not (thing-in? r 0.1 1.0)) (not (thing-in? g 0.1 1.0))
+                     (not (thing-in? b 0.1 1.0)))
+                 "colour")
+                ((< (thing-luma r g b) THING-LUMA) "dark")
+                ((not (thing-in? glow 0.0 THING-GLOW)) "glow")
+                (else
+                 (list (exact->inexact (thing-index shape thing-shapes))
+                       x y z sx sy sz r g b glow))))))))))
+
+; Union box of the parts: (x0 x1 y0 y1 z0 z1).
+(define (thing-bounds parts)
+  (let loop ((ps parts) (x0 1.0) (x1 -1.0) (y0 2.0) (y1 -1.0) (z0 1.0) (z1 -1.0))
+    (if (null? ps)
+      (list x0 x1 y0 y1 z0 z1)
+      (let* ((p (car ps))
+             (x (list-ref p 1)) (y (list-ref p 2)) (z (list-ref p 3))
+             (hx (* 0.5 (list-ref p 4))) (hy (* 0.5 (list-ref p 5))) (hz (* 0.5 (list-ref p 6))))
+        (loop (cdr ps)
+              (min x0 (- x hx)) (max x1 (+ x hx))
+              (min y0 (- y hy)) (max y1 (+ y hy))
+              (min z0 (- z hz)) (max z1 (+ z hz)))))))
+
+; A hurdle reads as tall as it is, a gate bar as wide as it is.
+; A pickup is not a speck.
+(define (thing-cover-ok? role parts)
+  (let* ((bx (thing-bounds parts))
+         (w (- (list-ref bx 1) (list-ref bx 0)))
+         (h (- (list-ref bx 3) (list-ref bx 2)))
+         (d (- (list-ref bx 5) (list-ref bx 4))))
+    (cond
+      ((string=? role "jump") (and (>= h 0.6) (>= w 0.5)))
+      ((string=? role "slide") (and (>= w 0.6) (>= h 0.4)))
+      ((string=? role "pickup") (>= (max w (max h d)) 0.3))
+      (else (>= (max w (max h d)) 0.2)))))
+
+(define (thing-clause form name)
+  (let loop ((xs form))
+    (if (null? xs)
+      #f
+      (let ((sp (car xs)))
+        (if (and (pair? sp) (string? (car sp)) (string=? (car sp) name))
+          sp
+          (loop (cdr xs)))))))
+
+(define (thing-heads-ok? xs)
+  (let loop ((ys xs))
+    (if (null? ys)
+      #t
+      (let ((sp (car ys)))
+        (if (and (pair? sp) (string? (car sp))
+                 (or (string=? (car sp) "part") (string=? (car sp) "anim")
+                     (string=? (car sp) "name")))
+          (loop (cdr ys))
+          #f)))))
+
+(define (thing-count-head xs name)
+  (let loop ((ys xs) (n 0))
+    (if (null? ys)
+      n
+      (loop (cdr ys)
+            (if (and (pair? (car ys)) (string? (car (car ys)))
+                     (string=? (car (car ys)) name))
+              (+ n 1)
+              n)))))
+
+(define (thing-parts xs)
+  (let loop ((ys xs) (acc (list)))
+    (if (null? ys)
+      (reverse acc)
+      (let ((sp (car ys)))
+        (if (and (pair? sp) (string=? (car sp) "part"))
+          (let ((p (thing-part sp)))
+            (if (string? p) p (loop (cdr ys) (cons p acc))))
+          (loop (cdr ys) acc))))))
+
+(define (thing-name-of xs)
+  (let ((sp (thing-clause xs "name")))
+    (if (and sp (pair? (cdr sp)) (string? (car (cdr sp))) (null? (cdr (cdr sp)))
+             (<= (string-length (car (cdr sp))) 16))
+      (string-downcase (car (cdr sp)))
+      "")))
+
+; The sentence in front of the form is the model's line. Only the
+; balanced (thing ...) is read.
+(define (thing-text text)
+  (extract-balanced-thing text))
+
+;; The balanced form that opens at index i, or #f.
+(define (thing-balanced-at s i)
+  (let ((n (string-length s)))
+    (let loop ((k i) (depth 0))
+      (if (>= k n)
+        #f
+        (let ((c (string-ref s k)))
+          (cond
+            ((= c 40) (loop (+ k 1) (+ depth 1)))
+            ((= c 41) (if (<= depth 1) (substring s i (+ k 1)) (loop (+ k 1) (- depth 1))))
+            (else (loop (+ k 1) depth))))))))
+
+;; Models sometimes drop the head word, or put the object's name there:
+;; (pickup 1.1 ...) or (donut pickup 1.1 ...). Both become (thing pickup
+;; 1.1 ...). Only the head is rewritten; the checker still reads the rest.
+(define (thing-fix-head src)
+  (let ((form (sexp-parse src)))
+    (cond
+      ((not (and (pair? form) (string? (car form)))) #f)
+      ((string=? (car form) "thing") src)
+      ((thing-member? (car form) thing-roles) (string-append "(thing " (substring src 1 (string-length src))))
+      ((and (pair? (cdr form)) (string? (car (cdr form))) (thing-member? (car (cdr form)) thing-roles))
+       (let ((sp (string-index src " " 0)))
+         (if (< sp 0) #f (string-append "(thing" (substring src sp (string-length src))))))
+      (else #f))))
+
+(define (extract-balanced-thing s)
+  (if (not (string? s))
+    #f
+    (let ((i (string-index s "(thing" 0)))
+      (if (>= i 0)
+        (thing-balanced-at s i)
+        (let loop ((k (string-index s "(" 0)) (tries 0))
+          (if (or (< k 0) (>= tries 4))
+            #f
+            (let* ((src (thing-balanced-at s k))
+                   (fixed (if src (try (thing-fix-head src) (catch (e) #f)) #f)))
+              (cond
+                (fixed fixed)
+                (src (loop (string-index s "(" (+ k (string-length src))) (+ tries 1)))
+                (else #f)))))))))
+
+; Returns a hash: ok, why, role, size, anim (kind amp rate), parts,
+; count, name, form (the one-line source that passed).
+(define (check-thing text)
+  (cond
+    ((or (not (string? text)) (= (string-length text) 0)) (thing-refuse "empty"))
+    ((thing-banned? text) (thing-refuse "banned"))
+    (else
+     (let* ((src (extract-balanced-thing text))
+            (form (if src (sexp-parse src) #f)))
+       (cond
+         ((or (not form) (not (pair? form)) (not (string? (car form)))
+              (not (string=? (car form) "thing"))
+              (not (pair? (cdr form))) (not (pair? (cdr (cdr form)))))
+          (thing-refuse (if src "syntax" "shape")))
+         (else
+          (let ((role (car (cdr form)))
+                (size (car (cdr (cdr form))))
+                (rest (cdr (cdr (cdr form)))))
+            (cond
+              ((or (not (string? role)) (not (thing-member? role thing-roles)))
+               (thing-refuse "role"))
+              ((not (thing-in? size (thing-size-lo role) (thing-size-hi role)))
+               (thing-refuse "size"))
+              ((not (thing-heads-ok? rest)) (thing-refuse "symbol"))
+              ((> (thing-count-head rest "anim") 1) (thing-refuse "anim"))
+              ((= (thing-count-head rest "part") 0) (thing-refuse "no-parts"))
+              ((> (thing-count-head rest "part") THING-MAX-PARTS) (thing-refuse "too-many"))
+              (else
+               (let* ((asp (thing-clause rest "anim"))
+                      (akind (if (and asp (pair? (cdr asp)) (string? (car (cdr asp))))
+                               (car (cdr asp)) "none"))
+                      (anums (if asp
+                               (let ((ns (thing-nums (if (pair? (cdr asp)) (cdr (cdr asp)) (list)) 2)))
+                                 ns)
+                               (list 0.0 0.0)))
+                      (parts (thing-parts rest)))
+                 (cond
+                   ((string? parts) (thing-refuse parts))
+                   ((or (not anums)
+                        (not (thing-anim-ok? role akind (car anums) (car (cdr anums)))))
+                    (thing-refuse "anim"))
+                   ((not (thing-cover-ok? role parts)) (thing-refuse "cover"))
+                   (else
+                    (hash "ok" #t "why" "fair" "role" role
+                          "size" (exact->inexact size)
+                          "anim" (list akind (car anums) (car (cdr anums)))
+                          "parts" parts
+                          "count" (length parts)
+                          "name" (thing-name-of rest)
+                          "form" (one-line-thing src))))))))))))))
+
+(define (one-line-thing s)
+  (string-replace (string-replace s "\n" " ") "\r" " "))
+
+; ---------------------------------------------------------------- trial
+
+; The short stretch a candidate is tried on. It uses the role's own
+; road piece at the candidate's SIZE, so a hurdle that is too tall for
+; this pace fails the same gate the obstacle phrases do.
+(define (thing-trial-form role size)
+  (let ((s (num-text size)))
+    (cond
+      ((string=? role "jump")
+       (string-append "(seq (ground 10.4) (hurdle " s " 0.8) (ground 10.4) (hurdle " s " 0.8) (ground 6.0))"))
+      ((string=? role "slide")
+       (string-append "(seq (ground 10.4) (gate " s " 0.9) (ground 10.4) (gate " s " 0.9) (ground 6.0))"))
+      ((string=? role "pickup")
+       (string-append "(seq (ground 8.0) (coin " s ") (ground 8.0) (coin-lane 1 " s ") (ground 8.0))"))
+      (else "(seq (ground 10.4) (ground 10.4))"))))
+
+(define (num-text n)
+  (let ((s (number->string (exact->inexact n))))
+    (if (string-contains? s ".") s (string-append s ".0"))))
+
+; geometry, budget and spare time from the layout gate, then the
+; autopilot on that stretch. Returns a hash with fair (#t/#f),
+; margin and the three numbers.
+(define (thing-fair role size rules)
+  (let ((laid (layout-form (thing-trial-form role size) rules)))
+    (if (not (hash? laid))
+      (hash "fair" #f "why" "layout" "margin" 0.0 "geometry" 1.0 "budget" 1.0)
+      (let* ((geom (hash-ref laid "geometry" 1.0))
+             (budget (hash-ref laid "budget" 1.0))
+             (margin (hash-ref laid "margin" 0.0))
+             (gate-ok (and (<= geom 0.0) (<= budget 0.0) (>= margin SPARE-S)
+                           (> (hash-ref laid "x1" 0.0) 0.0)))
+             (clear (if gate-ok (autopilot-clear? (hash-ref laid "pieces") rules) #f)))
+        (hash "fair" (and gate-ok clear)
+              "why" (cond ((> geom 0.0) "geometry")
+                          ((> budget 0.0) "budget")
+                          ((< margin SPARE-S) "reachable")
+                          ((not clear) "autopilot")
+                          (else "fair"))
+              "margin" margin "geometry" geom "budget" budget)))))
+
+; ---------------------------------------------------------------- intent
+
+; Words from the wish that say what kind of thing, what colour and what
+; shape. The wish is only compared, never copied into the form.
+(define (wish-role-of text)
+  (let ((low (string-downcase (if (string? text) text ""))))
+    (cond
+      ((or (has-any? text (list "兔" "猫" "狗" "鸟" "朋友" "小熊" "恐龙" "鸭" "龙" "小马" "企鹅" "熊猫"))
+           (has-any? low (list "bunny" "kitten" "puppy" "friend" "bird" "bear" "duck")))
+       "pal")
+      ((has-any? text (list "滑" "门" "桥" "拱" "隧道" "彩虹"))
+       "slide")
+      ((has-any? text (list "跳" "栏" "墙" "木头" "石头" "箱子" "障碍"))
+       "jump")
+      ((has-any? text (list "树" "房子" "城堡" "路边" "灯" "风车" "蘑菇屋" "塔"))
+       "decor")
+      ((or (has-any? text (list "星" "币" "糖" "果" "宝石" "钻石" "蛋糕" "冰淇淋" "礼物" "气球" "吃"))
+           (has-any? low (list "star" "coin" "candy" "gem" "cake")))
+       "pickup")
+      (else ""))))
+
+; string-index is the native search. std/string's string-contains?
+; builds a substring per position, which is a few ms per word here.
+(define (thing-has? text w)
+  (>= (string-index text w 0) 0))
+
+(define (has-any? text words)
+  (let loop ((ws words))
+    (if (null? ws)
+      #f
+      (if (thing-has? text (car ws)) #t (loop (cdr ws))))))
+
+; The same lists banned? reads, on the native search.
+(define (thing-banned? text)
+  (and (string? text)
+       (or (has-any? (string-downcase text) banned-words)
+           (has-any? text banned-zh))))
+
+; (r g b) the wish names, or #f.
+(define (wish-colour-of text)
+  (let ((t (if (string? text) text "")))
+    (cond
+      ((has-any? t (list "粉")) (list 0.98 0.6 0.75))
+      ((has-any? t (list "红")) (list 0.95 0.3 0.3))
+      ((has-any? t (list "橙" "橘")) (list 1.0 0.6 0.25))
+      ((has-any? t (list "金" "黄")) (list 1.0 0.85 0.3))
+      ((has-any? t (list "绿")) (list 0.4 0.85 0.4))
+      ((has-any? t (list "蓝" "海")) (list 0.4 0.65 1.0))
+      ((has-any? t (list "紫")) (list 0.7 0.5 0.95))
+      ((has-any? t (list "白" "云" "雪")) (list 0.95 0.95 0.98))
+      (else #f))))
+
+(define (wish-shape-of text)
+  (let ((t (if (string? text) text "")))
+    (cond
+      ((has-any? t (list "球" "圆" "泡泡" "气球")) "sphere")
+      ((has-any? t (list "甜甜圈" "圈" "环" "轮")) "torus")
+      ((has-any? t (list "星" "宝石" "钻石" "水晶")) "gem")
+      ((has-any? t (list "塔" "锥" "冰淇淋" "帽")) "cone")
+      ((has-any? t (list "柱" "罐" "鼓" "蜡烛")) "cylinder")
+      ((has-any? t (list "箱" "盒" "方" "积木" "礼物")) "box")
+      (else ""))))
+
+(define (thing-colour-near parts rgb)
+  (let loop ((ps parts) (best 9.0))
+    (if (null? ps)
+      best
+      (let* ((p (car ps))
+             (d (+ (abs (- (list-ref p 7) (car rgb)))
+                   (abs (- (list-ref p 8) (car (cdr rgb))))
+                   (abs (- (list-ref p 9) (car (cdr (cdr rgb))))))))
+        (loop (cdr ps) (min best d))))))
+
+(define (thing-has-shape? parts shape)
+  (let ((code (exact->inexact (thing-index shape thing-shapes))))
+    (let loop ((ps parts))
+      (if (null? ps)
+        #f
+        (if (= (car (car ps)) code) #t (loop (cdr ps)))))))
+
+; 0..1. Role, colour and shape each count when the wish names them.
+; A wish that names none of them scores 0.5.
+(define (thing-intent checked text)
+  (let* ((role (wish-role-of text))
+         (rgb (wish-colour-of text))
+         (shape (wish-shape-of text))
+         (parts (hash-ref checked "parts" (list)))
+         (asked (+ (if (string=? role "") 0 1) (if rgb 1 0) (if (string=? shape "") 0 1)))
+         (got (+ (if (and (not (string=? role "")) (string=? role (hash-ref checked "role" ""))) 1.0 0.0)
+                 (if rgb (max 0.0 (- 1.0 (/ (thing-colour-near parts rgb) 0.9))) 0.0)
+                 (if (and (not (string=? shape "")) (thing-has-shape? parts shape)) 1.0 0.0))))
+    (if (= asked 0) 0.5 (/ got asked))))
+
+; 0..1. The pace band 0..4 asks for a size; closer is better.
+(define (thing-size-target role band)
+  (let ((b (exact->inexact (max 0 (min 4 band)))))
+    (cond
+      ((string=? role "jump") (+ 0.32 (* 0.06 b)))
+      ((string=? role "slide") (- 0.86 (* 0.05 b)))
+      ((string=? role "pickup") 1.2)
+      ((string=? role "decor") 1.2)
+      (else 0.8))))
+
+(define (thing-difficulty checked band)
+  (let* ((role (hash-ref checked "role" ""))
+         (lo (thing-size-lo role))
+         (hi (thing-size-hi role))
+         (d (abs (- (hash-ref checked "size" lo) (thing-size-target role band)))))
+    (max 0.0 (- 1.0 (/ d (max 0.01 (- hi lo)))))))
+
+(define (thing-richness checked)
+  (min 1.0 (/ (exact->inexact (hash-ref checked "count" 1)) 5.0)))
+
+; The score the selection sorts by. Unfair is always 0.
+(define (thing-score checked fair text band)
+  (if (not (and (hash? checked) (hash-ref checked "ok" #f) (hash? fair) (hash-ref fair "fair" #f)))
+    0.0
+    (+ 1.0
+       (* 0.45 (thing-intent checked text))
+       (* 0.25 (thing-difficulty checked band))
+       (* 0.15 (thing-richness checked))
+       (* 0.15 (min 1.0 (/ (hash-ref fair "margin" 0.0) 1.0))))))
+
+; rows: list of (id score ...). Highest score wins; a tie keeps the
+; earlier arrival. A row with score 0 never wins.
+(define (thing-pick rows)
+  (let loop ((rs rows) (best #f))
+    (if (null? rs)
+      best
+      (let ((r (car rs)))
+        (if (and (> (car (cdr r)) 0.0)
+                 (or (not best) (> (car (cdr r)) (car (cdr best)))))
+          (loop (cdr rs) r)
+          (loop (cdr rs) best))))))
+
+; Arrivals after the deadline are dropped. rows are (id ms ...).
+(define (thing-in-time rows t0 deadline-ms)
+  (let loop ((rs rows) (acc (list)))
+    (if (null? rs)
+      (reverse acc)
+      (if (<= (- (car (cdr (car rs))) t0) deadline-ms)
+        (loop (cdr rs) (cons (car rs) acc))
+        (loop (cdr rs) acc)))))
+
+; ---------------------------------------------------------------- prompts
+
+(define THING-SYS
+  "You design one small toy object for a children's 3D running game. Reply with one short bright English sentence, then exactly one s-expression and nothing else. Grammar: (thing ROLE SIZE (anim KIND AMP RATE) (name WORD) (part SHAPE X Y Z SX SY SZ R G B GLOW) ...). ROLE is pickup, jump, slide, decor or pal. SIZE: pickup 0.8-1.6 (height above road), jump 0.3-0.6 (hurdle height), slide 0.62-0.9 (gap under the bar), decor 0.6-2.0 (scale), pal 0.5-1.0 (scale). SHAPE is box, sphere, cylinder, cone, torus or gem. Parts live in a unit box: X and Z from -0.5 to 0.5, Y from 0 to 1 (centre), SX SY SZ from 0.05 to 1, and every part must stay inside the box. R G B from 0.1 to 1 and bright. GLOW 0 to 0.6. 2 to 8 parts. KIND is none, spin, bob, hop or float; AMP 0-0.3, RATE 0-3; jump and slide may only use none, spin, or bob with AMP at most 0.05. A jump obstacle must fill at least 0.6 of the height and half the width. The s-expression must start with the word thing, like (thing pickup 1.0 (anim spin 0.1 1) (name star) (part gem 0 0.5 0 0.6 0.6 0.6 1 0.8 0.2 0.3)). No strings, no quotes, no markdown.")
+
+; Four variants: plain, more detail, cute and round, bold colour.
+(define (thing-variant-hint i)
+  (cond
+    ((= i 0) "Keep it simple: 2 to 4 parts.")
+    ((= i 1) "Add detail: 5 to 8 parts that read as the wished thing.")
+    ((= i 2) "Make it cute and round: spheres, tori and soft colours.")
+    (else "Make it bold: strong colours and one glowing part.")))
+
+(define (thing-variant-temp i)
+  (cond
+    ((= i 0) 0.3)
+    ((= i 1) 0.7)
+    ((= i 2) 0.9)
+    (else 1.1)))
+
+(define (thing-role-hint role)
+  (if (string=? role "")
+    "Choose the ROLE that fits the wish best."
+    (string-append "Use ROLE " role ".")))
+
+; The child's sentence is quoted as data for the model. It never becomes
+; part of the form; check-thing reads only (thing ...).
+(define (thing-user text role i)
+  (string-append
+    "The child wished: " text ". "
+    (thing-role-hint role) " "
+    (thing-variant-hint i)
+    " Do not copy gloomy words."))
+
+; ---------------------------------------------------------------- public
+
+; The browser gets numbers, not source.
+(define (thing-public checked id)
+  (hash "id" id
+        "role" (hash-ref checked "role" "")
+        "size" (hash-ref checked "size" 1.0)
+        "anim" (hash-ref checked "anim" (list "none" 0.0 0.0))
+        "name" (hash-ref checked "name" "")
+        "parts" (hash-ref checked "parts" (list))))
