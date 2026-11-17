@@ -75,6 +75,56 @@ negative-skip step-poppers-noop class=flat-hot hot-node=collide
 budget-used 0
 ```
 
+## The run on aura v0.2.5 with the LLVM JIT
+
+The runtime under test is a **release build of the current `main`** with
+the LLVM JIT (23.1.5, from the `aura-ci:v0.1.1` root) linked in:
+
+```sh
+cd ~/aura && git pull
+export PATH=$HOME/.local/cmake/bin:$HOME/mamba/envs/aura/bin:$PATH
+export CC=$HOME/mamba/envs/aura/bin/aarch64-conda-linux-gnu-gcc
+export CXX=$HOME/mamba/envs/aura/bin/aarch64-conda-linux-gnu-c++
+export CPLUS_INCLUDE_PATH=$HOME/mamba/envs/aura/include
+export LIBRARY_PATH=$HOME/mamba/envs/aura/lib
+cmake -S . -B build-jit -G Ninja -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_PREFIX_PATH="$HOME/mamba/envs/aura;$HOME/cache/aura-ci-root/usr;$HOME/cache/aura-ci-root/usr/lib/aarch64-linux-gnu" \
+      -DLLVM_DIR=$HOME/cache/aura-ci-root/usr/local/lib/cmake/llvm
+cmake --build build-jit --target aura -j 12
+```
+
+The JIT matters for the profile: the physics is compiled, so the
+per-define times are the compiled ones.
+
+The profile (600 frames of one course):
+
+```
+hotspot bench-kernel self-ms=1622 calls=1     share=56
+hotspot collide       self-ms=584  calls=600   share=20
+hotspot step-poppers  self-ms=177  calls=600   share=6
+hotspot nudge-flyers  self-ms=172  calls=600   share=6
+hotspot over-gap?     self-ms=130  calls=600   share=4
+hotspot pset          self-ms=113  calls=7800  share=3
+hotspot pxs           self-ms=48   calls=18000 share=1
+```
+
+`collide` is the hot leaf, and it copied the whole piece list every
+frame: a cons, a reverse and an append per piece. The candidate
+`perf/candidates/collide-nocopy.aura` keeps the list when no coin was
+picked up — a bump, a spring and a death change the player and the event,
+not the pieces — and rebuilds it once, when a coin was picked up:
+
+```
+candidate collide-nocopy PASS reason=gate-pass heldout-ms=1883 ref-ms=3118 ref-target=collide
+site collide base-ms=779 cand-ms=397 floor-pct=20
+verdict intend-met=1 KEEP=2 ROLLBACK=3 speedup-x=1.17 (2207ms->1883ms n=5)
+```
+
+The collide site halves and the whole path is 17% faster. The body was
+checked against the old one over every frame of three courses (1800
+frames): the same player, the same piece list and the same event every
+time. It is now the library's body (`lib/phys.aura`).
+
 ## The run on aura v0.2.5
 
 Both targets were re-run on **aura v0.2.5** (`7167490e`, the release
