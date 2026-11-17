@@ -78,3 +78,13 @@ shown-drop fair 1
 shown-miss missing
 shown-last fair house
 shown-cap 4 robot
+drop-both drop-prop sun+moon 0
+drop-and drop-prop sun+moon 0
+add-both add-prop sun+moon 1
+drop-npc drop-pals all 0
+drop-NPC drop-pals all 0
+drop-friends drop-pals all 0
+drop-pals drop-pals all 0
+drop-two drop-pal kitten+car 0
+both-line 1
+pals-line 1
