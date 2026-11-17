@@ -1,0 +1,31 @@
+cake 1 fair pickup 3
+log 1 fair jump 2
+arch 1 fair slide 1
+tall 0 size
+dark 0 dark
+out 0 part-outside
+bad-shape 0 part-shape
+many 0 too-many
+hopper 0 anim
+code 0 symbol
+str 0 syntax
+gloomy 0 banned
+speck 0 cover
+none 0 shape
+headless 1 fair pickup 1
+named-head 1 fair pickup 1
+other-head 0 syntax
+fair-cake 1
+fair-log 1
+fair-arch 1
+role-cake pickup
+role-arch slide
+role-none 1
+score-intent 1
+score-unfair 0.0
+score-refused 0.0
+pick 2
+pick-none 1
+in-time (1 2 4)
+user-quote 1
+public-parts 3

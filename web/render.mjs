@@ -1,3 +1,5 @@
+import { drawThing, growOf, animOf } from "./thing.mjs";
+
 // Third-person WebGL2 view of the Lumen garden. One instanced draw of
 // unit cubes, shaded as beveled toys, spheres and seeds. The sim's
 // forward axis is Z and its lane offset is X.
@@ -6,7 +8,7 @@
 // lane 0 (left) at negative X, and the renderer negates lateral positions.
 // Input still sends lane -1 for Left.
 
-const MAX = 720;
+const MAX = 1200;
 const STRIDE = 16;
 
 function mix3(a, b, t) {
@@ -440,6 +442,7 @@ flat out vec3 vHalf;
 flat out float vShape;
 flat out float vRough;
 flat out float vEmit;
+flat out float vYaw;
 void main() {
   // Yaw is roadPoint psi. Local +Z becomes the road tangent (sin ψ, 0, cos ψ).
   float c = cos(iYaw.x);
@@ -456,6 +459,7 @@ void main() {
   vShape = iPos.w;
   vRough = iSize.w;
   vEmit = iColor.a;
+  vYaw = iYaw.x;
   gl_Position = uProj * uView * vec4(world, 1.0);
 }`;
 
@@ -463,13 +467,45 @@ const MESH_FS = `#version 300 es
 precision highp float;
 in vec3 vN; in vec3 vW; in vec3 vC; in vec3 vL;
 flat in vec3 vCenter; flat in vec3 vHalf; flat in float vShape;
-flat in float vRough; flat in float vEmit;
+flat in float vRough; flat in float vEmit; flat in float vYaw;
 uniform vec3 uEye; uniform vec3 uFog; uniform float uFogAmt; uniform vec3 uLight; uniform float uTime;
 out vec4 o;
+// Cylinder, cone and torus live in the unit box of the instance and are
+// marched in that box, so any part a generated thing names is drawn by
+// the same instanced cube.
+float unitSdf(vec3 p, float shape) {
+  float rr = length(p.xz);
+  if (shape < 3.5) return max(rr - 0.5, abs(p.y) - 0.5);
+  if (shape < 4.5) return max((rr - 0.5 * (0.5 - p.y)) * 0.894, abs(p.y) - 0.5);
+  return length(vec2(rr - 0.32, p.y * 0.36)) - 0.18;
+}
 void main() {
   vec3 n = normalize(vN);
   vec3 rd = normalize(vW - uEye);
-  if (vShape > 0.5 && vShape < 1.5) {
+  if (vShape > 2.5) {
+    float cy = cos(vYaw);
+    float sy = sin(vYaw);
+    vec3 size = max(vHalf * 2.0, vec3(1e-3));
+    vec3 rl = vec3(cy * rd.x - sy * rd.z, rd.y, sy * rd.x + cy * rd.z) / size;
+    rl = normalize(rl);
+    vec3 p0 = vL;
+    float t = 0.0;
+    bool hit = false;
+    for (int i = 0; i < 40; i++) {
+      float d = unitSdf(p0 + rl * t, vShape);
+      if (d < 0.002) { hit = true; break; }
+      t += max(d * 0.85, 0.004);
+      if (t > 1.8) break;
+    }
+    if (!hit) discard;
+    vec3 q = p0 + rl * t;
+    vec2 e = vec2(0.003, 0.0);
+    vec3 g = vec3(unitSdf(q + e.xyy, vShape) - unitSdf(q - e.xyy, vShape),
+                  unitSdf(q + e.yxy, vShape) - unitSdf(q - e.yxy, vShape),
+                  unitSdf(q + e.yyx, vShape) - unitSdf(q - e.yyx, vShape)) / size;
+    g = normalize(g);
+    n = normalize(vec3(cy * g.x + sy * g.z, g.y, -sy * g.x + cy * g.z));
+  } else if (vShape > 0.5 && vShape < 1.5) {
     float r = min(min(vHalf.x, vHalf.y), vHalf.z);
     vec3 oc = uEye - vCenter;
     float b = dot(oc, rd);
@@ -480,7 +516,7 @@ void main() {
   } else if (vShape > 1.5 && vShape < 2.5) {
     if (abs(vL.x) + abs(vL.y) + abs(vL.z) > 0.82) discard;
     n = normalize(vec3(sign(vL.x), sign(vL.y), sign(vL.z)));
-  } else {
+  } else if (vShape < 0.5) {
     float edge = min(min(0.5 - abs(vL.x), 0.5 - abs(vL.y)), 0.5 - abs(vL.z));
     n = normalize(vN + vL * smoothstep(0.16, 0.0, edge) * 0.85);
   }
@@ -1445,6 +1481,82 @@ export function createRenderer(canvas) {
       }
     }
 
+    // A generated thing on its stretch. The hit box comes from the piece;
+    // the thing only decides how that box looks.
+    const tTime = st.time || 0;
+    function thingAnim(th, phase) {
+      // Obstacles keep their box: no spin, only the small bob the checker allows.
+      if (th.role === "jump" || th.role === "slide") {
+        return th.anim.kind === "bob" ? [0, animOf(th, tTime, phase, reduced)[1]] : [0, 0];
+      }
+      return animOf(th, tTime, phase, reduced);
+    }
+    function thingHurdle(q, th, zc, lane, sc) {
+      const hh = q[3] * sc;
+      const wide = lane < 0;
+      const tiles = wide ? 4 : 1;
+      const span = wide ? 5.15 : 1.28 * sc;
+      const tw = span / tiles;
+      const thick = Math.max(0.45, q[2]) * sc;
+      const grow = growOf(th.id, nowMs, reduced);
+      for (let t = 0; t < tiles; t++) {
+        const lat = wide ? -span / 2 + tw * (t + 0.5) : laneX(lane);
+        const at = onRoad(zc, lat);
+        drawThing(push, th, { x: at.x, y: 0, z: at.z, psi: at.psi, w: tw * 0.96, h: hh, d: thick },
+          { grow, anim: thingAnim(th, q[1] + t) });
+      }
+    }
+    function thingGate(q, th, zc, sc) {
+      const bottom = q[4] * sc;
+      const barH = q[3] * sc;
+      const postL = onRoad(zc, -2.35);
+      const postR = onRoad(zc, 2.35);
+      push(postL.x, bottom * 0.5, postL.z, 0.28, bottom, 0.28, 0, pal.gate, 0.4, 0.12, postL.psi);
+      push(postR.x, bottom * 0.5, postR.z, 0.28, bottom, 0.28, 0, pal.gate, 0.4, 0.12, postR.psi);
+      // Daylight under the bar stays: the tiles start at the bar's bottom
+      // and only grow upward.
+      const tiles = 4;
+      const span = 5.2 * sc;
+      const tw = span / tiles;
+      const th2 = Math.max(barH, 0.9 * sc);
+      const depth = gateBarDepth(q[2]) * 1.4;
+      const grow = growOf(th.id, nowMs, reduced);
+      for (let t = 0; t < tiles; t++) {
+        const at = onRoad(zc, -span / 2 + tw * (t + 0.5));
+        drawThing(push, th, { x: at.x, y: bottom, z: at.z, psi: at.psi, w: tw * 0.96, h: th2, d: depth },
+          { grow, anim: thingAnim(th, t) });
+      }
+    }
+    function thingPickup(q, th, here, sc) {
+      const box = 0.72 * sc;
+      const grow = growOf(th.id, nowMs, reduced);
+      drawThing(push, th, { x: here.x, y: q[4] * sc - box * 0.5, z: here.z, psi: here.psi, w: box, h: box, d: box },
+        { grow, anim: thingAnim(th, q[1] * 1.7), glow: 0.1 });
+    }
+    const thingChunks = Array.isArray(st.thingChunks) ? st.thingChunks : [];
+    for (const tc of thingChunks) {
+      const th = tc.thing;
+      if (!th || tc.x1 < z0 || tc.x0 > z1) continue;
+      if (th.role === "decor") {
+        const grow = growOf(th.id, nowMs, reduced);
+        const sz = th.size;
+        const spots = [tc.x0 + 3, tc.x0 + (tc.x1 - tc.x0) * 0.55];
+        for (let j = 0; j < spots.length; j++) {
+          if (spots[j] < z0 || spots[j] > z1) continue;
+          const side = (j + Math.floor(tc.x0)) % 2 ? 1 : -1;
+          const at = onRoad(spots[j], side * 3.9);
+          drawThing(push, th, { x: at.x, y: 0, z: at.z, psi: at.psi, w: 1.3 * sz, h: 1.7 * sz, d: 1.3 * sz },
+            { grow, anim: thingAnim(th, spots[j]) });
+        }
+      } else if (th.role === "pal" && pz >= tc.x0 && pz < tc.x1) {
+        const grow = growOf(th.id, nowMs, reduced);
+        const sz = th.size;
+        const at = onRoad(pz + 1.6, 2.7);
+        drawThing(push, th, { x: at.x, y: 0.05, z: at.z, psi: at.psi, w: 0.9 * sz, h: 0.9 * sz, d: 0.9 * sz },
+          { grow, anim: thingAnim(th, 0) });
+      }
+    }
+
     for (let i = 0; i < pieces.length; i++) {
       const q = pieces[i];
       const k = q[0];
@@ -1456,7 +1568,14 @@ export function createRenderer(canvas) {
       const glow = q.born ? 0.16 : 0;
       const lootKind = typeof st.loot === "string" ? st.loot : "coin";
       const here = onRoad(zc, laneX(lane < 0 ? 1 : lane));
-      if (k === 3) {
+      const th = q.thing;
+      if (k === 3 && th && th.role === "jump") {
+        thingHurdle(q, th, zc, lane, sc);
+      } else if (k === 4 && th && th.role === "slide") {
+        thingGate(q, th, zc, sc);
+      } else if (k === 5 && th && th.role === "pickup") {
+        thingPickup(q, th, here, sc);
+      } else if (k === 3) {
         drawHurdle(q, zc, lane, sc, glow);
       } else if (k === 4) {
         drawGate(q, zc, sc, glow);
