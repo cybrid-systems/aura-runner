@@ -151,6 +151,11 @@ function applyScene(msg) {
 }
 
 function applyPals(msg) {
+  // An empty Aura list is JSON null. Leave the roster alone when the key is absent.
+  if (msg.pals === null) {
+    pals = [];
+    return;
+  }
   if (!Array.isArray(msg.pals)) return;
   const next = [];
   for (const row of msg.pals) {
@@ -208,7 +213,9 @@ function applyProvider(msg) {
 }
 
 function applyProps(msg) {
-  if (Array.isArray(msg.props)) {
+  // An empty Aura list is JSON null. A missing key does not clear the sky.
+  if (msg.props === null) props = [];
+  else if (Array.isArray(msg.props)) {
     const next = [];
     for (const name of msg.props) {
       if ((name === "sun" || name === "moon" || name === "plane") && !next.includes(name)) next.push(name);
@@ -220,6 +227,10 @@ function applyProps(msg) {
 }
 
 function applyShown(msg) {
+  if (msg.shown === null) {
+    shownToys = [];
+    return;
+  }
   if (!Array.isArray(msg.shown)) return;
   const next = [];
   for (const raw of msg.shown) {
