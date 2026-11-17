@@ -33,15 +33,21 @@
 (define good (trial-of fair "fair-1"))
 (define bad (trial-of unfair "unfair-1"))
 
+; Nightly #5255: a hard-constraint miss is status infeasible, so trial-ok is 0.
+; commit still refuses that candidate.
 (display "trial-good ")
 (display (if (evo:trial-ok? good) 1 0))
 (display " ")
 (display (if (evo:feasible? good) 1 0))
+(display " ")
+(display (hash-ref good "status" "?"))
 (newline)
 (display "trial-bad ")
 (display (if (evo:trial-ok? bad) 1 0))
 (display " ")
 (display (if (evo:feasible? bad) 1 0))
+(display " ")
+(display (hash-ref bad "status" "?"))
 (newline)
 (display "live-before ")
 (display (motif-form))

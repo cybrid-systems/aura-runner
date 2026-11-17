@@ -2702,7 +2702,7 @@
               (begin
                 (note! "ROLLBACK" "trial" "thing" (wish-line wish-locale "shape") "thing")
                 (thing-hud! "none" (hash "got" (length rows2) "passed" passed "ms" ms
-                                         "why" "trial")))))))))
+                                         "why" "trial"))))))))))
 
 ; Rebind thing-form. Returns "rebind", "set-code" or "fail".
 (define (thing-rebind! form)
@@ -2975,7 +2975,7 @@
                      (wish-note! "SAY" "soon")
                      #f)))
                (if (compose-wanted? text) (thing-show! text) #f)
-               (thing-start! text)))))))))
+               (thing-start! text))))))))
   (flush-notes! c)
   (if rules-dirty
     (begin (send c (rules-msg)) (set! rules-dirty #f))

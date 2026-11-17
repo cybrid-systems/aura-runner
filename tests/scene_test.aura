@@ -57,15 +57,20 @@
 (define good (trial-of rosy "scene-rosy"))
 (define bad (trial-of dark "scene-dark"))
 
+; Nightly #5255: a dark garden is infeasible, so trial-ok is 0. It is not kept.
 (display "trial-rosy ")
 (display (if (evo:trial-ok? good) 1 0))
 (display " ")
 (display (if (evo:feasible? good) 1 0))
+(display " ")
+(display (hash-ref good "status" "?"))
 (newline)
 (display "trial-dark ")
 (display (if (evo:trial-ok? bad) 1 0))
 (display " ")
 (display (if (evo:feasible? bad) 1 0))
+(display " ")
+(display (hash-ref bad "status" "?"))
 (newline)
 
 (define search
