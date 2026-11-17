@@ -194,6 +194,9 @@
         "repeats" 5
         "profile-repeats" 3
         "min-speedup-pct" 20
+        ; The trial measures the candidate and its null twice each, so a
+        ; trial of this target takes minutes, not seconds.
+        "timeout-ms" 240000
         "screen-n" 1
         "screen-slack-ms" 50
         "genes" strategy-genes
