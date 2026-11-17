@@ -136,6 +136,10 @@
                "collide-far?"
                "the metre of slack around the body is more than the geometry needs"
                "collide")
+    (candidate "collide-nocopy"
+               "perf/candidates/collide-nocopy.aura"
+               "collide"
+               "the piece list is copied every frame; only a coin changes it")
     (candidate "wrong-scale"
                "perf/candidates/wrong-scale.aura"
                "pset"
@@ -158,14 +162,14 @@
           "ratio" 2
           "actionable-ms" 1
           "per-round" 2
-          "order" (list "nudge-flyers-noop" "step-poppers-noop"
-                        "collide-slack" "wrong-scale"))
+          "order" (list "collide-nocopy" "nudge-flyers-noop"
+                        "step-poppers-noop" "collide-slack" "wrong-scale"))
     (hash "id" "gene-ratio-8"
           "ratio" 8
           "actionable-ms" 1
           "per-round" 1
-          "order" (list "nudge-flyers-noop" "step-poppers-noop"
-                        "collide-slack" "wrong-scale"))
+          "order" (list "collide-nocopy" "nudge-flyers-noop"
+                        "step-poppers-noop" "collide-slack" "wrong-scale"))
     (hash "id" "gene-high-threshold"
           "ratio" 2
           "actionable-ms" 1000000
