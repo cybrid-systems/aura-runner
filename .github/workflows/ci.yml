@@ -40,6 +40,9 @@ jobs:
           node --check scripts/check-lanes.mjs
           node --check scripts/mock-llm-e2e.mjs
           node --check scripts/check-contrast.mjs
+          node --check scripts/check-run.mjs
+          node --check scripts/shot-biomes.mjs
+          node --check web/runstate.mjs
           node --check scripts/check-setcode.mjs
           node --check scripts/check-play.mjs
           node --check scripts/check-probe.mjs
@@ -49,6 +52,8 @@ jobs:
         run: node scripts/check-lanes.mjs
       - name: Pink garden keeps obstacle contrast
         run: node scripts/check-contrast.mjs
+      - name: Multiplier, venues, and voice state
+        run: node scripts/check-run.mjs
       - name: Startup model probe
         run: node scripts/check-probe.mjs
 

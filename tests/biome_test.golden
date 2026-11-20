@@ -1,0 +1,68 @@
+biome1 garden
+biome2 city
+biome3 space
+biome4 coast
+biome5 garden
+biome6 city
+next-garden city
+next-coast garden
+mult-up 2 1
+mult-cap 8 0
+chal-1 1 0 1
+chal-3 3 1 2 1
+chal-more 3 1 2 0
+gate-combo 3
+gate-mult 2
+gate-gain 1
+gate-biome city
+gate-what harder
+gate-form 1
+gate-level 2
+gate2-combo 4
+gate2-mult 3
+gate2-biome space
+gate2-what hero
+gate3-biome coast
+gate3-what ease
+gate3-combo 4
+gate4-mult 8
+gate4-gain 0
+gate4-biome garden
+gate4-combo 2
+line-en Level 2 · City · ×2 +1 · Trickier path
+line-zh 第2关 · 城市 · ×2 +1 · 路更难一点
+cn-garden biome garden
+cn-grass biome garden
+cn-city biome city
+cn-metro biome city
+cn-space biome space
+cn-stars biome space
+cn-cosmos biome space
+cn-coast biome coast
+cn-ocean biome coast
+cn-next biome-next next
+cn-next2 biome-next next
+cn-night mood night
+cn-night2 mood night
+cn-dark mood night
+cn-day mood day
+cn-sunny mood day
+cn-sunset mood sunset
+cn-dusk mood sunset
+cn-neon mood neon
+cn-cyber mood neon
+en-garden biome garden
+en-city biome city
+en-space biome space
+en-coast biome coast
+en-next biome-next next
+en-switch biome-next next
+en-night mood night
+en-day mood day
+en-sunset mood sunset
+en-neon mood neon
+en-cyber mood neon
+soft-sunny none
+soft-pink none
+soft-star none
+still-fast speed 

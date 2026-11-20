@@ -6,6 +6,7 @@
 (require "std/string" all:)
 (require "lib/phys")
 (require "lib/thing")
+(require "lib/biome")
 
 (define voice-speeds (list 8.0 10.0 12.0 13.0 14.0))
 
@@ -159,7 +160,71 @@
   (or (voice-has? text "简单一点") (voice-has? text "更简单") (voice-has? text "容易一点")
       (voice-has? text "难度低") (voice-word? low "easier")))
 
-; A known sky object, a friend to send home, a pace, or the finish.
+; A colour wish such as "sunny garden" still falls through. A bare
+; venue word, or 换场景, switches at once and does not wait for a model.
+(define (voice-venue-soft? text low)
+  (or (voice-has? low "sunny")
+      (voice-has? low "pink")
+      (voice-has? low "paint")
+      (voice-has? low "flower")
+      (voice-has? low "golden")
+      (voice-has? text "粉色")
+      (voice-has? text "金色")
+      (voice-has? text "花朵")))
+
+(define (voice-next-venue? text low)
+  (or (voice-has? text "换场景")
+      (voice-has? text "下一个场景")
+      (voice-has? text "下个场景")
+      (and (voice-word? low "next") (or (voice-word? low "scene") (voice-word? low "biome")))
+      (and (voice-word? low "switch") (or (voice-word? low "scene") (voice-word? low "biome")))))
+
+(define (voice-biome-name text low)
+  (cond
+    ((or (voice-has? text "花园") (voice-has? text "草地") (voice-word? low "garden")) "garden")
+    ((or (voice-has? text "城市") (voice-has? text "都市") (voice-word? low "city")) "city")
+    ((or (voice-has? text "太空") (voice-has? text "星空") (voice-has? text "宇宙")
+         (voice-word? low "space") (voice-word? low "universe")) "space")
+    ((or (voice-has? text "海边") (voice-has? text "海岸") (voice-has? text "海洋")
+         (voice-has? text "沙滩")
+         (voice-word? low "coast") (voice-word? low "ocean") (voice-word? low "beach")) "coast")
+    (else "")))
+
+(define (voice-mood-name text low)
+  (cond
+    ((or (voice-has? text "夜晚") (voice-has? text "夜景") (voice-has? text "黑夜")
+         (voice-has? text "晚上") (voice-word? low "night")) "night")
+    ((or (voice-has? text "日落") (voice-has? text "黄昏") (voice-word? low "sunset")
+         (voice-word? low "dusk")) "sunset")
+    ((or (voice-has? text "霓虹") (voice-has? text "赛博") (voice-word? low "neon")
+         (voice-word? low "cyber")) "neon")
+    ((or (voice-has? text "白天") (voice-has? text "晴天") (voice-word? low "day")) "day")
+    (else "")))
+
+; The next level, without dropping the combo the page is holding.
+; combo is echoed so a gate cannot zero it. The multiplier steps once.
+(define (gate-cross level form bumps points mult combo . rest)
+  (let* ((skill (if (and (pair? rest) (hash? (car rest))) (car rest) #f))
+         (plan (if skill
+                 (adapt-finish form bumps points level skill)
+                 (adapt-finish form bumps points level)))
+         (next-level (+ (biome-level level) 1))
+         (got (mult-add mult 1))
+         (next-form (hash-ref plan "form" form)))
+    (hash "level" next-level
+          "form" next-form
+          "act" (hash-ref plan "act" "scene")
+          "scene" (hash-ref plan "scene" -1)
+          "pressure" (hash-ref plan "pressure" 1)
+          "streak" (hash-ref plan "streak" 0)
+          "mult" (hash-ref got "mult")
+          "gain" (hash-ref got "gain")
+          "combo" combo
+          "biome" (biome-for-level next-level)
+          "what" (evo-what form next-form next-level)
+          "chal" 0)))
+
+; A known sky object, a friend to send home, a pace, the finish, or a venue.
 ; Anything else is #f and the garden wish still answers.
 (define (voice-intent text)
   (if (or (not (string? text)) (= (string-length text) 0))
@@ -222,6 +287,16 @@
                         ((> d 0) "The finish is farther")
                         ((< d 0) "The finish is closer")
                         (else "The finish is just ahead")))))
+        ((and (not (voice-venue-soft? text low)) (voice-next-venue? text low))
+         (voice-row "biome-next" "next" 1 "换了一个场景" "A new place"))
+        ((and (not (voice-venue-soft? text low))
+              (not (string=? (voice-biome-name text low) "")))
+         (let ((name (voice-biome-name text low)))
+           (voice-row "biome" name 1 (biome-say name "zh") (biome-say name "en"))))
+        ((and (not (voice-venue-soft? text low))
+              (not (string=? (voice-mood-name text low) "")))
+         (let ((name (voice-mood-name text low)))
+           (voice-row "mood" name 1 (mood-say name "zh") (mood-say name "en"))))
         ((and drop (or (voice-drop-last? text low)
                        (not (string=? (compose-name text) ""))))
          (voice-row "drop-thing" (compose-name text) 0 "拿下去了" "That one went away"))
@@ -285,6 +360,16 @@
        (if zh "终点近了一些" "The finish is closer"))
       ((string=? act "goal")
        (if zh "终点就在前面" "The finish is just ahead"))
+      ((and (string=? act "biome") (string=? why "same"))
+       (if zh "已经是这个场景了" "That place is already here"))
+      ((string=? act "biome")
+       (biome-say name (if zh "zh" "en")))
+      ((string=? act "biome-next")
+       (if zh "换了一个场景" "A new place"))
+      ((and (string=? act "mood") (string=? why "same"))
+       (if zh "已经是这个光线了" "That light is already on"))
+      ((string=? act "mood")
+       (mood-say name (if zh "zh" "en")))
       ((and (string=? act "drop-thing") (string=? why "missing"))
        (if zh "现在没有这个" "That one is not out"))
       ((string=? act "drop-thing")
