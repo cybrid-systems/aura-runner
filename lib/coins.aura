@@ -636,7 +636,7 @@
 
 ; Keep a zig or a switch while the lanes are even. Once a lane is a
 ; coin behind, the chain fills that lane instead of following the shape.
-(define (coin-want weights counts open planned)
+(define (coin-want-shape weights counts open planned)
   (let ((best (coin-best-deficit weights counts open planned)))
     (if (or (< planned -0.1) (not (coin-lane-on? open planned)) (< best -0.1))
       best
@@ -645,6 +645,48 @@
                 (- (coin-score weights counts total best) 0.08))
           planned
           best)))))
+
+; On the live course the same choice is held to the coins that were
+; actually laid in this three-level window.
+(define (coin-want weights counts open planned)
+  (if (not coin-course-on)
+    (coin-want-shape weights counts open planned)
+    (let* ((open (coin-fair-open counts open))
+           (best (coin-best-deficit weights counts open planned)))
+      (if (or (< planned -0.1) (not (coin-lane-on? open planned)) (< best -0.1))
+        best
+        (if (and (not (coin-share-over? counts planned))
+                 (not (coin-share-under? counts best)))
+          (coin-want-shape weights counts open planned)
+          best)))))
+
+; A lane already past 45% of the coins actually laid is closed when
+; another lane is open. Under 20%, once the window is large enough to
+; mean it, that lane is taken. One extra coin is what tips a short
+; window over the cap, so the test is strict greater-than.
+(define (coin-share-over? counts lane)
+  (let ((total (+ (car counts) (car (cdr counts)) (car (cdr (cdr counts)))))
+        (c (list-ref-counts counts lane)))
+    (> (* (+ c 1.0) 100.0) (* (+ total 1.0) 45.0))))
+
+(define (coin-share-under? counts lane)
+  (let ((total (+ (car counts) (car (cdr counts)) (car (cdr (cdr counts)))))
+        (c (list-ref-counts counts lane)))
+    (and (>= total 5)
+         (< (* c 100.0) (* total 20.0)))))
+
+(define (coin-fair-open counts open)
+  (let ((under (list (and (car open) (coin-share-under? counts 0.0))
+                     (and (car (cdr open)) (coin-share-under? counts 1.0))
+                     (and (car (cdr (cdr open))) (coin-share-under? counts 2.0)))))
+    (if (or (car under) (car (cdr under)) (car (cdr (cdr under))))
+      under
+      (let ((room (list (and (car open) (not (coin-share-over? counts 0.0)))
+                        (and (car (cdr open)) (not (coin-share-over? counts 1.0)))
+                        (and (car (cdr (cdr open))) (not (coin-share-over? counts 2.0))))))
+        (if (or (car room) (car (cdr room)) (car (cdr (cdr room))))
+          room
+          open)))))
 
 (define (coin-make x lane y)
   (piece 5.0 x 0.42 0.42 y lane))
@@ -658,6 +700,106 @@
   (and (not (string=? name "zig"))
        (not (string=? name "switch"))
        (not (string=? name "single"))))
+
+; The live road clips a level at the gate, so the coins a player sees
+; are not the whole chain. The course remembers the coins that were
+; actually laid, by the level they fall in, and the next pick is judged
+; against that three-level window. A coin the clearance check drops is
+; never counted.
+(define coin-course-on #f)
+(define coin-note-on #t)
+(define coin-origin 0.0)
+(define coin-closed (list))
+(define coin-open #f)
+(define coin-ahead (list 0 0 0))
+
+(define (coin-set-origin! x)
+  (set! coin-origin (if (number? x) (exact->inexact x) 0.0)))
+
+(define (coin-reset-course!)
+  (set! coin-course-on #t)
+  (set! coin-note-on #t)
+  (set! coin-origin 0.0)
+  (set! coin-closed (list))
+  (set! coin-open #f)
+  (set! coin-ahead (list 0 0 0)))
+
+(define (coin-open-triple)
+  (list (car (cdr (cdr coin-open)))
+        (car (cdr (cdr (cdr coin-open))))
+        (car (cdr (cdr (cdr (cdr coin-open)))))))
+
+(define (coin-add3 a b)
+  (list (+ (car a) (car b))
+        (+ (car (cdr a)) (car (cdr b)))
+        (+ (car (cdr (cdr a))) (car (cdr (cdr b))))))
+
+(define (coin-len xs)
+  (let loop ((xs xs) (n 0))
+    (if (null? xs) n (loop (cdr xs) (+ n 1)))))
+
+(define (coin-drop-n xs n)
+  (if (or (<= n 0) (null? xs))
+    xs
+    (coin-drop-n (cdr xs) (- n 1))))
+
+(define (coin-last xs n)
+  (let ((k (coin-len xs)))
+    (if (<= k n) xs (coin-drop-n xs (- k n)))))
+
+(define (coin-sum-counts xs)
+  (let loop ((xs xs) (a (list 0 0 0)))
+    (if (null? xs)
+      a
+      (loop (cdr xs) (coin-add3 a (car xs))))))
+
+(define (coin-open-level! x0 x1)
+  (set! coin-course-on #t)
+  (if coin-open
+    (set! coin-closed (append coin-closed (list (coin-open-triple))))
+    #f)
+  (set! coin-open (list (exact->inexact x0) (exact->inexact x1)
+                        (car coin-ahead)
+                        (car (cdr coin-ahead))
+                        (car (cdr (cdr coin-ahead)))))
+  (set! coin-ahead (list 0 0 0)))
+
+(define (coin-span! x1)
+  (if (and coin-course-on coin-open (number? x1))
+    (set! coin-open (list (car coin-open) (exact->inexact x1)
+                          (car (cdr (cdr coin-open)))
+                          (car (cdr (cdr (cdr coin-open))))
+                          (car (cdr (cdr (cdr (cdr coin-open)))))))
+    #f))
+
+(define (coin-bump-open lane)
+  (let ((n0 (car (cdr (cdr coin-open))))
+        (n1 (car (cdr (cdr (cdr coin-open)))))
+        (n2 (car (cdr (cdr (cdr (cdr coin-open)))))))
+    (set! coin-open
+      (list (car coin-open) (car (cdr coin-open))
+            (if (< lane 0.5) (+ n0 1) n0)
+            (if (and (>= lane 0.5) (< lane 1.5)) (+ n1 1) n1)
+            (if (>= lane 1.5) (+ n2 1) n2)))))
+
+(define (coin-note! x lane)
+  (if (or (not coin-course-on) (not coin-note-on) (not coin-open))
+    #f
+    (let ((wx (+ x coin-origin)))
+      (if (>= wx (car (cdr coin-open)))
+        (set! coin-ahead (coin-bump coin-ahead lane))
+        (coin-bump-open lane)))))
+
+(define (coin-window-counts x)
+  (if (or (not coin-course-on) (not coin-note-on) (not coin-open))
+    #f
+    (let ((wx (+ x coin-origin)))
+      (if (>= wx (car (cdr coin-open)))
+        (coin-add3 (coin-add3 (coin-sum-counts (coin-last coin-closed 1))
+                              (coin-open-triple))
+                   coin-ahead)
+        (coin-add3 (coin-sum-counts (coin-last coin-closed 2))
+                   (coin-open-triple))))))
 
 (define (coin-emit hazards pace table params rng name x0 n step base counts0)
   (let* ((y0 (coin-y name 0 n base))
@@ -682,17 +824,22 @@
                                 -1.0
                                 (coin-plan-lane name hold end i n)))
                      (open (coin-open-lanes hazards pace table x y name))
-                     (want (coin-want weights counts open planned)))
+                     (seen (coin-window-counts x))
+                     (want (coin-want weights (if seen seen counts) open planned)))
                 (if (>= want -0.1)
-                  (loop (+ i 1) (cons (coin-make x want y) acc) rg want (coin-bump counts want))
+                  (begin
+                    (coin-note! x want)
+                    (loop (+ i 1) (cons (coin-make x want y) acc) rg want (coin-bump counts want)))
                   (let ((alt (coin-choose-lane params rg hazards pace table x y name)))
                     (if (< (car alt) -0.1)
                       (loop (+ i 1) acc (cadr alt) hold counts)
-                      (loop (+ i 1)
-                            (cons (coin-make x (car alt) y) acc)
-                            (cadr alt)
-                            (car alt)
-                            (coin-bump counts (car alt))))))))))))))
+                      (begin
+                        (coin-note! x (car alt))
+                        (loop (+ i 1)
+                              (cons (coin-make x (car alt) y) acc)
+                              (cadr alt)
+                              (car alt)
+                              (coin-bump counts (car alt)))))))))))))))
 
 (define (coin-one hazards pace span step cap params table rng group counts)
   (let* ((head (car group))

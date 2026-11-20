@@ -1193,14 +1193,20 @@
 (define (coin-sample seed params pace)
   (load-coins!)
   (let ((speed (if (and (number? pace) (> pace 0.1)) pace 8.0))
-        (use (if (hash? params) params (coin-blank))))
-    (let loop ((band 0) (x 0.0) (acc (list)))
-      (if (> band 2)
-        acc
-        (let ((ch (chunk-or-fallback (pattern-chunk (floor (if (number? seed) seed 1)) band band speed) speed)))
-          (let ((span (hash-ref ch "x1" 8.0))
-                (raw (hash-ref ch "pieces" (list))))
-            (let ((placed (string-pickups raw band span 1 25.0
-                                          (coin-chunk-seed seed band band)
-                                          use)))
-              (loop (+ band 1) (+ x span) (append acc (shift-pieces placed x))))))))))
+        (use (if (hash? params) params (coin-blank)))
+        (noting coin-note-on))
+    (set! coin-note-on #f)
+    (let ((road (let loop ((band 0) (x 0.0) (acc (list)))
+                  (if (> band 2)
+                    acc
+                    (let* ((ch (chunk-or-fallback
+                                 (pattern-chunk (floor (if (number? seed) seed 1)) band band speed)
+                                 speed))
+                           (span (hash-ref ch "x1" 8.0))
+                           (raw (hash-ref ch "pieces" (list)))
+                           (placed (string-pickups raw band span 1 25.0
+                                                   (coin-chunk-seed seed band band)
+                                                   use)))
+                      (loop (+ band 1) (+ x span) (append acc (shift-pieces placed x))))))))
+      (set! coin-note-on noting)
+      road)))
