@@ -8,6 +8,7 @@ import { createFallback } from "./fallback.mjs";
 import { readQualityMode, writeQualityMode } from "./quality.mjs";
 import { createInput } from "./input.mjs";
 import { createAudio } from "./audio.mjs";
+import { volumeFromStore } from "./music.mjs";
 import { installWish } from "./wish.mjs";
 import { validThing } from "./thing.mjs";
 import { installThingHud } from "./thinghud.mjs";
@@ -1992,10 +1993,10 @@ muteBtn.addEventListener("click", () => {
   muteBtn.setAttribute("aria-pressed", next ? "true" : "false");
 });
 const volumeEl = document.getElementById("volume");
+const openingVolume = volumeFromStore(localStorage.getItem("lumen-volume"));
+audio.setVolume(openingVolume);
 if (volumeEl) {
-  const savedVol = Number(localStorage.getItem("lumen-volume"));
-  if (Number.isFinite(savedVol)) volumeEl.value = String(Math.round(Math.max(0, Math.min(1, savedVol)) * 100));
-  audio.setVolume(Number(volumeEl.value) / 100);
+  volumeEl.value = String(Math.round(openingVolume * 100));
   volumeEl.addEventListener("input", () => {
     const v = Number(volumeEl.value) / 100;
     audio.setVolume(v);
