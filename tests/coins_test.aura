@@ -1,0 +1,243 @@
+; Coins spread across the three lanes. The same seed lays the same
+; road. A weight that collapses onto one lane does not stay.
+(require "lib/gen")
+(require "lib/phys")
+(require "lib/voice")
+
+(define (expect name ok)
+  (display name)
+  (display " ")
+  (display (if ok 1 0))
+  (newline)
+  (if ok #t (error (string-append "coins: " name))))
+
+(define (near? a b)
+  (not (coin-apart? a b)))
+
+(define (lane-of q)
+  (let ((lane (piece-lane q)))
+    (cond
+      ((< (coin-abs (- lane 0.0)) 0.1) 0)
+      ((< (coin-abs (- lane 1.0)) 0.1) 1)
+      ((< (coin-abs (- lane 2.0)) 0.1) 2)
+      (else -1))))
+
+(define (coin-rows ps)
+  (let loop ((xs ps) (acc (list)))
+    (if (null? xs)
+      (reverse acc)
+      (let ((q (car xs)))
+        (loop (cdr xs)
+              (if (= (piece-k q) 5.0)
+                (cons (list (lane-of q) (floor (+ (* (piece-x q) 100.0) 0.5))
+                             (floor (+ (* (piece-y q) 100.0) 0.5)))
+                      acc)
+                acc))))))
+
+(define (lay-text text band seed params)
+  (let ((rules (feel-rules band)))
+    (let ((laid (layout-form text rules)))
+      (if (not laid)
+        (list)
+        (string-pickups (hash-ref laid "pieces") band (hash-ref laid "x1")
+                        1 25.0 seed params)))))
+
+(define blank (coin-blank))
+(define pace8 (feel-speed (feel-for 0)))
+
+(expect "blank-bounds" (coin-bounds? blank))
+(expect "blank-entropy" (>= (coin-entropy 0.34 0.33 0.33) 1.0))
+(expect "floor" (string=? (coin-weight-why 0.05 0.05 0.90) "floor"))
+(expect "cap" (string=? (coin-weight-why 0.70 0.15 0.15) "floor"))
+; Inside the floor and the cap, and still too peaked for the gate.
+(expect "entropy" (string=? (coin-weight-why 0.50 0.30 0.20) "entropy"))
+(expect "corner" (string=? (coin-weight-why 0.46 0.34 0.20) ""))
+(expect "collapsed" (string=? (coin-weight-why 0.80 0.10 0.10) "floor"))
+
+(define flat "(seq (ground 10.4) (coin 0.7) (ground 18))")
+(define short "(seq (ground 8) (coin 0.7) (ground 2.2))")
+(define hurdle "(seq (ground 8) (coin 0.7) (ground 3.2) (hurdle 0.45 0.7) (ground 8))")
+(define (forced name text)
+  (lay-text text 0 7 (hash "left" 0.34 "center" 0.33 "right" 0.33
+                           "mix" 0.55 "density" 0.55 "arc" 0.34
+                           "knob" 0 "prev" #f "force" name)))
+
+(define one (forced "single" short))
+(define line (forced "line" flat))
+(define zig (forced "zig" flat))
+(define arc (forced "switch" flat))
+(define jump (forced "jump" hurdle))
+
+(define (ncoins ps)
+  (let ((row (coin-share ps)))
+    (+ (car row) (car (cdr row)) (car (cdr (cdr row))) (car (cdr (cdr (cdr row)))))))
+
+(define (same-lane? ps)
+  (let ((xs (coin-rows ps)))
+    (if (null? xs)
+      #f
+      (let loop ((ys (cdr xs)) (lane (car (car xs))))
+        (if (null? ys)
+          #t
+          (if (= (car (car ys)) lane)
+            (loop (cdr ys) lane)
+            #f))))))
+
+(define (ymin ps)
+  (let loop ((xs ps) (m 99.0))
+    (if (null? xs)
+      m
+      (let ((q (car xs)))
+        (loop (cdr xs) (if (and (= (piece-k q) 5.0) (< (piece-y q) m)) (piece-y q) m))))))
+
+(define (ymax ps)
+  (let loop ((xs ps) (m 0.0))
+    (if (null? xs)
+      m
+      (let ((q (car xs)))
+        (loop (cdr xs) (if (and (= (piece-k q) 5.0) (> (piece-y q) m)) (piece-y q) m))))))
+
+(expect "single-n" (= (ncoins one) 1))
+(expect "single-lane" (not (= (lane-of (car (coin-take one))) -1)))
+(expect "line-n" (>= (ncoins line) 4))
+(expect "line-same" (same-lane? line))
+(expect "line-low" (and (>= (ymin line) 0.45) (<= (ymax line) 0.85)))
+(expect "zig-lanes" (>= (coin-used zig) 2))
+(expect "switch-lanes" (>= (coin-used arc) 2))
+(expect "jump-rise" (> (ymax jump) (+ (ymin jump) 0.35)))
+(expect "jump-clear" (coin-clear? jump))
+(expect "jump-reach" (coin-reachable? jump pace8))
+(expect "line-clear" (and (coin-clear? line) (coin-reachable? line pace8)))
+(expect "zig-clear" (and (coin-clear? zig) (coin-reachable? zig pace8)))
+
+(define again (forced "zig" flat))
+(expect "replay" (equal? (coin-rows zig) (coin-rows again)))
+(define other (lay-text flat 0 8 (hash "left" 0.34 "center" 0.33 "right" 0.33
+                                       "mix" 0.55 "density" 0.55 "arc" 0.34
+                                       "knob" 0 "prev" #f "force" "line")))
+(define other-again (lay-text flat 0 8 (hash "left" 0.34 "center" 0.33 "right" 0.33
+                                             "mix" 0.55 "density" 0.55 "arc" 0.34
+                                             "knob" 0 "prev" #f "force" "line")))
+(expect "other-seed" (and (equal? (coin-rows other) (coin-rows other-again))
+                          (same-lane? other)
+                          (>= (ncoins other) 4)))
+
+(define (lay-level seed params form speed x1 id)
+  (let loop ((x 0.0) (n id) (ps (list)))
+    (if (>= x x1)
+      ps
+      (let ((ch (chunk-or-fallback (pattern-chunk seed n form speed) speed)))
+        (let ((span (hash-ref ch "x1" 8.0))
+              (raw (hash-ref ch "pieces" (list))))
+          (let ((placed (string-pickups raw form span 1 25.0
+                                        (coin-chunk-seed seed n form) params)))
+            (loop (+ x span) (+ n 1) (append ps (shift-pieces placed x)))))))))
+
+(define (add-share a b)
+  (list (+ (car a) (car b))
+        (+ (car (cdr a)) (car (cdr b)))
+        (+ (car (cdr (cdr a))) (car (cdr (cdr b))))
+        (+ (car (cdr (cdr (cdr a)))) (car (cdr (cdr (cdr b)))))))
+
+(define (walk seed params)
+  (let loop ((level 1) (form 0) (points 0.0) (id 0) (acc (list 0 0 0 0)) (fair #t))
+    (if (or (> level 30) (not fair))
+      (list acc fair)
+      (let ((speed (feel-speed (feel-for form)))
+            (span (adapt-span speed points level)))
+        (let ((ps (lay-level seed params form speed span id)))
+          (let ((plan (adapt-finish form 0 (+ points 180.0) level)))
+            (loop (+ level 1)
+                  (hash-ref plan "form")
+                  (+ points 180.0)
+                  (+ id 4)
+                  (add-share acc (coin-share ps))
+                  (and (coin-clear? ps) (coin-reachable? ps speed)))))))))
+
+(define seeds (list 1 7 42 99 256 2024))
+
+(define (sum-walk params)
+  (let loop ((xs seeds) (acc (list 0 0 0 0)) (fair #t))
+    (if (or (null? xs) (not fair))
+      (list acc fair)
+      (let ((row (walk (car xs) params)))
+        (loop (cdr xs) (add-share acc (car row)) (and fair (car (cdr row))))))))
+
+(define shipped (sum-walk blank))
+(define counts (car shipped))
+(define n0 (car counts))
+(define n1 (car (cdr counts)))
+(define n2 (car (cdr (cdr counts))))
+(define nz (car (cdr (cdr (cdr counts)))))
+(define total (+ n0 n1 n2 nz))
+
+(define (share-ok? n)
+  (and (> total 0)
+       (>= (* n 100) (* total 20))
+       (<= (* n 100) (* total 45))))
+
+(display "share ")
+(display n0)
+(display " ")
+(display n1)
+(display " ")
+(display n2)
+(display " ")
+(display nz)
+(display " ")
+(display total)
+(newline)
+
+(expect "fair-road" (car (cdr shipped)))
+(expect "no-unset" (= nz 0))
+(expect "left-share" (share-ok? n0))
+(expect "centre-share" (share-ok? n1))
+(expect "right-share" (share-ok? n2))
+
+(define (climb state n pace)
+  (if (<= n 0)
+    state
+    (let ((step (coin-step state 3 0 4 3 1 pace)))
+      (if (hash-ref step "moved" #f)
+        (let ((next (coin-keep state step)))
+          (if (coin-bounds? next)
+            (climb next (- n 1) pace)
+            (error "coins: evolved out of bounds")))
+        state))))
+
+(define evolved (climb blank 12 pace8))
+(expect "evolved-bounds" (coin-bounds? evolved))
+(expect "evolved-entropy"
+        (string=? (coin-weight-why (hash-ref evolved "left" 0.0)
+                                   (hash-ref evolved "center" 0.0)
+                                   (hash-ref evolved "right" 0.0))
+                  ""))
+(expect "evolved-moved" (coin-apart? (hash-ref evolved "mix" 0.0) (hash-ref blank "mix" 0.0)))
+
+(define evolved-road (sum-walk evolved))
+(expect "evolved-fair" (car (cdr evolved-road)))
+
+(define step1 (coin-step blank 3 0 4 3 1 pace8))
+(define proposed (hash-ref step1 "params" blank))
+(define sample (coin-sample 42 proposed pace8))
+(define kept (coin-consider blank proposed sample pace8 (coin-engage 4 3 1)))
+(expect "keep" (and (string=? (hash-ref kept "kind" "") "KEEP")
+                    (coin-bounds? (hash-ref kept "state" blank))))
+
+(define bad (coin-consider blank
+                           (hash "left" 0.90 "center" 0.05 "right" 0.05
+                                 "mix" 0.55 "density" 0.55 "arc" 0.34)
+                           sample pace8 0.8))
+(expect "rollback" (and (string=? (hash-ref bad "kind" "") "ROLLBACK")
+                        (string=? (hash-ref bad "why" "") "floor")
+                        (near? (hash-ref (hash-ref bad "state" blank) "left" 0.0) 0.34)))
+
+(define busy (coin-consider blank
+                            (hash "left" 0.46 "center" 0.20 "right" 0.34
+                                  "mix" 0.70 "density" 0.55 "arc" 0.34)
+                            sample pace8 0.8))
+(expect "one-knob" (string=? (hash-ref busy "kind" "") "ROLLBACK"))
+
+(define back (coin-undo (hash-ref kept "state" blank)))
+(expect "undo" (and (near? (hash-ref back "left" 0.0) (hash-ref blank "left" 0.0))
+                    (near? (hash-ref back "mix" 0.0) (hash-ref blank "mix" 0.0))))
