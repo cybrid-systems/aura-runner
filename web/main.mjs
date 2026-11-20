@@ -3,7 +3,7 @@ import { awardPickup, challengeFor, challengeMet, dropGrade, gradeLabel, lootWor
 import { clampMult } from "./runstate.mjs";
 import { COMBO_HEART, HEART_IFRAME, HEARTS_MAX, heartsBlank, heartsHit, heartsRecover, heartsTick } from "./hearts.mjs";
 import { raceGate, raceRead } from "./race.mjs";
-import { createRenderer } from "./render.mjs";
+import { acceptSpec, createRenderer } from "./render.mjs";
 import { createInput } from "./input.mjs";
 import { createAudio } from "./audio.mjs";
 import { installWish } from "./wish.mjs";
@@ -99,6 +99,7 @@ let loot = "coin";
 let levelN = 1;
 let runMult = 1;
 let biomeName = "garden";
+let biomeSpec = null;
 let moodName = "day";
 let bannerId = 0;
 let bannerUntil = 0;
@@ -483,6 +484,7 @@ function resetLocal() {
   if (wardEl) wardEl.classList.remove("boost");
   runMult = 1;
   biomeName = params.get("venue") && VENUES.has(params.get("venue")) ? params.get("venue") : "garden";
+  biomeSpec = null;
   moodName = params.get("mood") && MOODS.has(params.get("mood")) ? params.get("mood") : "day";
   bannerId = 0;
   bannerUntil = 0;
@@ -634,7 +636,14 @@ function showEvo(text) {
 
 function applyVenue(msg) {
   if (typeof msg.mult === "number") runMult = clampMult(msg.mult);
-  if (typeof msg.biome === "string" && VENUES.has(msg.biome)) biomeName = msg.biome;
+  if ("spec" in msg) {
+    if (msg.spec && typeof msg.spec === "object") {
+      const next = acceptSpec(msg.spec);
+      biomeSpec = next && next.recipe === "mix" ? next : null;
+      if (biomeSpec) biomeName = biomeSpec.id;
+    } else biomeSpec = null;
+  }
+  if (!biomeSpec && typeof msg.biome === "string" && VENUES.has(msg.biome)) biomeName = msg.biome;
   if (typeof msg.mood === "string" && MOODS.has(msg.mood)) moodName = msg.mood;
   const id = msg["banner-id"];
   if (typeof id === "number" && id !== bannerId && typeof msg.banner === "string" && msg.banner) {
@@ -1090,6 +1099,11 @@ function pumpNet(now) {
 }
 
 window.__lumenPump = () => pumpNet(performance.now());
+window.__lumenSetCombo = (n) => {
+  combo = Math.max(0, n | 0);
+  comboUntil = performance.now() + 8000;
+  comboText = "×" + combo;
+};
 
 // Headless Chrome pauses animation frames. A few calls of the live frame
 // keep the picture moving while a test is the only thing reading the page.
@@ -1236,6 +1250,8 @@ function publishProbe() {
   root.dataset.speed = String(rules.speed);
   root.dataset.level = String(levelN);
   root.dataset.mult = String(runMult);
+  root.dataset.combo = String(combo);
+  root.dataset.biomeLabel = biomeSpec && biomeSpec.label ? biomeSpec.label : biomeName;
   root.dataset.biome = biomeName;
   root.dataset.mood = moodName;
   root.dataset.banner = evoEl && !evoEl.hidden ? evoEl.textContent : "";
@@ -1426,6 +1442,13 @@ function frame(now) {
     flashEl.hidden = true;
     flashEl.classList.remove("on");
   }
+  if (window.__forceSpec) {
+    const forced = acceptSpec(window.__forceSpec);
+    if (forced && forced.recipe === "mix") {
+      biomeSpec = forced;
+      biomeName = forced.id;
+    }
+  }
   lerpScene(dt);
   publishProbe();
   audio.music(reduced);
@@ -1446,6 +1469,7 @@ function frame(now) {
         goal: levelGoal,
         biome: biomeName,
         mood: moodName,
+        spec: biomeSpec,
         props,
         sunHide,
         shown: shownToys,
@@ -1454,6 +1478,7 @@ function frame(now) {
         ward: wardReady ? 1 : Math.max(0, (WARD_WAIT - wardLeft) / WARD_WAIT),
       });
     } catch (err) {
+      window.__lumenErr = String(err && err.stack || err);
       console.error(err);
     }
     spark = "";
