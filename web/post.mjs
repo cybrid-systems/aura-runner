@@ -181,6 +181,152 @@ void main() {
   o = vec4(c, 1.0);
 }`;
 
+const COMPOSITE_HIGH_FS = COMPOSITE_FS
+  .replace(
+    "uniform float uHit;\n",
+    "uniform float uHit;\nuniform sampler2D uReflect;\nuniform float uReveal;\nuniform vec3 uRevealCol;\n",
+  )
+  .replace(
+    "vec3 scene = texture(uScene, vUv).rgb;\n",
+    `vec3 scene = texture(uScene, vUv).rgb;
+  vec4 refl = texture(uReflect, vUv);
+  scene = mix(scene, refl.rgb, clamp(refl.a, 0.0, 0.85));
+`,
+  )
+  .replace(
+    "if (uHit > 0.001) col = mix(col, vec3(1.0, 0.96, 0.9), uHit * 0.28);\n",
+    `if (uHit > 0.001) col = mix(col, vec3(1.0, 0.96, 0.9), uHit * 0.28);
+  if (uReveal > 0.001) {
+    vec2 q = (vUv - vec2(0.5, 0.42)) * vec2(1.05, 0.78);
+    float rad = length(q);
+    float front = mix(0.02, 1.35, 1.0 - uReveal);
+    float ring = smoothstep(0.08, 0.0, abs(rad - front)) * smoothstep(0.0, 0.08, uReveal);
+    float tint = uReveal * (1.0 - smoothstep(front, front + 0.45, rad)) * 0.42;
+    col = mix(col, uRevealCol, clamp(tint, 0.0, 1.0));
+    col += uRevealCol * ring * 0.55;
+  }
+`,
+  );
+
+// One eighth-resolution gather. Four bilinear taps cover the source
+// footprint, so the speed tail can step a few pixels without reprinting edges.
+const DOWNSAMPLE_FS = `#version 300 es
+precision highp float;
+uniform sampler2D uTex;
+uniform vec2 uTexel;
+in vec2 vUv;
+out vec4 o;
+void main() {
+  vec2 o1 = uTexel * 2.0;
+  vec3 c = texture(uTex, vUv + vec2(-o1.x, -o1.y)).rgb;
+  c += texture(uTex, vUv + vec2(o1.x, -o1.y)).rgb;
+  c += texture(uTex, vUv + vec2(-o1.x, o1.y)).rgb;
+  c += texture(uTex, vUv + vec2(o1.x, o1.y)).rgb;
+  o = vec4(c * 0.25, 1.0);
+}`;
+
+// High finish. The medium finish source stays FINISH_FS. FXAA matches
+// that pass. The speed tail is four samples of the eighth-res image,
+// only along the line away from the runner.
+const FINISH_HIGH_FS = `#version 300 es
+precision highp float;
+uniform sampler2D uTex;
+uniform sampler2D uSoft;
+uniform sampler2D uDepth;
+uniform vec2 uRes;
+uniform float uFxaa;
+uniform float uBlur;
+uniform vec2 uHero;
+in vec2 vUv;
+out vec4 o;
+float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
+void main() {
+  vec3 c = texture(uTex, vUv).rgb;
+  if (uFxaa > 0.5) {
+    vec2 px = 1.0 / max(uRes, vec2(1.0));
+    float lL = luma(texture(uTex, vUv + vec2(-px.x, 0.0)).rgb);
+    float lR = luma(texture(uTex, vUv + vec2(px.x, 0.0)).rgb);
+    float lU = luma(texture(uTex, vUv + vec2(0.0, px.y)).rgb);
+    float lD = luma(texture(uTex, vUv + vec2(0.0, -px.y)).rgb);
+    vec2 dir = vec2(lL - lR, lU - lD);
+    float edge = clamp(length(dir) * 6.0, 0.0, 1.0);
+    if (edge > 0.04) {
+      dir = dir / max(length(dir), 1e-4) * px;
+      vec3 a = texture(uTex, vUv + dir * 0.75).rgb;
+      vec3 b = texture(uTex, vUv - dir * 0.75).rgb;
+      c = mix(c, (a + b) * 0.5, edge * 0.72);
+    }
+  }
+  if (uBlur > 0.001) {
+    vec2 hero = clamp(uHero, vec2(0.0), vec2(1.0));
+    float body = 1.0 - smoothstep(0.045, 0.18, length((vUv - hero) * vec2(0.78, 1.35)));
+    float z = texture(uDepth, vUv).r;
+    float nearZ = 1.0 - smoothstep(0.97, 0.995, z);
+    float sharp = clamp(max(body, nearZ * 0.9), 0.0, 1.0);
+    vec2 step = (vUv - hero) * uBlur * 0.085 * 0.45;
+    float span = length(step * uRes);
+    if (span > 8.0) step *= 8.0 / span;
+    vec3 tail = texture(uSoft, vUv + step).rgb * 0.34;
+    tail += texture(uSoft, vUv + step * 2.0).rgb * 0.28;
+    tail += texture(uSoft, vUv + step * 3.0).rgb * 0.22;
+    tail += texture(uSoft, vUv + step * 4.0).rgb * 0.16;
+    c = mix(c, tail, (1.0 - sharp) * 0.42);
+  }
+  o = vec4(c, 1.0);
+}`;
+
+// Quarter-resolution reflection. Gloss is the scene alpha written by the
+// high mesh shader. Sky and matte pixels store 0 and leave this pass.
+const REFLECT_FS = `#version 300 es
+precision highp float;
+uniform sampler2D uScene;
+uniform sampler2D uDepth;
+uniform mat4 uInvProj;
+uniform mat4 uProj;
+uniform vec3 uSky;
+uniform float uAmt;
+uniform float uTime;
+in vec2 vUv;
+out vec4 o;
+vec3 viewPos(vec2 uv, float z) {
+  vec4 clip = vec4(uv * 2.0 - 1.0, z * 2.0 - 1.0, 1.0);
+  vec4 view = uInvProj * clip;
+  return view.xyz / max(view.w, 1e-4);
+}
+void main() {
+  float g = texture(uScene, vUv).a;
+  float z = texture(uDepth, vUv).r;
+  vec3 p = viewPos(vUv, z);
+  vec3 n = normalize(cross(dFdx(p), dFdy(p)));
+  if (n.y < 0.0) n = -n;
+  if (uAmt < 0.01 || g < 0.04 || n.y < 0.42) { o = vec4(0.0); return; }
+  vec3 rdir = reflect(normalize(p), n);
+  vec3 hitCol = uSky;
+  float found = 0.0;
+  for (int i = 0; i < 8; i++) {
+    vec3 q = p + rdir * (0.35 + float(i) * 0.42);
+    vec4 clip = uProj * vec4(q, 1.0);
+    if (clip.w <= 0.05) continue;
+    vec2 suv = clip.xy / clip.w * 0.5 + 0.5;
+    if (suv.x < 0.0 || suv.y < 0.0 || suv.x > 1.0 || suv.y > 1.0) break;
+    float sz = texture(uDepth, suv).r;
+    vec3 sp = viewPos(suv, sz);
+    float gap = sp.z - q.z;
+    if (i > 1 && gap > 0.0 && gap < 1.6 && sz < 0.998) {
+      hitCol = texture(uScene, suv).rgb;
+      found = 1.0;
+      break;
+    }
+  }
+  if (found < 0.5) {
+    float sheen = 0.65 + 0.35 * sin(vUv.x * 38.0 + uTime * 1.2);
+    hitCol = uSky * (0.85 + 0.18 * sheen);
+  }
+  float fres = pow(1.0 - clamp(n.y, 0.0, 1.0), 1.6);
+  float w = g * mix(0.28, 0.9, fres) * uAmt;
+  o = vec4(hitCol, clamp(w, 0.0, 0.72));
+}`;
+
 function compile(gl, type, src) {
   const shader = gl.createShader(type);
   gl.shaderSource(shader, src);
@@ -209,6 +355,115 @@ function link(gl, vs, fs) {
   }
   return program;
 }
+
+// Compile without waiting. KHR_parallel_shader_compile makes the status
+// poll return immediately. Without the extension the poll does nothing
+// and linkNow is the one call that can stall, so a caller can spread it.
+export function shaderCompiler(gl) {
+  const ext = gl.getExtension("KHR_parallel_shader_compile");
+  const jobs = new Map();
+  function add(name, vsSrc, fsSrc) {
+    if (jobs.has(name)) return jobs.get(name);
+    const vs = gl.createShader(gl.VERTEX_SHADER);
+    const fs = gl.createShader(gl.FRAGMENT_SHADER);
+    gl.shaderSource(vs, vsSrc);
+    gl.shaderSource(fs, fsSrc);
+    gl.compileShader(vs);
+    gl.compileShader(fs);
+    const job = { name, vs, fs, vsSrc, fsSrc, program: null, state: "compiling" };
+    jobs.set(name, job);
+    return job;
+  }
+  function shaderReady(shader) {
+    if (!ext) return false;
+    return !!gl.getShaderParameter(shader, ext.COMPLETION_STATUS_KHR);
+  }
+  function programReady(program) {
+    if (!ext) return true;
+    return !!gl.getProgramParameter(program, ext.COMPLETION_STATUS_KHR);
+  }
+  function poll() {
+    for (const job of jobs.values()) {
+      if (job.state === "ready" || job.state === "failed") continue;
+      if (job.state === "compiling") {
+        if (!shaderReady(job.vs) || !shaderReady(job.fs)) continue;
+        const program = gl.createProgram();
+        gl.attachShader(program, job.vs);
+        gl.attachShader(program, job.fs);
+        gl.linkProgram(program);
+        job.program = program;
+        job.state = "linking";
+      }
+      if (job.state === "linking" && programReady(job.program)) {
+        const ok = !!gl.getProgramParameter(job.program, gl.LINK_STATUS);
+        if (job.vs) gl.deleteShader(job.vs);
+        if (job.fs) gl.deleteShader(job.fs);
+        job.vs = null;
+        job.fs = null;
+        if (!ok) {
+          gl.deleteProgram(job.program);
+          job.program = null;
+          job.state = "failed";
+        } else {
+          job.state = "ready";
+        }
+      }
+    }
+  }
+  function linkNow(name) {
+    const job = jobs.get(name);
+    if (!job) return null;
+    if (job.state === "ready") return job.program;
+    if (job.state === "failed") return null;
+    if (job.state === "compiling") {
+      const program = gl.createProgram();
+      gl.attachShader(program, job.vs);
+      gl.attachShader(program, job.fs);
+      gl.linkProgram(program);
+      job.program = program;
+      job.state = "linking";
+    }
+    const ok = job.program && gl.getProgramParameter(job.program, gl.LINK_STATUS);
+    if (job.vs) gl.deleteShader(job.vs);
+    if (job.fs) gl.deleteShader(job.fs);
+    job.vs = null;
+    job.fs = null;
+    if (!ok) {
+      if (job.program) gl.deleteProgram(job.program);
+      job.program = null;
+      job.state = "failed";
+      return null;
+    }
+    job.state = "ready";
+    return job.program;
+  }
+  return {
+    ext: !!ext,
+    add,
+    poll,
+    linkNow,
+    program(name) {
+      const job = jobs.get(name);
+      return job && job.state === "ready" ? job.program : null;
+    },
+    failed(name) {
+      const job = jobs.get(name);
+      return !!(job && job.state === "failed");
+    },
+  };
+}
+
+export const POST_SOURCES = {
+  threshold: [POST_VS, THRESHOLD_FS],
+  blur: [POST_VS, BLUR_FS],
+  composite: [POST_VS, COMPOSITE_FS],
+  ao: [POST_VS, AO_FS],
+  finish: [POST_VS, FINISH_FS],
+  compositeHigh: [POST_VS, COMPOSITE_HIGH_FS],
+  finishHigh: [POST_VS, FINISH_HIGH_FS],
+  reflect: [POST_VS, REFLECT_FS],
+  downsample: [POST_VS, DOWNSAMPLE_FS],
+};
 
 function colorTex(gl, w, h, hdr) {
   const tex = gl.createTexture();
@@ -286,7 +541,27 @@ export function probeFloat(gl) {
   }
 }
 
-export function createPost(gl) {
+export function createPost(gl, compiler) {
+  function take(name, vs, fs) {
+    if (compiler) {
+      compiler.add(name, vs, fs);
+      compiler.poll();
+      const ready = compiler.program(name);
+      if (ready) return ready;
+      if (compiler.ext && compiler.patient) return null;
+      const linked = compiler.linkNow(name);
+      if (linked) return linked;
+    }
+    return link(gl, vs, fs);
+  }
+  const threshold = take("threshold", POST_VS, THRESHOLD_FS);
+  const blurProg = take("blur", POST_VS, BLUR_FS);
+  const composite = take("composite", POST_VS, COMPOSITE_FS);
+  const aoProg = take("ao", POST_VS, AO_FS);
+  const finish = take("finish", POST_VS, FINISH_FS);
+  if (!threshold || !blurProg || !composite || !aoProg || !finish) {
+    throw new Error("post shaders pending");
+  }
   const tri = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, tri);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
@@ -295,16 +570,23 @@ export function createPost(gl) {
   gl.enableVertexAttribArray(0);
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
   gl.bindVertexArray(null);
-  const threshold = link(gl, POST_VS, THRESHOLD_FS);
-  const blur = link(gl, POST_VS, BLUR_FS);
-  const composite = link(gl, POST_VS, COMPOSITE_FS);
-  const aoProg = link(gl, POST_VS, AO_FS);
-  const finish = link(gl, POST_VS, FINISH_FS);
+  const blur = blurProg;
+  let compositeHigh = null;
+  let finishHigh = null;
+  let reflectProg = null;
+  let locH = null;
+  let locF = null;
+  let locR = null;
   const white = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, white);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([255, 255, 255, 255]));
+  const empty = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, empty);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 0]));
   const loc = {
     cut: gl.getUniformLocation(threshold, "uCut"),
     cutTex: gl.getUniformLocation(threshold, "uTex"),
@@ -345,7 +627,14 @@ export function createPost(gl) {
   let quartB = null;
   let aoBuf = null;
   let flat = null;
+  let eighth = null;
+  let reflBuf = null;
+  let downProg = null;
+  let locDown = null;
+  let tiny = null;
+  let primed = false;
   let aoLive = false;
+  let reflectOn = false;
   let depthDenied = false;
   let failed = false;
 
@@ -358,7 +647,13 @@ export function createPost(gl) {
     dropTarget(gl, quartB);
     dropTarget(gl, aoBuf);
     dropTarget(gl, flat);
-    scene = shadow = halfA = halfB = quartA = quartB = aoBuf = flat = null;
+    dropTarget(gl, eighth);
+    dropTarget(gl, reflBuf);
+    dropTarget(gl, tiny);
+    scene = shadow = halfA = halfB = quartA = quartB = aoBuf = flat = eighth = reflBuf = tiny = null;
+    downProg = null;
+    locDown = null;
+    primed = false;
     aoLive = false;
   }
 
@@ -452,6 +747,25 @@ export function createPost(gl) {
           flat = null;
         }
       }
+      if (profile && profile.tier === "high") {
+        const ew = Math.max(1, w >> 3);
+        const eh = Math.max(1, h >> 3);
+        if (!eighth || eighth.w !== ew || eighth.h !== eh) {
+          dropTarget(gl, eighth);
+          try { eighth = target(gl, ew, eh, false, false); } catch { eighth = null; }
+          if (!eighth || !eighth.ok) eighth = null;
+        }
+      }
+      const wantReflect = !!(profile && profile.tier === "high" && profile.reflect > 0 && scene && scene.depthTex);
+      if (wantReflect) {
+        const rw = Math.max(1, w >> 2);
+        const rh = Math.max(1, h >> 2);
+        if (!reflBuf || reflBuf.w !== rw || reflBuf.h !== rh) {
+          dropTarget(gl, reflBuf);
+          try { reflBuf = target(gl, rw, rh, false, false); } catch { reflBuf = null; }
+          if (!reflBuf || !reflBuf.ok) reflBuf = null;
+        }
+      }
       return !!(scene && scene.ok && quartA && quartA.ok);
     } catch {
       failed = true;
@@ -465,6 +779,31 @@ export function createPost(gl) {
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
+  function ensureDown() {
+    if (downProg && locDown) return true;
+    downProg = take("downsample", POST_VS, DOWNSAMPLE_FS);
+    if (!downProg) return false;
+    locDown = {
+      tex: gl.getUniformLocation(downProg, "uTex"),
+      texel: gl.getUniformLocation(downProg, "uTexel"),
+    };
+    return true;
+  }
+
+  function downsample(src, dest) {
+    if (!ensureDown() || !src || !dest) return false;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, dest.fb);
+    gl.viewport(0, 0, dest.w, dest.h);
+    gl.useProgram(downProg);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, src.tex);
+    gl.uniform1i(locDown.tex, 0);
+    gl.uniform2f(locDown.texel, 1 / src.w, 1 / src.h);
+    gl.bindVertexArray(vao);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    return true;
+  }
+
   function blurPass(src, dirX, dirY, dest) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, dest.fb);
     gl.viewport(0, 0, dest.w, dest.h);
@@ -475,6 +814,113 @@ export function createPost(gl) {
     gl.uniform2f(loc.blurDir, dirX, dirY);
     gl.bindVertexArray(vao);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+
+  function ensureHighShaders() {
+    if (compositeHigh && finishHigh && reflectProg && locH && locF && locR) return true;
+    try {
+      if (!compositeHigh) compositeHigh = take("compositeHigh", POST_VS, COMPOSITE_HIGH_FS);
+      if (!finishHigh) finishHigh = take("finishHigh", POST_VS, FINISH_HIGH_FS);
+      if (!reflectProg) reflectProg = take("reflect", POST_VS, REFLECT_FS);
+      if (!compositeHigh || !finishHigh || !reflectProg) return false;
+      locH = {
+        scene: gl.getUniformLocation(compositeHigh, "uScene"),
+        bloom: gl.getUniformLocation(compositeHigh, "uBloom"),
+        bloom2: gl.getUniformLocation(compositeHigh, "uBloom2"),
+        ao: gl.getUniformLocation(compositeHigh, "uAo"),
+        reflect: gl.getUniformLocation(compositeHigh, "uReflect"),
+        amt: gl.getUniformLocation(compositeHigh, "uAmt"),
+        amt2: gl.getUniformLocation(compositeHigh, "uAmt2"),
+        exposure: gl.getUniformLocation(compositeHigh, "uExposure"),
+        grade: gl.getUniformLocation(compositeHigh, "uGrade"),
+        sat: gl.getUniformLocation(compositeHigh, "uSat"),
+        contrast: gl.getUniformLocation(compositeHigh, "uContrast"),
+        lift: gl.getUniformLocation(compositeHigh, "uLift"),
+        gain: gl.getUniformLocation(compositeHigh, "uGain"),
+        shaftCol: gl.getUniformLocation(compositeHigh, "uShaftCol"),
+        sunUv: gl.getUniformLocation(compositeHigh, "uSunUv"),
+        shaft: gl.getUniformLocation(compositeHigh, "uShaft"),
+        aoAmt: gl.getUniformLocation(compositeHigh, "uAoAmt"),
+        keep: gl.getUniformLocation(compositeHigh, "uKeep"),
+        back: gl.getUniformLocation(compositeHigh, "uBack"),
+        hit: gl.getUniformLocation(compositeHigh, "uHit"),
+        reveal: gl.getUniformLocation(compositeHigh, "uReveal"),
+        revealCol: gl.getUniformLocation(compositeHigh, "uRevealCol"),
+      };
+      locF = {
+        tex: gl.getUniformLocation(finishHigh, "uTex"),
+        depth: gl.getUniformLocation(finishHigh, "uDepth"),
+        res: gl.getUniformLocation(finishHigh, "uRes"),
+        fxaa: gl.getUniformLocation(finishHigh, "uFxaa"),
+        blur: gl.getUniformLocation(finishHigh, "uBlur"),
+        hero: gl.getUniformLocation(finishHigh, "uHero"),
+        soft: gl.getUniformLocation(finishHigh, "uSoft"),
+      };
+      locR = {
+        scene: gl.getUniformLocation(reflectProg, "uScene"),
+        depth: gl.getUniformLocation(reflectProg, "uDepth"),
+        invProj: gl.getUniformLocation(reflectProg, "uInvProj"),
+        proj: gl.getUniformLocation(reflectProg, "uProj"),
+        sky: gl.getUniformLocation(reflectProg, "uSky"),
+        amt: gl.getUniformLocation(reflectProg, "uAmt"),
+        time: gl.getUniformLocation(reflectProg, "uTime"),
+      };
+      return !!(compositeHigh && finishHigh && reflectProg);
+    } catch (err) {
+      console.error(err);
+      return false;
+    }
+  }
+
+  // Draw the High programs once at 4×4, including the blur branch, so the
+  // first restart is not the first time the driver builds those pipelines.
+  function primeHigh() {
+    if (primed) return;
+    if (!ensureHighShaders()) return;
+    if (!tiny || !tiny.ok) {
+      try { tiny = target(gl, 4, 4, false, false); } catch { tiny = null; }
+    }
+    if (!tiny || !tiny.ok) return;
+    const prev = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, tiny.fb);
+    gl.viewport(0, 0, tiny.w, tiny.h);
+    gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.BLEND);
+    gl.colorMask(true, true, true, true);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, empty);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, empty);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, empty);
+    gl.useProgram(finishHigh);
+    gl.uniform1i(locF.tex, 0);
+    gl.uniform1i(locF.depth, 1);
+    gl.uniform1i(locF.soft, 2);
+    gl.uniform2f(locF.res, 4, 4);
+    gl.uniform1f(locF.fxaa, 1);
+    gl.uniform1f(locF.blur, 1);
+    gl.uniform2f(locF.hero, 0.5, 0.42);
+    gl.bindVertexArray(vao);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    const id = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+    gl.useProgram(reflectProg);
+    gl.uniform1i(locR.scene, 0);
+    gl.uniform1i(locR.depth, 1);
+    gl.uniformMatrix4fv(locR.invProj, false, id);
+    gl.uniformMatrix4fv(locR.proj, false, id);
+    gl.uniform3f(locR.sky, 0.6, 0.7, 0.9);
+    gl.uniform1f(locR.amt, 0.4);
+    gl.uniform1f(locR.time, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    if (ensureDown()) {
+      gl.useProgram(downProg);
+      gl.uniform1i(locDown.tex, 0);
+      gl.uniform2f(locDown.texel, 0.25, 0.25);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, prev);
+    primed = true;
   }
 
   function present(viewW, viewH, profile, look) {
@@ -525,57 +971,117 @@ export function createPost(gl) {
       gl.bindVertexArray(vao);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
+    const highPic = !!(profile && profile.tier === "high" && ensureHighShaders());
+    if (highPic) {
+      primeHigh();
+      ensureDown();
+    }
+    reflectOn = false;
+    if (highPic && tone.reflect > 0 && reflBuf && scene.depthTex && tone.invProj && tone.proj) {
+      if (tone.span) tone.span("reflect");
+      gl.bindFramebuffer(gl.FRAMEBUFFER, reflBuf.fb);
+      gl.viewport(0, 0, reflBuf.w, reflBuf.h);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.useProgram(reflectProg);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, scene.tex);
+      gl.uniform1i(locR.scene, 0);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, scene.depthTex);
+      gl.uniform1i(locR.depth, 1);
+      gl.uniformMatrix4fv(locR.invProj, false, tone.invProj);
+      gl.uniformMatrix4fv(locR.proj, false, tone.proj);
+      const sky = tone.sky || [0.6, 0.7, 0.85];
+      gl.uniform3f(locR.sky, sky[0] || 0, sky[1] || 0, sky[2] || 0);
+      gl.uniform1f(locR.amt, tone.reflect);
+      gl.uniform1f(locR.time, tone.time || 0);
+      gl.bindVertexArray(vao);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      reflectOn = true;
+    }
+    if (highPic && tone.span) tone.span("grade");
     const gradeOn = !!(profile && profile.fxaa) || (tone.blur > 0);
     const dest = gradeOn && flat && flat.ok ? flat.fb : null;
     gl.bindFramebuffer(gl.FRAMEBUFFER, dest);
     gl.viewport(0, 0, dest ? flat.w : viewW, dest ? flat.h : viewH);
-    gl.useProgram(composite);
+    const comp = highPic ? compositeHigh : composite;
+    const L = highPic ? locH : loc;
+    gl.useProgram(comp);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, scene.tex);
-    gl.uniform1i(loc.scene, 0);
+    gl.uniform1i(L.scene, 0);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, bloom.tex);
-    gl.uniform1i(loc.bloom, 1);
+    gl.uniform1i(L.bloom, 1);
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, bloom2.tex);
-    gl.uniform1i(loc.bloom2, 2);
+    gl.uniform1i(L.bloom2, 2);
     gl.activeTexture(gl.TEXTURE3);
     gl.bindTexture(gl.TEXTURE_2D, aoOn ? aoBuf.tex : white);
-    gl.uniform1i(loc.ao, 3);
+    gl.uniform1i(L.ao, 3);
     const amt = profile.bloomAmt || 0;
     const keep = tone.keep > 0 ? tone.keep : 0;
-    gl.uniform1f(loc.amt, (wide ? amt * 0.7 : amt) * (1 + keep * 0.35));
-    gl.uniform1f(loc.amt2, amt2);
-    gl.uniform1f(loc.exposure, tone.exposure > 0 ? tone.exposure : 1);
-    gl.uniform1f(loc.grade, tone.grade > 0 ? tone.grade : 0);
-    gl.uniform1f(loc.sat, tone.sat > 0 ? tone.sat : 1);
-    gl.uniform1f(loc.contrast, tone.contrast > 0 ? tone.contrast : 1);
+    gl.uniform1f(L.amt, (wide ? amt * 0.7 : amt) * (1 + keep * 0.35));
+    gl.uniform1f(L.amt2, amt2);
+    gl.uniform1f(L.exposure, tone.exposure > 0 ? tone.exposure : 1);
+    gl.uniform1f(L.grade, tone.grade > 0 ? tone.grade : 0);
+    gl.uniform1f(L.sat, tone.sat > 0 ? tone.sat : 1);
+    gl.uniform1f(L.contrast, tone.contrast > 0 ? tone.contrast : 1);
     const lift = tone.lift || [0, 0, 0];
     const gain = tone.gain || [1, 1, 1];
     const shaftCol = tone.shaftCol || [1, 1, 1];
     const sun = tone.sun || [0.7, 0.75];
-    gl.uniform3f(loc.lift, lift[0] || 0, lift[1] || 0, lift[2] || 0);
-    gl.uniform3f(loc.gain, gain[0] || 1, gain[1] || 1, gain[2] || 1);
-    gl.uniform3f(loc.shaftCol, shaftCol[0] || 1, shaftCol[1] || 1, shaftCol[2] || 1);
-    gl.uniform2f(loc.sunUv, sun[0] || 0.7, sun[1] || 0.75);
-    gl.uniform1f(loc.shaft, tone.shaft > 0 ? tone.shaft : 0);
-    gl.uniform1f(loc.aoAmt, aoOn ? tone.ao : 0);
-    gl.uniform1f(loc.keep, keep);
-    gl.uniform1f(loc.back, tone.back > 0 ? tone.back : 0);
-    gl.uniform1f(loc.hit, tone.hit > 0 ? tone.hit : 0);
+    gl.uniform3f(L.lift, lift[0] || 0, lift[1] || 0, lift[2] || 0);
+    gl.uniform3f(L.gain, gain[0] || 1, gain[1] || 1, gain[2] || 1);
+    gl.uniform3f(L.shaftCol, shaftCol[0] || 1, shaftCol[1] || 1, shaftCol[2] || 1);
+    gl.uniform2f(L.sunUv, sun[0] || 0.7, sun[1] || 0.75);
+    gl.uniform1f(L.shaft, tone.shaft > 0 ? tone.shaft : 0);
+    gl.uniform1f(L.aoAmt, aoOn ? tone.ao : 0);
+    gl.uniform1f(L.keep, keep);
+    gl.uniform1f(L.back, tone.back > 0 ? tone.back : 0);
+    gl.uniform1f(L.hit, tone.hit > 0 ? tone.hit : 0);
+    if (highPic) {
+      gl.activeTexture(gl.TEXTURE4);
+      gl.bindTexture(gl.TEXTURE_2D, reflectOn ? reflBuf.tex : empty);
+      gl.uniform1i(L.reflect, 4);
+      gl.uniform1f(L.reveal, tone.reveal > 0 ? tone.reveal : 0);
+      const revealCol = tone.revealCol || [0.7, 0.8, 0.9];
+      gl.uniform3f(L.revealCol, revealCol[0] || 0, revealCol[1] || 0, revealCol[2] || 0);
+    }
     gl.bindVertexArray(vao);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+    let softTex = null;
+    if (highPic && tone.blur > 0.001 && dest && flat && eighth && downsample(flat, eighth)) {
+      softTex = eighth.tex;
+    }
     if (dest) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, viewW, viewH);
-      gl.useProgram(finish);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, flat.tex);
-      gl.uniform1i(loc.finTex, 0);
-      gl.uniform2f(loc.finRes, flat.w, flat.h);
-      gl.uniform1f(loc.finFxaa, profile && profile.fxaa ? 1 : 0);
-      gl.uniform1f(loc.finBlur, tone.blur > 0 ? tone.blur : 0);
-      gl.uniform2f(loc.finFocus, 0.5, 0.62);
+      if (highPic) {
+        gl.useProgram(finishHigh);
+        gl.uniform1i(locF.tex, 0);
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, scene.depthTex || empty);
+        gl.uniform1i(locF.depth, 1);
+        gl.activeTexture(gl.TEXTURE2);
+        gl.bindTexture(gl.TEXTURE_2D, softTex || flat.tex);
+        gl.uniform1i(locF.soft, 2);
+        gl.uniform2f(locF.res, flat.w, flat.h);
+        gl.uniform1f(locF.fxaa, profile && profile.fxaa ? 1 : 0);
+        gl.uniform1f(locF.blur, softTex ? (tone.blur > 0 ? tone.blur : 0) : 0);
+        const hero = tone.hero || [0.5, 0.42];
+        gl.uniform2f(locF.hero, hero[0], hero[1]);
+      } else {
+        gl.useProgram(finish);
+        gl.uniform1i(loc.finTex, 0);
+        gl.uniform2f(loc.finRes, flat.w, flat.h);
+        gl.uniform1f(loc.finFxaa, profile && profile.fxaa ? 1 : 0);
+        gl.uniform1f(loc.finBlur, tone.blur > 0 ? tone.blur : 0);
+        gl.uniform2f(loc.finFocus, 0.5, 0.62);
+      }
       gl.bindVertexArray(vao);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
@@ -595,5 +1101,7 @@ export function createPost(gl) {
     shadowTex() { return shadow && shadow.tex; },
     shadowSize() { return shadow ? shadow.w : 0; },
     aoOn() { return aoLive; },
+    reflectOn() { return reflectOn; },
+    highOn() { return !!(compositeHigh && finishHigh); },
   };
 }

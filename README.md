@@ -8,13 +8,15 @@ Hero on autopilot, voice switches worlds, each new world is an Aura Biome EDSL f
 
 ## Quick start
 
-Linux x86_64 or arm64, Node.js 22, `bash`, `curl`, and `python3`. The first `./run.sh` downloads the Aura nightly into `.tools`.
+Linux x86_64 or arm64, Node.js 22, `bash`, `curl`, and `python3`. No C compiler, CMake, or Docker.
 
 ```bash
 ./run.sh
 ```
 
-Open the URL it prints. Ctrl-C stops the core and the page. If 8080 or 8765 is taken, `./run.sh` prints the next free port. `AURA_RUNNER_WEB` and `AURA_RUNNER_PORT` pin one. Set `AURA_BIN` to skip the download: `AURA_BIN="$(command -v aura)" ./run.sh`.
+The first run downloads the [Aura nightly](https://github.com/cybrid-systems/aura/releases/tag/nightly) (sha256-checked, cached in `~/.cache/lumen-run`) and prints the version, where it came from (`download`, `cache`, or `offline`), and the URL. Open that URL. The page retries until the core is listening. Ctrl-C stops both. If 8080 or 8765 is taken, `./run.sh` prints the next free port. `AURA_RUNNER_WEB` and `AURA_RUNNER_PORT` pin one.
+
+`AURA_BIN=/path/to/aura` uses a binary you already have. `AURA_VERSION=v0.2.7` pins a release instead of `nightly`. `AURA_OFFLINE=1` uses the cache and does not touch the network. The nightly release publishes Linux x86_64 and arm64. On a Mac, install [OrbStack](https://orbstack.dev) or Docker Desktop and run `./run.sh` again: it uses the prebuilt image `ghcr.io/cybrid-systems/aura:nightly` and does not compile.
 
 ## Controls
 
@@ -64,6 +66,26 @@ The form in [`lib/edsl.aura`](lib/edsl.aura):
 KIND is tree, tower, arch, crystal, rock, coral, or ring.
 A proposal is kept only after evo:trial (edsl-gate).
 
+## Music
+
+The page plays Symphony No. 29 when `LUMEN_MUSIC` points at the recording. A missing file is HTTP 204, and a play error does the same: the page starts a synthesized tune. No audio file is added to the repo. The first key, tap, or click starts the sound. Mute and the volume slider sit in the corner.
+
+The tune is a `(tune ...)` form in [`lib/music.aura`](lib/music.aura). `evo:trial` keeps a fair phrase and rolls a harsh one back. A kept phrase starts on the next bar. A rollback before that bar stays on the current phrase; after the bar, the previous phrase returns on the next one. Speed and level raise the tempo and add a layer. A combo or a near miss plays a fill. A hit ducks the filter, a shield plays a short brighter note, and a level-up lifts the key. Everything lands on the beat.
+
+After a click or a key, the console can fire each of those:
+
+| Call | What you hear |
+| --- | --- |
+| `__musicState()` | Phrase, tempo, bed (`synth` or `file`), and whether a swap is waiting |
+| `__musicEvent("combo")` or `"near"` | A drum fill on the next eighth |
+| `__musicEvent("hit")` | Filter duck and a short pitch dip, then the phrase returns |
+| `__musicEvent("shield")` | A brighter stinger, then the phrase returns |
+| `__musicEvent("level")` | A stinger now, and a key lift on the next bar |
+| `__musicTrial(form)` | The same bounds as the gate. A fair form waits for the next bar |
+| `__musicRollback()` | Drops a phrase that has not started, or queues the previous one |
+
+`document.documentElement.dataset` mirrors the bed, phrase, key, bpm, layers, and pending swap.
+
 ## LLM
 
 With no key, the offline generator still builds the run. These are the `LLM_*` variables the repo reads.
@@ -81,7 +103,7 @@ With no `LLM_API_KEY`, `./run.sh` fills those three from `~/code/keys/deepseek` 
 
 ## Picture
 
-Auto starts on Low and moves to Medium or High only after frames stay under budget, then steps back if they miss. Low is the original single pass, with the round contact shadows. Medium and High add a sun shadow, bloom, ACES tonemapping, a scene colour grade, and FXAA. High also adds a short speed blur, light shafts, a small ambient occlusion pass, and a brighter hero trail. On those tiers the camera eases a lane change, kicks the field of view with speed, and shakes on a near miss. A kept scene or hero pulses the bloom. A rollback cools the frame. The score stays in the page, so it stays sharp. A browser without WebGL2 draws a flat garden and says so.
+Auto starts on Low and moves to Medium or High only after frames stay under budget, then steps back if they miss. Low is the original single pass, with the round contact shadows. Medium and High add a sun shadow, bloom, ACES tonemapping, a scene colour grade, and FXAA. High also adds a speed blur that leaves the runner sharp, light shafts, a small ambient occlusion pass, a softer shadow edge, haze toward the horizon, and a brighter trail that grows with speed and combo. A wet city road and an ice road pick up a short reflection. Garden petals, city dust, snow, and space dust drift on High only. A near miss nudges the camera and flashes the obstacle that was passed. A world change on High opens as a coloured ring instead of a white wash. On those tiers the camera eases a lane change and kicks the field of view with speed. A kept scene or hero pulses the bloom. A rollback cools the frame. The score stays in the page, so it stays sharp. A browser without WebGL2 draws a flat garden and says so.
 
 The budgets live in [`lib/quality.aura`](lib/quality.aura). The page carries the same numbers, because it does not ask Aura to run them. Quality is not an `evo:trial`. A world, the runner, and a phrase still are. Pick Auto, Low, Medium, or High from the corner control. The browser remembers the choice.
 
@@ -98,7 +120,7 @@ docs/      Demo poster and video
 
 ## Checks
 
-Aura commands need `AURA_SANDBOX=off` and a nightly binary on `PATH`. CI runs that job on `ghcr.io/cybrid-systems/aura:nightly` ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
+`./run.sh` downloads a prebuilt binary and does not compile. `aura test` needs `AURA_SANDBOX=off` and a nightly binary on `PATH`; that CI job uses `ghcr.io/cybrid-systems/aura:nightly` ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). The smoke job installs the same release on a runner without build tools.
 
 | Command | Checks |
 | --- | --- |
@@ -111,7 +133,10 @@ Aura commands need `AURA_SANDBOX=off` and a nightly binary on `PATH`. CI runs th
 | `node scripts/check-edsl.mjs` | Biome EDSL view |
 | `node scripts/check-run.mjs` | Multiplier, venues, voice |
 | `node scripts/check-probe.mjs` | Startup model probe |
-| `bash scripts/check-install.sh` | Install from an empty tools dir |
+| `node scripts/check-music.mjs` | Tune bounds, KEEP/ROLLBACK, tempo, missing file |
+| `node scripts/check-voice.mjs` | Soft voice stays on 196 Hz |
+| `bash scripts/check-install.sh` | Install from an empty cache, offline reuse |
+| `bash scripts/check-runsh.sh` | `./run.sh` downloads a prebuilt binary and serves the page |
 | `node scripts/smoke.mjs` | Seeded end-to-end run |
 | `node scripts/mock-llm-e2e.mjs` | Mock LLM rebind |
 | `node scripts/check-edsl-e2e.mjs` | EDSL gate and voice switch |

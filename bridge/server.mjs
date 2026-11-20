@@ -10,8 +10,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const web = path.join(root, "web");
 const webPort = Number(process.env.AURA_RUNNER_WEB || 8080);
 const auraPort = Number(process.env.AURA_RUNNER_PORT || 8765);
-// The recording stays outside the repo. A missing file is a 404, and the
-// page falls back to the short synthesized line.
+// The recording stays outside the repo. A missing file is a 204, and the
+// page plays the synthesized tune instead.
 const musicFile = process.env.LUMEN_MUSIC
   || "/home/dev/code/symphony/symphony_no_29_in_a_major_k_201.mp4";
 const mime = {
@@ -169,6 +169,19 @@ function attachSocket(ws) {
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://127.0.0.1");
   let rel = decodeURIComponent(url.pathname);
+  if (rel === "/boot") {
+    const note = path.join(root, "out/boot.txt");
+    fs.readFile(note, "utf8", (err, text) => {
+      if (err) {
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+      res.end(text);
+    });
+    return;
+  }
   if (rel === "/favicon.ico" || rel === "/apple-touch-icon.png" || rel === "/apple-touch-icon-precomposed.png") {
     res.writeHead(204);
     res.end();

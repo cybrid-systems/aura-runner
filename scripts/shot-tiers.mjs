@@ -213,6 +213,8 @@ try {
         ao: view && view.dataset.ao || "",
         grade: view && view.dataset.grade || "",
         blur: view && view.dataset.blur || "",
+        shade: view && view.dataset.shade || "",
+        reflect: view && view.dataset.reflect || "",
         hdr: view && view.dataset.hdr || "",
         shadow: view && view.dataset.shadow || "",
         bloom: view && view.dataset.bloom || "",
@@ -238,6 +240,8 @@ try {
       if (probe.tier !== tier) throw new Error(`${venue} ${tier} drew ${probe.tier}`);
       if (probe.biome !== venue) throw new Error(`${venue} showed ${probe.biome}`);
       if (probe.err) throw new Error(probe.err);
+      if (tier === "high" && probe.shade !== "high") throw new Error(venue + " high drew shade " + probe.shade);
+      if (tier !== "high" && probe.shade === "high") throw new Error(venue + " " + tier + " used the high shade");
     }
     await openGame(`quality=${tier}&venue=garden&shot=1`);
     await evalJson(cdp, `window.__forceSpec = ${JSON.stringify(AURORA)}; window.__lumenFrames && window.__lumenFrames(6);`);
@@ -247,6 +251,8 @@ try {
     if (probe.tier !== tier) throw new Error(`aurora ${tier} drew ${probe.tier}`);
     if (probe.biome !== "aurora-ice") throw new Error("aurora showed " + probe.biome);
     if (probe.err) throw new Error(probe.err);
+    if (tier === "high" && probe.shade !== "high") throw new Error(name + " high drew shade " + probe.shade);
+    if (tier !== "high" && probe.shade === "high") throw new Error(name + " " + tier + " used the high shade");
   }
 
   async function timeFrames(n) {
@@ -272,6 +278,15 @@ try {
     tiersTimed[tier] = row;
     console.log(`bench ${tier} garden p50 ${row.p50.toFixed(2)} ms p95 ${row.p95.toFixed(2)} ms work ${row.work} gpu ${row.gpu} gpuN ${row.gpuN} fxaa ${row.fxaa} ao ${row.ao} grade ${row.grade} blur ${row.blur} hdr ${row.hdr}`);
   }
+
+  await openGame("quality=high&venue=city&shot=1");
+  await evalJson(cdp, `window.__lumenPassTimers = true; window.__lumenPace = 15; true`);
+  const paced = await timeFrames(10);
+  const paceShot = path.join(outDir, "city-high-pace.png");
+  await capture(cdp, paceShot);
+  console.log(`bench high city pace p50 ${paced.p50.toFixed(2)} ms p95 ${paced.p95.toFixed(2)} ms passes ${JSON.stringify(paced.passes)}`);
+  shots.push({ scene: "city-pace", tier: "high", file: paceShot, passes: paced.passes, p50: paced.p50, p95: paced.p95 });
+  await evalJson(cdp, `window.__lumenPace = 0; window.__lumenPassTimers = false; true`);
 
   const report = {
     gpu: gpuName,

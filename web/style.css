@@ -20,6 +20,48 @@ html, body {
   height: 100%;
   display: block;
 }
+#boot[hidden] { display: none; }
+#boot {
+  position: fixed;
+  z-index: 20;
+  left: 50%;
+  bottom: max(24px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: min(360px, 92vw);
+  padding: 16px 18px 14px;
+  border-radius: 16px;
+  background: rgba(255, 246, 232, 0.96);
+  color: var(--ink);
+  box-shadow: 0 8px 28px rgba(92, 52, 20, 0.18);
+}
+#boot-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+}
+#boot-step {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+}
+#boot-track {
+  width: min(280px, 70vw);
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(92, 52, 20, 0.18);
+  overflow: hidden;
+}
+#boot-bar {
+  width: 6%;
+  height: 100%;
+  border-radius: inherit;
+  background: #e07a2f;
+  transition: width 0.2s ease;
+}
 #nogpu[hidden] { display: none; }
 #nogpu {
   position: fixed;
@@ -510,6 +552,15 @@ html, body {
 }
 #motion { right: max(16px, env(safe-area-inset-right)); }
 #mute { right: max(78px, calc(env(safe-area-inset-right) + 62px)); }
+#volume {
+  position: fixed;
+  z-index: 6;
+  top: max(28px, calc(env(safe-area-inset-top) + 16px));
+  right: max(140px, calc(env(safe-area-inset-right) + 124px));
+  width: 72px;
+  height: 20px;
+  accent-color: #e07a3d;
+}
 #motion[aria-pressed="true"], #mute[aria-pressed="true"] { background: #ffe08a; }
 #quality { position: fixed; z-index: 6; top: max(74px, calc(env(safe-area-inset-top) + 62px)); right: max(16px, env(safe-area-inset-right)); }
 #quality-btn {
@@ -700,7 +751,7 @@ html, body {
   color: #8a5a32;
 }
 #card-share[hidden] { display: none; }
-#motion:focus-visible, #mute:focus-visible, #quality-btn:focus-visible, #quality-menu button:focus-visible, #badge:focus-visible, #model:focus-visible, #again:focus-visible, #play-again:focus-visible, #cards-open:focus-visible, #cards-use:focus-visible, #cards-share:focus-visible, .card:focus-visible, #note-list button:focus-visible, .primer-open:focus-visible, #primer-try:focus-visible, #primer-text:focus-visible {
+#motion:focus-visible, #mute:focus-visible, #volume:focus-visible, #quality-btn:focus-visible, #quality-menu button:focus-visible, #badge:focus-visible, #model:focus-visible, #again:focus-visible, #play-again:focus-visible, #cards-open:focus-visible, #cards-use:focus-visible, #cards-share:focus-visible, .card:focus-visible, #note-list button:focus-visible, .primer-open:focus-visible, #primer-try:focus-visible, #primer-text:focus-visible {
   outline: 3px solid white;
   outline-offset: 3px;
 }
