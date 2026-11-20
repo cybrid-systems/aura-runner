@@ -1389,7 +1389,12 @@
                   (set! motif-now prev-form)
                   (set! hue-now prev-hue)
                   (note! "ROLLBACK" "commit" "motif" "That shape drifted away"))))))
-            (release-slot!)))))))
+            ; release-slot! is #f when no model is configured, because
+            ; llm-slot was never created. step-dream! only ends the dream
+            ; when this returns true, so the seal has to say so itself,
+            ; the same way seal-hold! and seal-chase! do.
+            (release-slot!)
+            #t))))))
 
 (define (begin-dream!)
   (set! dream-phase 1)
