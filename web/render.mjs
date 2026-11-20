@@ -238,6 +238,29 @@ export function clampBend(bend) {
   return Math.max(-0.7, Math.min(0.7, n));
 }
 
+// Road tangent (sin ψ, cos ψ) and road-right (-cos ψ, sin ψ).
+export function roadAxes(psi) {
+  const p = Number.isFinite(psi) ? psi : 0;
+  return {
+    tx: Math.sin(p),
+    tz: Math.cos(p),
+    rx: -Math.cos(p),
+    rz: Math.sin(p),
+  };
+}
+
+// World XZ of one burst spoke. ψ = 0 keeps (cos a, sin a). On a bend the
+// spoke stays in the road plane instead of the world axes.
+export function burstDir(psi, a) {
+  const ax = roadAxes(psi);
+  const along = Math.sin(a);
+  const side = -Math.cos(a);
+  return {
+    x: ax.tx * along + ax.rx * side,
+    z: ax.tz * along + ax.rz * side,
+  };
+}
+
 function advance(x, z, psi, kappa, ds) {
   if (Math.abs(kappa) < 1e-8) {
     return { x: x + Math.sin(psi) * ds, z: z + Math.cos(psi) * ds, psi };
@@ -399,7 +422,7 @@ precision highp float;
 uniform vec3 uSky0; uniform vec3 uSky1; uniform vec3 uHill; uniform vec3 uHill2;
 uniform vec3 uSunCol; uniform vec2 uSun; uniform vec2 uRes;
 uniform float uTime; uniform float uCamZ; uniform float uYaw; uniform float uFov;
-uniform float uSunAmt;
+uniform float uSunAmt; uniform float uRush;
 out vec4 o;
 void main() {
   vec2 uv = gl_FragCoord.xy / uRes;
@@ -430,6 +453,14 @@ void main() {
   float sunAmt = max(uSunAmt, 0.0);
   c += uSunCol * smoothstep(0.14, 0.0, sd) * 0.5 * sunAmt;
   c += vec3(1.0, 0.97, 0.9) * smoothstep(0.035, 0.0, sd) * sunAmt;
+  // Speed streaks sit on the lower screen edges. uRush is 0 below 12 m/s,
+  // so the centre of the sky is not touched and the branch stays off.
+  if (uRush > 0.5) {
+    float edge = max(smoothstep(0.12, 0.0, uv.x), smoothstep(0.88, 1.0, uv.x));
+    float low = smoothstep(0.62, 0.22, uv.y);
+    float streak = sin(uv.y * 36.0 - uTime * 16.0 + uv.x * 2.0);
+    c += vec3(1.0, 0.98, 0.92) * edge * low * smoothstep(0.25, 0.92, streak) * 0.18;
+  }
   // Highlight shoulder only. Below 0.9 the sky is unchanged, so the blue
   // stays blue; the sun core rolls toward white instead of clipping flat.
   vec3 over = max(c - vec3(0.9), vec3(0.0));
@@ -607,7 +638,7 @@ void main() {
   }
   float under = smoothstep(-0.15, -0.48, vL.y);
   col *= 1.0 - 0.32 * under * (1.0 - vEmit);
-  if (vKind > 0.5) {
+  if (vKind > 0.5 && vKind < 1.5) {
     float rip = sin(vW.x * 5.4 + uTime * 1.6) * sin(vW.z * 4.1 - uTime * 1.2);
     col += vec3(0.35, 0.58, 0.6) * rip * 0.16;
   }
@@ -638,7 +669,7 @@ vec3 softKnee(vec3 c) {
 }
 void main() {
   // Kind 2 is a contact shadow: a thin square cut into a soft disc.
-  if (vKind > 1.5) {
+  if (vKind > 1.5 && vKind < 2.5) {
     float rr = length(vL.xz);
     if (rr > 0.46) discard;
     float feather = smoothstep(0.46, 0.12, rr);
@@ -683,7 +714,7 @@ void main() {
   }
   float under = smoothstep(-0.15, -0.48, vL.y);
   col *= 1.0 - 0.32 * under * (1.0 - vEmit);
-  if (vKind > 0.5) {
+  if (vKind > 0.5 && vKind < 1.5) {
     float rip = sin(vW.x * 5.4 + uTime * 1.6) * sin(vW.z * 4.1 - uTime * 1.2);
     col += vec3(0.35, 0.58, 0.6) * rip * 0.16;
   }
@@ -696,6 +727,19 @@ void main() {
   fog *= (1.0 - 0.82 * clamp(vEmit, 0.0, 1.0));
   o = vec4(softKnee(mix(col, uFog, fog)), 1.0);
 }`;
+
+// One pattern each, so a grass tile does not also run the wood and metal
+// math. The road stays on MESH_FS_BOX. Kind selects the program.
+function boxPat(line) {
+  return MESH_FS_BOX.replace(
+    "float pulse = 0.85 + 0.15 * sin(uTime * 3.0 + vCenter.z);",
+    `${line}
+  float pulse = 0.85 + 0.15 * sin(uTime * 3.0 + vCenter.z);`,
+  );
+}
+const MESH_FS_BOX_PAT = boxPat(`if (vKind < 3.5) col *= 0.94 + 0.1 * fract(vL.y * 12.0);
+  else if (vKind < 4.5) col *= 0.97 + 0.06 * fract(vL.x * 17.0 + vL.z * 11.0);
+  else col += vec3(1.0, 0.97, 0.86) * (1.0 - step(0.07, abs(vL.y + 0.04))) * (0.18 + clamp(vSheen, 0.0, 1.0) * 0.22);`);
 
 // Spheres and gems only. No raymarch, so a tree canopy does not carry the loop.
 const MESH_FS_BALL = `#version 300 es
@@ -745,6 +789,14 @@ void main() {
   col += mix(vec3(1.0, 0.96, 0.88), vC, metal) * spec * mix(0.45, 0.06, rough) * (1.0 + sheen);
   float under = smoothstep(-0.15, -0.48, vL.y);
   col *= 1.0 - 0.32 * under * (1.0 - vEmit);
+  // Coins are the only kind-5 gems. Leaves stay on kind 0 and skip this.
+  if (vKind > 4.5 && vKind < 5.5) {
+    vec3 eyeV = vCenter - uEye;
+    if (dot(eyeV, eyeV) < 256.0) {
+      float stripe = 1.0 - smoothstep(0.02, 0.11, abs(vL.y));
+      col += vec3(1.0, 0.97, 0.82) * stripe * (0.22 + clamp(vSheen, 0.0, 1.0) * 0.4);
+    }
+  }
   float pulse = 0.85 + 0.15 * sin(uTime * 3.0 + vCenter.z);
   col += vC * vEmit * pulse;
   float dist = length(vW - uEye);
@@ -801,6 +853,7 @@ export function createRenderer(canvas) {
   const sky = link(gl, SKY_VS, SKY_FS);
   const mesh = link(gl, MESH_VS, MESH_FS);
   const meshBox = link(gl, MESH_VS, MESH_FS_BOX);
+  const meshPat = link(gl, MESH_VS, MESH_FS_BOX_PAT);
   const meshBall = link(gl, MESH_VS, MESH_FS_BALL);
   const tri = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, tri);
@@ -842,6 +895,7 @@ export function createRenderer(canvas) {
     yaw: gl.getUniformLocation(sky, "uYaw"),
     fov: gl.getUniformLocation(sky, "uFov"),
     sunAmt: gl.getUniformLocation(sky, "uSunAmt"),
+    rush: gl.getUniformLocation(sky, "uRush"),
   };
   function meshLocs(prog) {
     return {
@@ -855,10 +909,12 @@ export function createRenderer(canvas) {
       skyAmb: gl.getUniformLocation(prog, "uSkyAmb"),
       soil: gl.getUniformLocation(prog, "uSoil"),
       mtime: gl.getUniformLocation(prog, "uTime"),
+      pat: gl.getUniformLocation(prog, "uPat"),
     };
   }
   const um = meshLocs(mesh);
   const ub = meshLocs(meshBox);
+  const up = meshLocs(meshPat);
   const uBall = meshLocs(meshBall);
   const gpuInfo = gl.getExtension("WEBGL_debug_renderer_info");
   const gpuName = gpuInfo
@@ -908,6 +964,11 @@ export function createRenderer(canvas) {
   let prevG = 32;
   let reject = 0;
   const sparks = new Float32Array(36 * 8);
+  // Short-lived foot puffs. Kept apart from sparks so a coin burst cannot
+  // crowd them out, and the pool stays far under the instance cap.
+  const DUST_N = 12;
+  const dust = new Float32Array(DUST_N * 8);
+  let dustStep = 0;
 
   function resize() {
     const dpr = Math.min(dprCap, window.devicePixelRatio || 1);
@@ -971,23 +1032,46 @@ export function createRenderer(canvas) {
   }
 
   // tint 0 keeps the garden mix. 1 blossom, 2 apple, 3 star, 4 gem.
-  function burst(x, y, z, rgb, count, lift, tint = 0) {
+  function burst(x, y, z, rgb, count, lift, tint = 0, psi = 0) {
     let left = count;
     for (let i = 0; i < 36 && left > 0; i++) {
       const o = i * 8;
       if (sparks[o + 6] > 0) continue;
       const a = (i / 36) * Math.PI * 2;
+      const dir = burstDir(psi, a);
       sparks[o] = x;
       sparks[o + 1] = y;
       sparks[o + 2] = z;
-      sparks[o + 3] = Math.cos(a);
-      sparks[o + 4] = Math.sin(a);
+      sparks[o + 3] = dir.x;
+      sparks[o + 4] = dir.z;
       sparks[o + 5] = lift;
       sparks[o + 6] = 0.55;
       sparks[o + 7] = i + tint * 100;
       left--;
     }
     void rgb;
+  }
+
+  // Puffs drift back along the tangent and a little to either side.
+  function puffDust(x, y, z, psi, count, kick) {
+    if (n >= MAX - 48) return;
+    const ax = roadAxes(psi);
+    let left = count;
+    for (let i = 0; i < DUST_N && left > 0; i++) {
+      const o = i * 8;
+      if (dust[o + 6] > 0) continue;
+      const side = ((i % 5) - 2) * 0.22;
+      const back = 0.45 + (i % 3) * 0.18;
+      dust[o] = x + ax.rx * side * 0.15;
+      dust[o + 1] = y;
+      dust[o + 2] = z + ax.rz * side * 0.15;
+      dust[o + 3] = -ax.tx * back + ax.rx * side;
+      dust[o + 4] = kick;
+      dust[o + 5] = -ax.tz * back + ax.rz * side;
+      dust[o + 6] = 0.4;
+      dust[o + 7] = i;
+      left--;
+    }
   }
 
   function shade(rgb, s) {
@@ -1034,22 +1118,22 @@ export function createRenderer(canvas) {
   }
 
   function drawCar(x, y, z, rgb) {
-    push(x, y + 0.28, z, 0.72, 0.28, 1.05, 0, rgb, 0.32, 0.06);
-    push(x, y + 0.5, z - 0.02, 0.48, 0.26, 0.48, 0, shade(rgb, 1.12), 0.22, 0.1);
+    push(x, y + 0.28, z, 0.72, 0.28, 1.05, 0, rgb, 0.32, 0.06, spin, 0.62, 0.5, 5);
+    push(x, y + 0.5, z - 0.02, 0.48, 0.26, 0.48, 0, shade(rgb, 1.12), 0.22, 0.1, spin, 0.28, 0.35, 5);
     axles(x, y, z, 0.32, -0.32);
     lamps(x, y + 0.3, z + 0.54);
   }
 
   function drawVan(x, y, z, rgb) {
     const glass = [0.78, 0.9, 0.98];
-    push(x, y + 0.42, z, 0.78, 0.52, 1.2, 0, rgb, 0.34, 0.05);
+    push(x, y + 0.42, z, 0.78, 0.52, 1.2, 0, rgb, 0.34, 0.05, spin, 0.58, 0.46, 5);
     push(x, y + 0.58, z + 0.12, 0.62, 0.28, 0.46, 0, glass, 0.15, 0.12);
     axles(x, y, z, 0.38, -0.38, 0.32);
     lamps(x, y + 0.28, z + 0.62);
   }
 
   function drawRacer(x, y, z, rgb) {
-    push(x, y + 0.2, z, 0.66, 0.16, 1.4, 0, rgb, 0.28, 0.08);
+    push(x, y + 0.2, z, 0.66, 0.16, 1.4, 0, rgb, 0.28, 0.08, spin, 0.7, 0.55, 5);
     push(x, y + 0.34, z - 0.05, 0.36, 0.16, 0.42, 0, shade(rgb, 1.08), 0.2, 0.1);
     push(x, y + 0.36, z - 0.58, 0.5, 0.08, 0.12, 0, shade(rgb, 0.75), 0.3, 0.05);
     axles(x, y, z, 0.42, -0.42);
@@ -1062,7 +1146,7 @@ export function createRenderer(canvas) {
   }
 
   function drawWagon(x, y, z, rgb) {
-    push(x, y + 0.32, z + 0.08, 0.8, 0.36, 0.9, 1, rgb, 0.32, 0.06);
+    push(x, y + 0.32, z + 0.08, 0.8, 0.36, 0.9, 1, rgb, 0.32, 0.06, spin, 0.55, 0.42, 5);
     push(x, y + 0.34, z - 0.48, 0.62, 0.32, 0.4, 0, shade(rgb, 0.86), 0.34, 0.04);
     push(x, y + 0.52, z + 0.1, 0.5, 0.22, 0.4, 0, shade(rgb, 1.1), 0.2, 0.08);
     axles(x, y, z, 0.28, -0.46, 0.3);
@@ -1314,7 +1398,8 @@ export function createRenderer(canvas) {
     if (Math.abs(speed - prevSpeed) > 0.05 || Math.abs(grav - prevG) > 0.05) pulse = 1;
     prevSpeed = speed;
     prevG = grav;
-    if (py <= 0.02 && prevY > 0.18) land = 1;
+    const justLanded = py <= 0.02 && prevY > 0.18;
+    if (justLanded) land = 1;
     prevY = py;
     const lxDelta = px - prevLx;
     prevLx = px;
@@ -1370,6 +1455,11 @@ export function createRenderer(canvas) {
     gl.uniform1f(u.fov, camFov);
     const skyShow = visibleSky(st.props, st.sunHide);
     gl.uniform1f(u.sunAmt, skyShow.shader);
+    // The full-screen streak is a real-GPU extra. SwiftShader keeps the
+    // few road-edge quads below and skips this pass.
+    const softwareGL = /swiftshader|llvmpipe|softpipe|software/i.test(gpuName);
+    const rush = !reduced && speed >= 12 && !softwareGL ? 1 : 0;
+    gl.uniform1f(u.rush, rush);
     gl.uniform2f(u.res, w, h);
     gl.bindVertexArray(null);
     gl.bindBuffer(gl.ARRAY_BUFFER, tri);
@@ -1412,28 +1502,29 @@ export function createRenderer(canvas) {
       const swayZ = -sway * Math.sin(at.psi);
       const leaf = mix3(pal.leaf, pal.leaf2, kind === 2 ? 0.2 : 0.62);
       const trunk = mix3(pal.trunk, [0.32, 0.2, 0.13], kind === 1 ? 0.15 : 0.4);
+      const wood = near ? 3 : 0;
       const top = [at.x + swayX, at.z + swayZ];
       // Roadside trees stand past the grass deck, so a ground blot would hang in the air.
       if (Math.abs(lat) <= DECK) contactShadow(at.x, at.z, at.psi, 0, 0.42 * scale);
       if (kind === 1) {
-        push(at.x, 0.72 * scale, at.z, 0.11 * scale, 1.45 * scale, 0.11 * scale, 0, trunk, 0.8, 0, at.psi);
+        push(at.x, 0.72 * scale, at.z, 0.11 * scale, 1.45 * scale, 0.11 * scale, 0, trunk, 0.8, 0, at.psi, 0, 0, wood);
         push(top[0], 1.62 * scale, top[1], 0.38 * scale, 1.2 * scale, 0.38 * scale, 1, leaf, 0.7, 0.02, at.psi);
       } else if (kind === 2) {
         const pine = mul(leaf, 0.82);
-        push(at.x, 0.32 * scale, at.z, 0.12 * scale, 0.64 * scale, 0.12 * scale, 0, trunk, 0.78, 0, at.psi);
+        push(at.x, 0.32 * scale, at.z, 0.12 * scale, 0.64 * scale, 0.12 * scale, 0, trunk, 0.78, 0, at.psi, 0, 0, wood);
         push(at.x + swayX * 0.25, 0.82 * scale, at.z + swayZ * 0.25, 0.92 * scale, 0.5 * scale, 0.92 * scale, 1, pine, 0.72, 0.02, at.psi);
         push(at.x + swayX * 0.55, 1.28 * scale, at.z + swayZ * 0.55, 0.66 * scale, 0.46 * scale, 0.66 * scale, 1, leaf, 0.7, 0.03, at.psi);
         push(top[0], 1.68 * scale, top[1], 0.34 * scale, 0.4 * scale, 0.34 * scale, 1, mix3(leaf, [0.72, 0.84, 0.58], 0.4), 0.68, 0.04, at.psi);
       } else if (kind === 3) {
-        push(at.x, 0.46 * scale, at.z, 0.22 * scale, 0.92 * scale, 0.22 * scale, 0, trunk, 0.82, 0, at.psi);
+        push(at.x, 0.46 * scale, at.z, 0.22 * scale, 0.92 * scale, 0.22 * scale, 0, trunk, 0.82, 0, at.psi, 0, 0, wood);
         push(top[0], 1.12 * scale, top[1], 1.28 * scale, 0.52 * scale, 1.15 * scale, 1, leaf, 0.7, 0.02, at.psi);
         push(at.x + swayX * 0.4, 1.5 * scale, at.z + swayZ * 0.4, 0.78 * scale, 0.46 * scale, 0.78 * scale, 1, pal.leaf2, 0.68, 0.03, at.psi);
       } else if (kind === 4) {
-        push(at.x, 0.38 * scale, at.z, 0.11 * scale, 0.76 * scale, 0.11 * scale, 0, trunk, 0.78, 0, at.psi);
+        push(at.x, 0.38 * scale, at.z, 0.11 * scale, 0.76 * scale, 0.11 * scale, 0, trunk, 0.78, 0, at.psi, 0, 0, wood);
         push(top[0], 1.12 * scale, top[1], 0.9 * scale, 0.66 * scale, 0.9 * scale, 1, pal.flower, 0.42, 0.08, at.psi);
         push(top[0] + 0.18 * scale, 1.32 * scale, top[1], 0.42 * scale, 0.36 * scale, 0.42 * scale, 1, pal.flower2, 0.38, 0.12, at.psi);
       } else {
-        push(at.x, 0.4 * scale, at.z, 0.15 * scale, 0.8 * scale, 0.15 * scale, 0, trunk, 0.8, 0, at.psi);
+        push(at.x, 0.4 * scale, at.z, 0.15 * scale, 0.8 * scale, 0.15 * scale, 0, trunk, 0.8, 0, at.psi, 0, 0, wood);
         push(top[0], 1.12 * scale, top[1], 0.98 * scale, 0.88 * scale, 0.98 * scale, near ? 1 : 0, leaf, 0.72, 0.02, at.psi);
         if (near) push(top[0] + 0.16, 1.22 * scale, top[1], 0.11, 0.11, 0.11, 1, [0.95, 0.34, 0.3], 0.32, 0.16, at.psi);
       }
@@ -1456,7 +1547,8 @@ export function createRenderer(canvas) {
             const vary = (laneHash(mid * 0.23 + lane * 17.2) - 0.5) * 0.09;
             const top = vary >= 0 ? mix3(baseTop, [1, 1, 1], vary) : mix3(baseTop, [0.16, 0.18, 0.1], -vary);
             const len = end - cursor;
-            push(tile.x, 0.02, tile.z, 1.74, 0.12, len + 0.02, 0, top, lane === 1 ? 0.55 : 0.8, 0, tile.psi);
+            const grass = lane !== 1 && dist > -2 && dist < 4 ? 4 : 0;
+            push(tile.x, 0.02, tile.z, 1.74, 0.12, len + 0.02, 0, top, lane === 1 ? 0.55 : 0.8, 0, tile.psi, 0, 0, grass);
           }
           if (i < spans.length) cursor = spans[i][1];
         }
@@ -1533,7 +1625,7 @@ export function createRenderer(canvas) {
         push(at.x, y, at.z, s * 0.95, s * 1.05, s * 0.95, 1, [0.95, 0.32, 0.38], 0.35, 0.55);
         push(at.x, y + s * 0.62, at.z, 0.05, 0.14, 0.05, 0, [0.35, 0.62, 0.28], 0.4, 0.1);
       } else {
-        push(at.x, y, at.z, s, s, s, 2, pal.coin, 0.12, 0.95);
+        push(at.x, y, at.z, s, s, s, 2, pal.coin, 0.12, 0.95, spin, 0.74, 0.58, 5);
       }
     }
     // Look is field 6. A stored look is kept. A phrase that left the word
@@ -1684,7 +1776,7 @@ export function createRenderer(canvas) {
         push(here.x, y * 0.72, here.z, 0.7 * grow, 0.7 * grow, 0.7 * grow, 1, [1, 0.95, 0.75], 0.15, 0.95, yaw);
         if (!q.puffed) {
           q.puffed = 1;
-          burst(here.x, 0.6, here.z, [1, 0.78, 0.3], 10, 0.12);
+          burst(here.x, 0.6, here.z, [1, 0.78, 0.3], 10, 0.12, 0, yaw);
         }
         return;
       }
@@ -1754,9 +1846,9 @@ export function createRenderer(canvas) {
       const here = onRoad(zc, lat);
       const yaw = here.psi;
       if (look === 1) {
-        push(here.x, 0.62 * sc, here.z, 0.78 * sc, 1.24 * sc, 0.78 * sc, 0, [0.52, 0.34, 0.2], 0.6, 0.05, yaw);
-        push(here.x, 1.3 * sc, here.z, 0.98 * sc, 0.18 * sc, 0.98 * sc, 0, [0.7, 0.5, 0.32], 0.45, 0.08, yaw);
-        push(here.x, 1.46 * sc, here.z, 0.66 * sc, 0.14 * sc, 0.66 * sc, 0, [0.62, 0.42, 0.26], 0.5, 0.06, yaw);
+        push(here.x, 0.62 * sc, here.z, 0.78 * sc, 1.24 * sc, 0.78 * sc, 0, [0.52, 0.34, 0.2], 0.6, 0.05, yaw, 0, 0, 3);
+        push(here.x, 1.3 * sc, here.z, 0.98 * sc, 0.18 * sc, 0.98 * sc, 0, [0.7, 0.5, 0.32], 0.45, 0.08, yaw, 0, 0, 3);
+        push(here.x, 1.46 * sc, here.z, 0.66 * sc, 0.14 * sc, 0.66 * sc, 0, [0.62, 0.42, 0.26], 0.5, 0.06, yaw, 0, 0, 3);
       } else if (look === 2) {
         push(here.x, 0.48 * sc, here.z, 0.38 * sc, 0.96 * sc, 0.38 * sc, 0, [0.96, 0.9, 0.78], 0.4, 0.06, yaw);
         push(here.x, 1.12 * sc, here.z, 1.05 * sc, 0.36 * sc, 1.05 * sc, 0, [0.9, 0.24, 0.3], 0.35, 0.1, yaw);
@@ -1987,7 +2079,9 @@ export function createRenderer(canvas) {
     }
     drawFinish(st.goal);
 
-    if (st.event === "ward") burst(rx, py + 0.7, rz, [0.72, 0.9, 1], 8, 0.04, 4);
+    const heading = feet.psi;
+    const ax = roadAxes(heading);
+    if (st.event === "ward") burst(rx, py + 0.7, rz, [0.72, 0.9, 1], 8, 0.04, 4, heading);
     if (st.event === "coin") {
       const kind = typeof st.loot === "string" ? st.loot : "coin";
       const rich = kind === "gem" ? [18, 0.11, 4]
@@ -1995,12 +2089,25 @@ export function createRenderer(canvas) {
         : kind === "apple" ? [10, 0.07, 2]
         : kind === "blossom" ? [10, 0.07, 1]
         : [8, 0.05, 0];
-      burst(rx, py + 0.9, rz, pal.coin, rich[0], rich[1], rich[2]);
+      burst(rx, py + 0.9, rz, pal.coin, rich[0], rich[1], rich[2], heading);
     }
-    if (st.event === "spring") burst(rx, py + 0.4, rz, pal.spring, 8, 0.08);
-    if (st.near) burst(rx, py + 0.7, rz + 0.4, pal.sun, 6, 0.02);
-    if (land > 0.85) burst(rx, 0.15, rz, pal.path, 4, 0.01);
-    if (st.reject) burst(rx, 1.6, rz + 2, pal.flower, 10, 0.06);
+    if (st.event === "spring") burst(rx, py + 0.4, rz, pal.spring, 8, 0.08, 0, heading);
+    if (st.near) burst(rx + ax.tx * 0.4, py + 0.7, rz + ax.tz * 0.4, pal.sun, 6, 0.02, 0, heading);
+    if (land > 0.85) burst(rx, 0.15, rz, pal.path, 4, 0.01, 0, heading);
+    if (st.reject) burst(rx + ax.tx * 2, 1.6, rz + ax.tz * 2, pal.flower, 10, 0.06, 0, heading);
+    if (!reduced && alive && py <= 0.06) {
+      if (justLanded) puffDust(rx, 0.06, rz, heading, 5, 0.7);
+      else if (speed >= 8) {
+        dustStep++;
+        const every = speed >= 12 ? 3 : 6;
+        if (dustStep >= every) {
+          dustStep = 0;
+          const side = Math.sin((st.time || 0) * 9) > 0 ? 0.14 : -0.14;
+          const foot = sample(drawS, px + side);
+          puffDust(foot.x, 0.05, foot.z, foot.psi, 1, 0.32);
+        }
+      }
+    }
 
     drawPals(st.pals, drawS, st.time || 0, reduced);
 
@@ -2087,6 +2194,32 @@ export function createRenderer(canvas) {
         : (code % 2) ? pal.coin : pal.flower;
       push(sparks[o], sparks[o + 1], sparks[o + 2], s, s, s, 1, tint, 0.2, tintId >= 3 ? 0.9 : 0.7);
     }
+    let dustN = 0;
+    for (let i = 0; i < DUST_N; i++) {
+      const o = i * 8;
+      const life = dust[o + 6];
+      if (life <= 0) continue;
+      dust[o] += dust[o + 3] * 0.055;
+      dust[o + 1] += dust[o + 4] * 0.05;
+      dust[o + 2] += dust[o + 5] * 0.055;
+      dust[o + 4] -= 0.014;
+      dust[o + 6] = life - (reduced ? 0.2 : 0.02);
+      if (dust[o + 6] <= 0 || n >= MAX - 8) continue;
+      const puff = 0.1 + (0.4 - life) * 0.28;
+      push(dust[o], Math.max(0.08, dust[o + 1]), dust[o + 2], puff, puff * 0.55, puff, 1, [0.92, 0.78, 0.52], 0.8, 0.14);
+      dustN++;
+    }
+    if (!reduced && speed >= 12 && n < MAX - 16) {
+      const scroll = ((st.time || 0) * Math.min(speed, 18)) % 3.4;
+      for (let s = 0; s < 3; s++) {
+        for (const side of [-1, 1]) {
+          const along = drawS + 0.4 + s * 3.4 - scroll;
+          const at = sample(along, side * (2.35 + (s === 1 ? 0.4 : 0)));
+          const h = 0.1 + (s === 2 ? 0.08 : 0);
+          push(at.x, 0.42 + s * 0.28, at.z, 0.03, h, 2.5, 0, [1, 0.98, 0.9], 0.22, 0.55, at.psi);
+        }
+      }
+    }
     if (reject > 0.2 && !reduced && (n < MAX - 4)) {
       const petal = Math.sin(st.time * 3) * 0.4;
       const petalA = sample(pz + 1.5, px - petal);
@@ -2128,6 +2261,21 @@ export function createRenderer(canvas) {
         hi--;
       }
     }
+    // Patterned surfaces (kind >= mark) draw on their own, with uPat.
+    // One mixed draw would make SwiftShader run the hash on every box.
+    const splitKind = (start, end, mark) => {
+      let a = start;
+      let b = end - 1;
+      while (a <= b) {
+        if (data[a * STRIDE + 15] < mark) a++;
+        else {
+          swapInst(a, b);
+          b--;
+        }
+      }
+      return a;
+    };
+    const boxPat = splitKind(0, lo, 2.5);
     gl.bindVertexArray(vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, inst);
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, data.subarray(0, n * STRIDE));
@@ -2144,9 +2292,10 @@ export function createRenderer(canvas) {
       gl.uniform3fv(locs.soil, pal.soil);
       gl.uniform1f(locs.mtime, st.time || 0);
     };
-    const drawSpan = (prog, locs, first, count, coverage) => {
+    const drawSpan = (prog, locs, first, count, coverage, pat) => {
       if (!count) return;
       bindMesh(prog, locs);
+      if (locs.pat) gl.uniform1f(locs.pat, pat);
       const base = first * STRIDE * 4;
       for (let i = 0; i < 4; i++) {
         gl.vertexAttribPointer(2 + i, 4, gl.FLOAT, false, STRIDE * 4, base + i * 16);
@@ -2155,11 +2304,14 @@ export function createRenderer(canvas) {
       else gl.disable(gl.SAMPLE_ALPHA_TO_COVERAGE);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 36, count);
     };
-    drawSpan(meshBox, ub, 0, lo, false);
-    drawSpan(meshBall, uBall, lo, mid - lo, false);
-    drawSpan(mesh, um, mid, n - mid, true);
+    drawSpan(meshBox, ub, 0, boxPat, false, 0);
+    drawSpan(meshPat, up, boxPat, lo - boxPat, false, 0);
+    drawSpan(meshBall, uBall, lo, mid - lo, false, 0);
+    drawSpan(mesh, um, mid, n - mid, true, 0);
     gl.disable(gl.SAMPLE_ALPHA_TO_COVERAGE);
     canvas.dataset.instances = String(n);
+    canvas.dataset.dust = String(dustN);
+    canvas.dataset.rush = rush ? "1" : "0";
     return n;
   }
 
