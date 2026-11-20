@@ -51,6 +51,10 @@ if (!renderer) {
 
 const player = makePlayer(1.2);
 let rules = rulesOf(32, 11.2, 8, 0.48, 0.12, 0.12);
+const paceParam = Number(params.get("pace"));
+if (paceParam >= 6 && paceParam <= 16) {
+  rules = rulesOf(rules.g, rules.jump, paceParam, rules.slide, rules.coyote, rules.forgive);
+}
 let pieces = [];
 let hue = 0;
 const sceneTarget = {
