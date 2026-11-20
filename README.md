@@ -8,13 +8,15 @@ Hero on autopilot, voice switches worlds, each new world is an Aura Biome EDSL f
 
 ## Quick start
 
-Linux x86_64 or arm64, Node.js 22, `bash`, `curl`, and `python3`. The first `./run.sh` downloads the Aura nightly into `.tools`.
+Linux x86_64 or arm64, Node.js 22, `bash`, `curl`, and `python3`. No C compiler, CMake, or Docker.
 
 ```bash
 ./run.sh
 ```
 
-Open the URL it prints. Ctrl-C stops the core and the page. If 8080 or 8765 is taken, `./run.sh` prints the next free port. `AURA_RUNNER_WEB` and `AURA_RUNNER_PORT` pin one. Set `AURA_BIN` to skip the download: `AURA_BIN="$(command -v aura)" ./run.sh`.
+The first run downloads the [Aura nightly](https://github.com/cybrid-systems/aura/releases/tag/nightly) (sha256-checked, cached in `~/.cache/lumen-run`) and prints the version, where it came from (`download`, `cache`, or `offline`), and the URL. Open that URL. The page retries until the core is listening. Ctrl-C stops both. If 8080 or 8765 is taken, `./run.sh` prints the next free port. `AURA_RUNNER_WEB` and `AURA_RUNNER_PORT` pin one.
+
+`AURA_BIN=/path/to/aura` uses a binary you already have. `AURA_VERSION=v0.2.7` pins a release instead of `nightly`. `AURA_OFFLINE=1` uses the cache and does not touch the network. macOS and Windows pick the matching asset when the release publishes one.
 
 ## Controls
 
@@ -118,7 +120,7 @@ docs/      Demo poster and video
 
 ## Checks
 
-Aura commands need `AURA_SANDBOX=off` and a nightly binary on `PATH`. CI runs that job on `ghcr.io/cybrid-systems/aura:nightly` ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
+`./run.sh` downloads a prebuilt binary and does not compile. `aura test` needs `AURA_SANDBOX=off` and a nightly binary on `PATH`; that CI job uses `ghcr.io/cybrid-systems/aura:nightly` ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). The smoke job installs the same release on a runner without build tools.
 
 | Command | Checks |
 | --- | --- |
@@ -133,7 +135,8 @@ Aura commands need `AURA_SANDBOX=off` and a nightly binary on `PATH`. CI runs th
 | `node scripts/check-probe.mjs` | Startup model probe |
 | `node scripts/check-music.mjs` | Tune bounds, KEEP/ROLLBACK, tempo, missing file |
 | `node scripts/check-voice.mjs` | Soft voice stays on 196 Hz |
-| `bash scripts/check-install.sh` | Install from an empty tools dir |
+| `bash scripts/check-install.sh` | Install from an empty cache, offline reuse |
+| `bash scripts/check-runsh.sh` | `./run.sh` downloads a prebuilt binary and serves the page |
 | `node scripts/smoke.mjs` | Seeded end-to-end run |
 | `node scripts/mock-llm-e2e.mjs` | Mock LLM rebind |
 | `node scripts/check-edsl-e2e.mjs` | EDSL gate and voice switch |
