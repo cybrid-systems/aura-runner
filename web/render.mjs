@@ -430,8 +430,10 @@ void main() {
   float sunAmt = max(uSunAmt, 0.0);
   c += uSunCol * smoothstep(0.14, 0.0, sd) * 0.5 * sunAmt;
   c += vec3(1.0, 0.97, 0.9) * smoothstep(0.035, 0.0, sd) * sunAmt;
-  c = max(c, vec3(0.0));
-  c = clamp((c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14), 0.0, 1.0);
+  // Highlight shoulder only. Below 0.9 the sky is unchanged, so the blue
+  // stays blue; the sun core rolls toward white instead of clipping flat.
+  vec3 over = max(c - vec3(0.9), vec3(0.0));
+  c = min(max(c, vec3(0.0)), vec3(0.9)) + over / (vec3(1.0) + over * 10.0);
   o = vec4(c, 1.0);
 }`;
 
@@ -499,9 +501,9 @@ float unitSdf(vec3 p, float shape) {
   if (shape < 4.5) return max((rr - 0.5 * (0.5 - p.y)) * 0.894, abs(p.y) - 0.5);
   return length(vec2(rr - 0.32, p.y * 0.36)) - 0.18;
 }
-vec3 aces(vec3 x) {
-  x = max(x, vec3(0.0));
-  return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+vec3 softKnee(vec3 c) {
+  vec3 over = max(c - vec3(0.9), vec3(0.0));
+  return min(max(c, vec3(0.0)), vec3(0.9)) + over / (vec3(1.0) + over * 10.0);
 }
 void main() {
   vec3 n = normalize(vN);
@@ -515,10 +517,10 @@ void main() {
     float edge = min(min(0.5 - abs(vL.x), 0.5 - abs(vL.y)), 0.5 - abs(vL.z));
     n = normalize(vN + vL * smoothstep(0.16, 0.0, edge) * 0.85);
   } else if (vShape > 2.5) {
-    int budget = 40;
-    float minStep = 0.004;
-    if (eyeD > 20.0) { budget = 8; minStep = 0.018; }
-    else if (eyeD > 13.0) { budget = 16; minStep = 0.009; }
+    int budget = 32;
+    float minStep = 0.005;
+    if (eyeD > 18.0) { budget = 8; minStep = 0.02; }
+    else if (eyeD > 12.0) { budget = 14; minStep = 0.011; }
     float cy = cos(vYaw);
     float sy = sin(vYaw);
     vec3 size = max(vHalf * 2.0, vec3(1e-3));
@@ -579,15 +581,14 @@ void main() {
   float metal = clamp(vMetal, 0.0, 1.0);
   float sheen = clamp(vSheen, 0.0, 1.0);
   float rough = clamp(vRough, 0.0, 1.0);
-  vec3 ambient = mix(vec3(0.20, 0.19, 0.17), uSkyAmb, 0.32);
-  vec3 albedo = mix(vC, vC * (0.42 + 0.58 * ndl), metal * 0.55);
-  vec3 col = albedo * (ambient * (0.75 + 0.25 * hemi) + uLightAmt * ndl + 0.10 * wrap);
+  vec3 ambient = mix(vec3(0.22), uSkyAmb, 0.10);
+  vec3 col = vC * (ambient + 0.28 * hemi + uLightAmt * ndl + 0.12 * wrap);
   float rim = pow(1.0 - max(dot(n, viewDir), 0.0), 2.2);
-  col += vec3(1.0, 0.93, 0.82) * rim * (0.16 + vEmit * 0.28);
-  float specPow = mix(64.0, 9.0, rough);
+  col += vec3(1.0, 0.93, 0.82) * rim * (0.16 + vEmit * 0.22);
+  float specPow = mix(48.0, 12.0, rough);
   float spec = pow(max(dot(n, normalize(L + viewDir)), 0.0), specPow);
   vec3 specCol = mix(vec3(1.0, 0.96, 0.88), vC, metal);
-  col += specCol * spec * mix(0.55, 0.08, rough) * (1.0 + sheen * 0.9);
+  col += specCol * spec * mix(0.45, 0.06, rough) * (1.0 + sheen);
   if (asBox) {
     float edge = min(min(0.5 - abs(vL.x), 0.5 - abs(vL.y)), 0.5 - abs(vL.z));
     col *= 0.76 + 0.24 * smoothstep(0.0, 0.16, edge);
@@ -617,7 +618,7 @@ void main() {
   float fog = 1.0 - exp(-dist * 0.011);
   fog = clamp(fog, 0.0, cap);
   fog *= (1.0 - 0.82 * clamp(vEmit, 0.0, 1.0));
-  o = vec4(mix(aces(col), aces(uFog), fog), cov);
+  o = vec4(softKnee(mix(col, uFog, fog)), cov);
 }`;
 
 // Boxes are most of the pixels. This twin has no raymarch and no fwidth,
@@ -631,30 +632,44 @@ flat in float vMetal; flat in float vSheen; flat in float vKind;
 uniform vec3 uEye; uniform vec3 uFog; uniform float uFogAmt;
 uniform vec3 uLight; uniform float uLightAmt; uniform vec3 uSkyAmb; uniform vec3 uSoil; uniform float uTime;
 out vec4 o;
-vec3 aces(vec3 x) {
-  x = max(x, vec3(0.0));
-  return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+vec3 softKnee(vec3 c) {
+  vec3 over = max(c - vec3(0.9), vec3(0.0));
+  return min(max(c, vec3(0.0)), vec3(0.9)) + over / (vec3(1.0) + over * 10.0);
 }
 void main() {
+  // Kind 2 is a contact shadow: a thin square cut into a soft disc.
+  if (vKind > 1.5) {
+    float rr = length(vL.xz);
+    if (rr > 0.46) discard;
+    float feather = smoothstep(0.46, 0.12, rr);
+    vec3 shade = mix(vec3(0.46, 0.40, 0.30), vec3(0.24, 0.20, 0.14), feather);
+    float dist = length(vW - uEye);
+    float fog = clamp(1.0 - exp(-dist * 0.011), 0.0, 0.38);
+    o = vec4(mix(shade, uFog, fog * 0.7), 1.0);
+    return;
+  }
   float edge = min(min(0.5 - abs(vL.x), 0.5 - abs(vL.y)), 0.5 - abs(vL.z));
   vec3 n = normalize(vN + vL * smoothstep(0.16, 0.0, edge) * 0.85);
-  vec3 viewDir = normalize(uEye - vW);
   vec3 L = normalize(uLight);
   float ndl = max(dot(n, L), 0.0);
   float hemi = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);
   float wrap = clamp(dot(n, L) * 0.5 + 0.5, 0.0, 1.0);
-  float metal = clamp(vMetal, 0.0, 1.0);
-  float sheen = clamp(vSheen, 0.0, 1.0);
   float rough = clamp(vRough, 0.0, 1.0);
-  vec3 ambient = mix(vec3(0.20, 0.19, 0.17), uSkyAmb, 0.32);
-  vec3 albedo = mix(vC, vC * (0.42 + 0.58 * ndl), metal * 0.55);
-  vec3 col = albedo * (ambient * (0.75 + 0.25 * hemi) + uLightAmt * ndl + 0.10 * wrap);
-  float rim = pow(1.0 - max(dot(n, viewDir), 0.0), 2.2);
-  col += vec3(1.0, 0.93, 0.82) * rim * (0.16 + vEmit * 0.28);
-  float specPow = mix(64.0, 9.0, rough);
-  float spec = pow(max(dot(n, normalize(L + viewDir)), 0.0), specPow);
-  vec3 specCol = mix(vec3(1.0, 0.96, 0.88), vC, metal);
-  col += specCol * spec * mix(0.55, 0.08, rough) * (1.0 + sheen * 0.9);
+  vec3 ambient = mix(vec3(0.22), uSkyAmb, 0.10);
+  vec3 col = vC * (ambient + 0.28 * hemi + uLightAmt * ndl + 0.12 * wrap);
+  // Grass and hedges are most of the pixels: skip the pows there.
+  if (vEmit > 0.05 || rough < 0.72) {
+    vec3 viewDir = normalize(uEye - vW);
+    if (vEmit > 0.05) {
+      float rim = pow(1.0 - max(dot(n, viewDir), 0.0), 2.2);
+      col += vec3(1.0, 0.93, 0.82) * rim * (0.16 + vEmit * 0.22);
+    }
+    if (rough < 0.72) {
+      float specPow = mix(48.0, 12.0, rough);
+      float spec = pow(max(dot(n, normalize(L + viewDir)), 0.0), specPow);
+      col += vec3(1.0, 0.96, 0.88) * spec * mix(0.42, 0.08, rough);
+    }
+  }
   col *= 0.76 + 0.24 * smoothstep(0.0, 0.16, edge);
   if (vHalf.y < 0.12) col *= 1.0 - 0.22 * smoothstep(0.32, 0.48, abs(vL.x));
   if (vHalf.y < 0.1 && vHalf.x > 0.7 && rough > 0.4 && rough < 0.7 && vKind < 0.5) {
@@ -679,7 +694,63 @@ void main() {
   float fog = 1.0 - exp(-dist * 0.011);
   fog = clamp(fog, 0.0, cap);
   fog *= (1.0 - 0.82 * clamp(vEmit, 0.0, 1.0));
-  o = vec4(mix(aces(col), aces(uFog), fog), 1.0);
+  o = vec4(softKnee(mix(col, uFog, fog)), 1.0);
+}`;
+
+// Spheres and gems only. No raymarch, so a tree canopy does not carry the loop.
+const MESH_FS_BALL = `#version 300 es
+precision highp float;
+in vec3 vN; in vec3 vW; in vec3 vC; in vec3 vL;
+flat in vec3 vCenter; flat in vec3 vHalf; flat in float vShape;
+flat in float vRough; flat in float vEmit; flat in float vYaw;
+flat in float vMetal; flat in float vSheen; flat in float vKind;
+uniform vec3 uEye; uniform vec3 uFog; uniform float uFogAmt;
+uniform vec3 uLight; uniform float uLightAmt; uniform vec3 uSkyAmb; uniform vec3 uSoil; uniform float uTime;
+out vec4 o;
+vec3 softKnee(vec3 c) {
+  vec3 over = max(c - vec3(0.9), vec3(0.0));
+  return min(max(c, vec3(0.0)), vec3(0.9)) + over / (vec3(1.0) + over * 10.0);
+}
+void main() {
+  vec3 rd = normalize(vW - uEye);
+  vec3 n;
+  float cov;
+  if (vShape < 1.5) {
+    float r = min(min(vHalf.x, vHalf.y), vHalf.z);
+    vec3 oc = uEye - vCenter;
+    float b = dot(oc, rd);
+    float h = b * b - (dot(oc, oc) - r * r);
+    if (h < 0.0) discard;
+    cov = 1.0;
+    n = normalize(uEye + rd * (-b - sqrt(h)) - vCenter);
+  } else {
+    if (abs(vL.x) + abs(vL.y) + abs(vL.z) > 0.82) discard;
+    cov = 1.0;
+    n = normalize(vec3(sign(vL.x), sign(vL.y), sign(vL.z)) + 0.0001);
+  }
+  vec3 viewDir = normalize(uEye - vW);
+  vec3 L = normalize(uLight);
+  float ndl = max(dot(n, L), 0.0);
+  float hemi = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);
+  float wrap = clamp(dot(n, L) * 0.5 + 0.5, 0.0, 1.0);
+  float metal = clamp(vMetal, 0.0, 1.0);
+  float sheen = clamp(vSheen, 0.0, 1.0);
+  float rough = clamp(vRough, 0.0, 1.0);
+  vec3 ambient = mix(vec3(0.22), uSkyAmb, 0.10);
+  vec3 col = vC * (ambient + 0.28 * hemi + uLightAmt * ndl + 0.12 * wrap);
+  float rim = pow(1.0 - max(dot(n, viewDir), 0.0), 2.2);
+  col += vec3(1.0, 0.93, 0.82) * rim * (0.16 + vEmit * 0.22);
+  float specPow = mix(48.0, 12.0, rough);
+  float spec = pow(max(dot(n, normalize(L + viewDir)), 0.0), specPow);
+  col += mix(vec3(1.0, 0.96, 0.88), vC, metal) * spec * mix(0.45, 0.06, rough) * (1.0 + sheen);
+  float under = smoothstep(-0.15, -0.48, vL.y);
+  col *= 1.0 - 0.32 * under * (1.0 - vEmit);
+  float pulse = 0.85 + 0.15 * sin(uTime * 3.0 + vCenter.z);
+  col += vC * vEmit * pulse;
+  float dist = length(vW - uEye);
+  float fog = clamp(1.0 - exp(-dist * 0.011), 0.0, min(max(uFogAmt, 0.0), 0.38));
+  fog *= (1.0 - 0.82 * clamp(vEmit, 0.0, 1.0));
+  o = vec4(softKnee(mix(col, uFog, fog)), cov);
 }`;
 
 export const SKY_KINDS = ["sun", "moon", "plane"];
@@ -730,6 +801,7 @@ export function createRenderer(canvas) {
   const sky = link(gl, SKY_VS, SKY_FS);
   const mesh = link(gl, MESH_VS, MESH_FS);
   const meshBox = link(gl, MESH_VS, MESH_FS_BOX);
+  const meshBall = link(gl, MESH_VS, MESH_FS_BALL);
   const tri = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, tri);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
@@ -787,6 +859,7 @@ export function createRenderer(canvas) {
   }
   const um = meshLocs(mesh);
   const ub = meshLocs(meshBox);
+  const uBall = meshLocs(meshBall);
   const gpuInfo = gl.getExtension("WEBGL_debug_renderer_info");
   const gpuName = gpuInfo
     ? `${gl.getParameter(gpuInfo.UNMASKED_VENDOR_WEBGL) || ""} ${gl.getParameter(gpuInfo.UNMASKED_RENDERER_WEBGL) || ""}`
@@ -878,21 +951,22 @@ export function createRenderer(canvas) {
     n++;
   }
 
-  // Flat blot, same falloff as the popper: wider when the body is near the
-  // ground, smaller as it rises. The road slab tops out near y 0.08, so the
-  // blot sits just above it. Leaves room for the runner if the buffer fills.
-  const SHADOW = [0.2, 0.14, 0.08];
+  // Round disc, same height falloff as the popper, a little smaller.
+  // Kind 2 tells the box shader to cut the square into a circle. The road
+  // slab tops out near y 0.08. Off the grass deck there is nothing to sit on.
+  const DECK = 2.85;
   function contactShadow(x, z, yaw, height, radius) {
     if (n >= MAX - 96) return;
-    const s = Math.max(0.12, radius) / (1 + Math.max(0, height) * 0.45);
-    push(x, 0.108, z, s * 1.6, 0.02, s, 0, SHADOW, 1, 0, yaw);
+    const s = Math.max(0.16, radius) * 0.78 / (1 + Math.max(0, height) * 0.55);
+    push(x, 0.09, z, s, 0.012, s, 0, [0.34, 0.28, 0.2], 0.95, 0, yaw, 0, 0, 2);
   }
 
   function placeThing(thing, box, opts) {
     const drawn = drawThing(push, thing, box, opts || {});
+    if (opts && opts.deck === false) return drawn;
     const grow = !opts || opts.grow === undefined ? 1 : opts.grow;
     const span = Math.max(box.w || 0, box.d || 0) * (grow || 0);
-    contactShadow(box.x, box.z, box.psi || 0, box.y || 0, Math.min(0.9, Math.max(0.18, span * 0.42)));
+    contactShadow(box.x, box.z, box.psi || 0, box.y || 0, Math.min(0.72, Math.max(0.16, span * 0.34)));
     return drawn;
   }
 
@@ -1131,7 +1205,7 @@ export function createRenderer(canvas) {
       const z = pz - 0.8 + i * 1.45 + (reduced ? 0 : Math.sin(t * 0.8 + i) * 0.25);
       const at = sample(z, lat);
       spin = at.psi;
-      contactShadow(at.x, at.z, at.psi, hop, 0.46);
+      if (Math.abs(lat) <= DECK) contactShadow(at.x, at.z, at.psi, hop, 0.34);
       const plan = pal.plan || pal.kind;
       const look = carLook(plan, t, i, reduced);
       looks.push(look);
@@ -1328,8 +1402,8 @@ export function createRenderer(canvas) {
       const leaf = mix3(pal.leaf, pal.leaf2, kind === 2 ? 0.2 : 0.62);
       const trunk = mix3(pal.trunk, [0.32, 0.2, 0.13], kind === 1 ? 0.15 : 0.4);
       const top = [at.x + swayX, at.z + swayZ];
-      const canopy = kind === 3 ? 0.72 : kind === 2 ? 0.62 : kind === 1 ? 0.4 : 0.52;
-      contactShadow(at.x, at.z, at.psi, 0, canopy * scale);
+      // Roadside trees stand past the grass deck, so a ground blot would hang in the air.
+      if (Math.abs(lat) <= DECK) contactShadow(at.x, at.z, at.psi, 0, 0.42 * scale);
       if (kind === 1) {
         push(at.x, 0.72 * scale, at.z, 0.11 * scale, 1.45 * scale, 0.11 * scale, 0, trunk, 0.8, 0, at.psi);
         push(top[0], 1.62 * scale, top[1], 0.38 * scale, 1.2 * scale, 0.38 * scale, 1, leaf, 0.7, 0.02, at.psi);
@@ -1396,7 +1470,7 @@ export function createRenderer(canvas) {
       }
       if (dist < 36 && ((z / 2) | 0) % 2 === 0) {
         const hv = laneHash(z * 0.19 + 4.2);
-        const hedgeH = 0.42 + hv * 0.5;
+        const hedgeH = 0.30 + hv * 0.22;
         const hedgeW = 0.56 + hv * 0.22;
         const hedgeD = 3.5 + laneHash(z * 0.07) * 0.7;
         const tint = mix3(pal.hedge, hv > 0.5 ? pal.leaf : [0.08, 0.12, 0.06], Math.abs(hv - 0.5) * 0.35);
@@ -1799,7 +1873,7 @@ export function createRenderer(canvas) {
           const side = (j + Math.floor(tc.x0)) % 2 ? 1 : -1;
           const at = onRoad(spots[j], side * 3.9);
           placeThing(th, { x: at.x, y: 0, z: at.z, psi: at.psi, w: 1.3 * sz, h: 1.7 * sz, d: 1.3 * sz },
-            { grow, anim: thingAnim(th, spots[j]) });
+            { grow, anim: thingAnim(th, spots[j]), deck: Math.abs(side * 3.9) <= DECK });
         }
       } else if (th.role === "pal" && pz >= tc.x0 && pz < tc.x1) {
         const grow = growOf(th.id, nowMs, reduced);
@@ -1890,7 +1964,11 @@ export function createRenderer(canvas) {
       placeThing(toy, {
         x: at.x, y: box.y, z: at.z, psi: at.psi,
         w: box.w, h: box.h, d: box.d,
-      }, { grow: growOf(toy.id, nowMs, reduced), anim: thingAnim(toy, i * 0.7) });
+      }, {
+        grow: growOf(toy.id, nowMs, reduced),
+        anim: thingAnim(toy, i * 0.7),
+        deck: Math.abs(box.lat) <= DECK,
+      });
     }
 
     // Spoken sun, moon and plane sit in the view. The camera looks slightly
@@ -2040,19 +2118,32 @@ export function createRenderer(canvas) {
     const ahead = Math.hypot(at[0] - eye[0], at[2] - eye[2]) || 1;
     const pitch = Math.atan2(at[1] - eye[1], ahead);
     const aim = sunAim(psi, camFov, w / Math.max(1, h), pal.sunUv, pitch);
-    const lightAmt = (0.55 + 0.45 * pal.lightAmt) * (0.82 + lift * 0.12 + pulse * 0.1);
-    let boxN = 0;
+    const sunI = 0.55 + 0.55 * pal.lightAmt;
+    const lightAmt = 0.55 * sunI * (1 + lift * 0.08 + pulse * 0.06);
+    const swapInst = (i, j) => {
+      if (i === j) return;
+      const a = i * STRIDE;
+      const b = j * STRIDE;
+      for (let k = 0; k < STRIDE; k++) {
+        const tmp = data[a + k];
+        data[a + k] = data[b + k];
+        data[b + k] = tmp;
+      }
+    };
+    // 0 box, 1 sphere/gem, 2 marched shape.
+    let lo = 0;
+    let mid = 0;
     let hi = n - 1;
-    while (boxN <= hi) {
-      if (data[boxN * STRIDE + 3] < 0.5) boxN++;
-      else {
-        const a = boxN * STRIDE;
-        const b = hi * STRIDE;
-        for (let k = 0; k < STRIDE; k++) {
-          const tmp = data[a + k];
-          data[a + k] = data[b + k];
-          data[b + k] = tmp;
-        }
+    while (mid <= hi) {
+      const shape = data[mid * STRIDE + 3];
+      if (shape < 0.5) {
+        swapInst(lo, mid);
+        lo++;
+        mid++;
+      } else if (shape < 2.5) {
+        mid++;
+      } else {
+        swapInst(mid, hi);
         hi--;
       }
     }
@@ -2083,8 +2174,9 @@ export function createRenderer(canvas) {
       else gl.disable(gl.SAMPLE_ALPHA_TO_COVERAGE);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 36, count);
     };
-    drawSpan(meshBox, ub, 0, boxN, false);
-    drawSpan(mesh, um, boxN, n - boxN, true);
+    drawSpan(meshBox, ub, 0, lo, false);
+    drawSpan(meshBall, uBall, lo, mid - lo, false);
+    drawSpan(mesh, um, mid, n - mid, true);
     gl.disable(gl.SAMPLE_ALPHA_TO_COVERAGE);
     canvas.dataset.instances = String(n);
     return n;
