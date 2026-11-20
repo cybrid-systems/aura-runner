@@ -155,6 +155,12 @@ function pickupWorth(rules) {
   return Number.isFinite(n) && n > 0 ? n : 25;
 }
 
+// Field 6 is this coin's own worth. Missing or zero keeps the loot base.
+function pieceWorth(q, rules) {
+  const w = q.length > 6 ? q[6] : 0;
+  return Number.isFinite(w) && w > 0 ? w : pickupWorth(rules);
+}
+
 function tickTimers(p, dt) {
   p[11] = Math.max(0, p[11] - dt);
   p[12] = Math.max(0, p[12] - dt);
@@ -453,8 +459,10 @@ function collide(p, pieces, rules) {
       continue;
     }
     if (hit && k === 5) {
+      const worth = pieceWorth(q, rules);
+      q.paid = worth;
       q[0] = 0;
-      p[6] += pickupWorth(rules);
+      p[6] += worth;
       event = "coin";
     } else if (hit && k === 6 && p[1] <= 0.05 && p[2] <= 0) {
       p[2] = rules.jump * 1.28;

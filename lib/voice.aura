@@ -344,11 +344,24 @@
     (/ (max 0.0 (exact->inexact points)) (exact->inexact level))
     0.0))
 
+(define (skill-num h k d)
+  (if (hash? h) (hash-ref h k d) d))
+
+(define (skill-flag h k)
+  (and (hash? h) (equal? (hash-ref h k #f) #t)))
+
+(define (finish-plan form act scene pressure streak)
+  (hash "form" form "act" act "scene" scene "pressure" pressure "streak" streak))
+
 ; One change for the next level. A low score, or two bumps, eases the
 ; pace and opens the bright cloud garden. A clean odd level steps the
 ; pace up. An even level, or a single bump, keeps the pace and changes
 ; the garden instead. scene -1 means the garden stays.
-(define (adapt-finish form bumps points level)
+; Pressure is a second band for coin density and poppers. It moves by
+; one band: up on a clean streak, a x3 combo, an overtake, or a high
+; score; down on two bumps or a low score. A speed lock keeps the feel
+; where it is and lets pressure tune density instead of asking for speed.
+(define (adapt-finish form bumps points level . rest)
   (let ((f (voice-band form))
         (n (if (and (number? bumps) (> bumps 1.5)) 2 (if (and (number? bumps) (> bumps 0.5)) 1 0)))
         (lv (cond
@@ -359,14 +372,35 @@
               ((< level 4.5) 4)
               ((< level 5.5) 5)
               (else 6)))
-        (rate (adapt-rate points level)))
-    (cond
-      ((or (>= n 2) (< rate 25.0))
-       (hash "form" (max 0 (- f 1)) "act" "ease" "scene" 5))
-      ((and (<= n 0) (= (modulo lv 2) 1))
-       (hash "form" (min 4 (+ f 1)) "act" "harder" "scene" -1))
-      (else
-       (hash "form" f "act" "scene" "scene" (modulo lv 6))))))
+        (rate (adapt-rate points level))
+        (skill (if (and (pair? rest) (hash? (car rest))) (car rest) #f)))
+    (let* ((pressure (pressure-band (skill-num skill "pressure" 1)))
+           (combo (skill-num skill "combo" 0))
+           (overtakes (skill-num skill "overtakes" 0))
+           (streak0 (skill-num skill "streak" 0))
+           (locked (skill-flag skill "locked"))
+           (streak (if (<= n 0)
+                     (+ (if (and (number? streak0) (> streak0 0)) streak0 0) 1)
+                     0))
+           (hot (and (<= n 0)
+                     (or (>= streak 2)
+                         (and (number? combo) (>= combo 3))
+                         (and (number? overtakes) (>= overtakes 1))
+                         (>= rate 80.0))))
+           (low (or (>= n 2) (< rate 25.0)))
+           (next-p (cond
+                     (low (max 0 (- pressure 1)))
+                     (hot (min 4 (+ pressure 1)))
+                     (else pressure))))
+      (cond
+        ((or (>= n 2) (< rate 25.0))
+         (finish-plan (max 0 (- f 1)) "ease" 5 next-p streak))
+        ((and (<= n 0) (= (modulo lv 2) 1))
+         (if locked
+           (finish-plan f (if (> next-p pressure) "dense" "hold") -1 next-p streak)
+           (finish-plan (min 4 (+ f 1)) "harder" -1 next-p streak)))
+        (else
+         (finish-plan f "scene" (modulo lv 6) next-p streak))))))
 
 ; The opening level keeps the plain span. Later levels stretch a little
 ; when the score is low and shorten a little when it is high.
@@ -387,4 +421,6 @@
     (cond
       ((string=? act "ease") (if zh "这一关轻松一点" "A gentler path"))
       ((string=? act "harder") (if zh "这一关难了一点" "A little harder"))
+      ((string=? act "dense") (if zh "这一关收集更密" "More to collect"))
+      ((string=? act "hold") (if zh "这一关先这样" "Same pace"))
       (else (if zh "这一关换了风景" "A new garden")))))

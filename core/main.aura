@@ -509,6 +509,15 @@
 (define level-x0 0.0)
 (define level-x1 128.0)
 (define level-bumps 0)
+; Density band for coins and poppers. 1 is the shipped spacing.
+; Skill points the picture adds (combo, Nice, near-miss, overtake)
+; arrive on the tick and land on the score the finish reads.
+(define pressure-now 1)
+(define skill-seen 0.0)
+(define level-combo 0)
+(define level-near 0)
+(define level-overtakes 0)
+(define level-streak 0)
 ; A spoken finish stays until this level ends. Sky props are names the
 ; view draws. sun-hide turns off the soft disc when the child sends the sun home.
 (define goal-lock #f)
@@ -527,6 +536,9 @@
 (define (begin-level!)
   (set! level-x0 (player-x player))
   (set! level-bumps 0)
+  (set! level-combo 0)
+  (set! level-near 0)
+  (set! level-overtakes 0)
   (if goal-lock
     #f
     (set! level-x1 (+ level-x0 (adapt-span speed-now (player-score player) level-n)))))
@@ -546,16 +558,39 @@
             #t)
           #f)))))
 
+(define (skill-now)
+  (hash "pressure" pressure-now
+        "combo" level-combo
+        "overtakes" level-overtakes
+        "near" level-near
+        "streak" level-streak
+        "locked" (if speed-lock #t #f)))
+
+(define (level-clear-line combo near overs)
+  (if (and (<= combo 0) (<= near 0) (<= overs 0))
+    "Level clear"
+    (string-append "Level clear · x" (int-str combo)
+                   " · close " (int-str near)
+                   " · pass " (int-str overs))))
+
 (define (finish-level!)
   (let* ((played form)
          (bumps level-bumps)
-         (plan (adapt-finish played bumps (player-score player) level-n))
+         (combo level-combo)
+         (near level-near)
+         (overs level-overtakes)
+         (plan (adapt-finish played bumps (player-score player) level-n (skill-now)))
          (act (hash-ref plan "act" "scene"))
          (scene-i (hash-ref plan "scene" -1)))
+    (set! pressure-now (hash-ref plan "pressure" pressure-now))
+    (set! level-streak (hash-ref plan "streak" 0))
     (set! chase-recent (chase-remember chase-recent bumps))
     (set! form (hash-ref plan "form" played))
     (set! level-n (+ level-n 1))
     (set! level-bumps 0)
+    (set! level-combo 0)
+    (set! level-near 0)
+    (set! level-overtakes 0)
     (set! goal-lock #f)
     (advance-pace!)
     (begin-level!)
@@ -564,10 +599,10 @@
         (if (paint-env! scene-i say)
           #f
           (note! "KEEP" act "run" say))
-        (if (string=? act "harder")
+        (if (or (string=? act "harder") (string=? act "dense"))
           (note! "KEEP" act "run" say)
           #f)))
-    (note! "KEEP" "level" "run" "Level clear")
+    (note! "KEEP" "level" "run" (level-clear-line combo near overs))
     (queue-chase! played bumps (chase-sum chase-recent) speed-now)
     (roster-evolve! "Level clear")))
 
@@ -729,11 +764,11 @@
   (let* ((margin (if (and (pair? rest) (number? (car rest)))
                    (exact->inexact (car rest))
                    9.0))
-         (placed (shift-onto (string-pickups pieces b span) next-x))
+         (placed (shift-onto (string-pickups pieces b span pressure-now (loot-worth loot-now)) next-x))
          (id next-id)
          (x0 next-x)
          (x1 (+ next-x span))
-         (toss (popper-for id x0 span))
+         (toss (popper-for id x0 span pressure-now))
          (rival (rival-for-chunk x0 x1))
          (with (append placed
                        (if toss (list toss) (list))
@@ -837,6 +872,12 @@
   (set! form 0)
   (set! level-n 1)
   (set! level-bumps 0)
+  (set! level-combo 0)
+  (set! level-near 0)
+  (set! level-overtakes 0)
+  (set! level-streak 0)
+  (set! pressure-now 1)
+  (set! skill-seen 0.0)
   (set! rival-for 0)
   (set! chase (chase-blank))
   (set! chase-recent (list))
@@ -941,6 +982,7 @@
         "worth" (loot-worth loot-now)
         "level" level-n "goal" level-x1 "level0" level-x0
         "pace" pace "points" (floor (player-score player))
+        "pressure" pressure-now
         "motif" motif-now "scene" scene-now
         "pals" pals-rows "hero" (hero-public) "provider" llm-provider
         "model" (active-model) "providers" (ready-providers)
@@ -979,6 +1021,11 @@
         "seed" seed
         "event" ev
         "grace" (player-grace player)
+        "pressure" pressure-now
+        "combo" level-combo
+        "near" level-near
+        "overtakes" level-overtakes
+        "skill" (floor skill-seen)
         "chunks" (length chunks)
         "sky" (list sky-r sky-g sky-b)
         "ground" (list ground-r ground-g ground-b)
@@ -3241,7 +3288,8 @@
         "dream-phase" dream-phase "chase-phase" chase-phase
         "chase-plan" chase-plan "card-spec" card-spec "hold-form" hold-form
         "dream-form" dream-form
-        "via" publish-via "rev" rule-rev "dirty" rules-dirty))
+        "via" publish-via "rev" rule-rev "dirty" rules-dirty
+        "pressure" pressure-now "streak" level-streak "skill-seen" skill-seen))
 
 (define (restore-run! saved)
   (set! g-now (hash-ref saved "g"))
@@ -3295,6 +3343,9 @@
   (set! publish-via (hash-ref saved "via"))
   (set! rule-rev (hash-ref saved "rev"))
   (set! rules-dirty (hash-ref saved "dirty"))
+  (set! pressure-now (let ((n (hash-ref saved "pressure" 1))) (if (number? n) n 1)))
+  (set! level-streak (let ((n (hash-ref saved "streak" 0))) (if (number? n) n 0)))
+  (set! skill-seen (let ((n (hash-ref saved "skill-seen" 0.0))) (if (number? n) n 0.0)))
   (set! rewind-quiet #f))
 
 (define (clear-slices!)
@@ -3504,7 +3555,40 @@
   (send c (state-msg "ok"))
   (flush-notes! c))
 
+; Combo, Nice, a near miss, and an overtake live on the picture.
+; The tick adds the new part of that total onto the server score so
+; the finish sees the same skill the runner was shown. Per-level
+; counts apply only while the picture is still on this level.
+(define (absorb-skill! msg)
+  (let ((skill (hash-ref msg "skill" #f)))
+    (if (number? skill)
+      (let* ((want (points-clamp skill))
+             (delta (- want skill-seen)))
+        (if (> delta 0.5)
+          (let ((gain (if (> delta 800.0) 800.0 delta)))
+            (set! player (pset player 6 (points-clamp (+ (player-score player) gain))))
+            (set! skill-seen (points-clamp (+ skill-seen gain))))
+          #f))
+      #f))
+  (let ((lv (hash-ref msg "level" #f)))
+    (if (and (number? lv) (= (level-exact lv) level-n))
+      (let ((combo (skill-count (hash-ref msg "combo" 0)))
+            (near (skill-count (hash-ref msg "near" 0)))
+            (overs (skill-count (hash-ref msg "overtakes" 0))))
+        (if (> combo level-combo) (set! level-combo combo) #f)
+        (if (> near level-near) (set! level-near near) #f)
+        (if (> overs level-overtakes) (set! level-overtakes overs) #f))
+      #f)))
+
+(define (skill-count n)
+  (cond
+    ((not (number? n)) 0)
+    ((<= n 0.0) 0)
+    ((>= n 99.0) 99)
+    (else (floor (+ n 0.001)))))
+
 (define (on-tick c msg)
+  (absorb-skill! msg)
   (if (and (player-alive? player) (> (hash-ref msg "jump" 0) 0))
     (set! player (press-jump player))
     #f)
