@@ -1,0 +1,91 @@
+name: image
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/cybrid-systems/aura-runner
+
+jobs:
+  play:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup prompts and gitignore
+        run: bash scripts/check-play.sh
+
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Aura nightly checksums
+        id: sha
+        run: |
+          set -euo pipefail
+          amd64="$(curl -fsSL https://github.com/cybrid-systems/aura/releases/download/nightly/aura-nightly-linux-x86_64.tar.gz.sha256 | awk 'NF { print $1; exit }')"
+          arm64="$(curl -fsSL https://github.com/cybrid-systems/aura/releases/download/nightly/aura-nightly-linux-arm64.tar.gz.sha256 | awk 'NF { print $1; exit }')"
+          echo "amd64=$amd64" >> "$GITHUB_OUTPUT"
+          echo "arm64=$arm64" >> "$GITHUB_OUTPUT"
+      - name: Build
+        run: |
+          docker build --provenance=false \
+            --build-arg "AURA_SHA_AMD64=${{ steps.sha.outputs.amd64 }}" \
+            --build-arg "AURA_SHA_ARM64=${{ steps.sha.outputs.arm64 }}" \
+            -t lumen-run:ci .
+      - name: Smoke test
+        run: LUMEN_IMAGE=lumen-run:ci bash scripts/check-docker.sh
+
+  publish:
+    needs: [play, smoke]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Aura nightly checksums
+        id: sha
+        run: |
+          set -euo pipefail
+          amd64="$(curl -fsSL https://github.com/cybrid-systems/aura/releases/download/nightly/aura-nightly-linux-x86_64.tar.gz.sha256 | awk 'NF { print $1; exit }')"
+          arm64="$(curl -fsSL https://github.com/cybrid-systems/aura/releases/download/nightly/aura-nightly-linux-arm64.tar.gz.sha256 | awk 'NF { print $1; exit }')"
+          echo "amd64=$amd64" >> "$GITHUB_OUTPUT"
+          echo "arm64=$arm64" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push linux/amd64 and linux/arm64
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: false
+          sbom: false
+          build-args: |
+            AURA_SHA_AMD64=${{ steps.sha.outputs.amd64 }}
+            AURA_SHA_ARM64=${{ steps.sha.outputs.arm64 }}
+          tags: |
+            ghcr.io/cybrid-systems/aura-runner:latest
+            ghcr.io/cybrid-systems/aura-runner:sha-${{ github.sha }}
+      - name: Link the package to this repo
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api --method PATCH \
+            -H "Accept: application/vnd.github+json" \
+            /orgs/cybrid-systems/packages/container/aura-runner \
+            -f visibility=public
