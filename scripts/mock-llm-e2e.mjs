@@ -279,37 +279,40 @@ async function screenshots() {
   }
   const mock = await startMock();
   const core = startAura("", mock.base);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lumen-chrome-"));
-  const dbg = 9333;
-  let bridge;
-  let chrome;
-  try {
-    await core.ready;
-    bridge = spawn(process.execPath, ["bridge/server.mjs"], {
-      cwd: root,
-      env: { ...process.env, AURA_RUNNER_PORT: String(port), AURA_RUNNER_WEB: String(webPort) },
-      stdio: "ignore",
-    });
-    await new Promise((r) => setTimeout(r, 300));
-    chrome = spawn(bin, [
-      "--headless=new",
-      "--no-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-background-timer-throttling",
-      "--disable-renderer-backgrounding",
-      "--disable-backgrounding-occluded-windows",
-      "--disable-gpu",
-      "--use-gl=angle",
-      "--use-angle=swiftshader",
-      "--enable-unsafe-swiftshader",
-      `--window-size=1280,720`,
-      `--remote-debugging-port=${dbg}`,
-      `--user-data-dir=${dir}`,
-      "--no-first-run",
-      "--no-default-browser-check",
-      `http://127.0.0.1:${webPort}/?seed=42`,
-    ], { stdio: "ignore" });
-    const list = await waitJson(`http://127.0.0.1:${dbg}/json`);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lumen-chrome-"));
+    const dbg = 9333;
+    const chromeLog = path.join(dir, "chrome.log");
+    const chromeOut = fs.openSync(chromeLog, "a");
+    let bridge;
+    let chrome;
+    try {
+      await core.ready;
+      bridge = spawn(process.execPath, ["bridge/server.mjs"], {
+        cwd: root,
+        env: { ...process.env, AURA_RUNNER_PORT: String(port), AURA_RUNNER_WEB: String(webPort) },
+        stdio: "ignore",
+      });
+      await new Promise((r) => setTimeout(r, 300));
+      chrome = spawn(bin, [
+        "--headless=new",
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-background-timer-throttling",
+        "--disable-renderer-backgrounding",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-gpu",
+        "--use-gl=angle",
+        "--use-angle=swiftshader",
+        "--enable-unsafe-swiftshader",
+        `--window-size=1280,720`,
+        "--remote-debugging-address=127.0.0.1",
+        `--remote-debugging-port=${dbg}`,
+        `--user-data-dir=${dir}`,
+        "--no-first-run",
+        "--no-default-browser-check",
+        `http://127.0.0.1:${webPort}/?seed=42`,
+      ], { stdio: ["ignore", chromeOut, chromeOut] });
+      const list = await waitJson(`http://127.0.0.1:${dbg}/json`, chromeLog);
     const page = list.find((t) => t.type === "page" && t.webSocketDebuggerUrl);
     if (!page) throw new Error("no chrome page " + JSON.stringify(list.map((t) => t.type)));
     const cdp = await cdpClient(page.webSocketDebuggerUrl);
@@ -412,6 +415,7 @@ async function screenshots() {
     }
     cdp.close();
   } finally {
+    fs.closeSync(chromeOut);
     if (chrome) chrome.kill("SIGTERM");
     if (bridge) bridge.kill("SIGTERM");
     core.child.kill("SIGTERM");
@@ -423,13 +427,18 @@ async function screenshots() {
   }
 }
 
-function waitJson(url) {
+function waitJson(url, logFile) {
   const t0 = Date.now();
   return new Promise((resolve, reject) => {
     const tick = () => {
       fetch(url).then((r) => r.json()).then(resolve).catch(() => {
-        if (Date.now() - t0 > 8000) reject(new Error("chrome debug " + url));
-        else setTimeout(tick, 80);
+        if (Date.now() - t0 > 25000) {
+          let tail = "";
+          if (logFile) {
+            try { tail = fs.readFileSync(logFile, "utf8").slice(-400); } catch { tail = ""; }
+          }
+          reject(new Error("chrome debug " + url + (tail ? " " + tail.replace(/\s+/g, " ") : "")));
+        } else setTimeout(tick, 100);
       });
     };
     tick();
