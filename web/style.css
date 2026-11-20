@@ -277,7 +277,9 @@ html, body {
   z-index: 4;
   top: max(118px, calc(env(safe-area-inset-top) + 106px));
   right: max(16px, env(safe-area-inset-right));
-  width: min(280px, 34vw);
+  width: auto;
+  max-width: min(420px, 46vw);
+  white-space: nowrap;
   max-height: 5.2em;
   overflow: hidden;
   margin: 0;
@@ -385,7 +387,7 @@ html, body {
   bottom: max(118px, calc(env(safe-area-inset-bottom) + 108px));
   width: min(280px, 72vw);
   margin: 0;
-  padding: 10px 14px;
+  padding: 8px 14px 10px;
   border-radius: 18px;
   background: rgba(255, 246, 232, 0.94);
   color: var(--ink);
@@ -394,6 +396,18 @@ html, body {
   pointer-events: none;
   box-shadow: 0 8px 22px rgba(92, 52, 20, 0.16);
 }
+.trial-kicker {
+  display: block;
+  margin: 0 0 2px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #b4532a;
+}
+.trial-kicker:empty { display: none; }
+#mark[data-verdict="ROLLBACK"] .trial-kicker,
+#said[data-verdict="ROLLBACK"] .trial-kicker { color: #9a3412; }
 #said[hidden] { display: none; }
 #thing-hud {
   position: fixed;
@@ -681,4 +695,85 @@ html, body {
 #bench { position: fixed; left: 8px; top: 40%; color: white; }
 @media (prefers-reduced-motion: reduce) {
   #score, #toast, #gain, #grade, #pace, #mult, #evo { animation: none; text-shadow: none; }
+}
+
+/* The left readout is one column. A hot combo used to be pinned on top
+   of Level, Best, and Try because each line had its own fixed top. */
+#hud {
+  position: fixed;
+  z-index: 4;
+  top: max(10px, env(safe-area-inset-top));
+  left: max(16px, env(safe-area-inset-left));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  width: min(280px, 46vw);
+  max-height: calc(100vh - 24px);
+  pointer-events: none;
+}
+#hud #kicker,
+#hud #score,
+#hud #mult,
+#hud #grade,
+#hud #pace,
+#hud #ward,
+#hud #record,
+#hud #challenge,
+#hud #combo {
+  position: static;
+  top: auto;
+  left: auto;
+  right: auto;
+  margin: 0;
+}
+#score-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: 100%;
+}
+#hud #score {
+  font-size: clamp(44px, 6.2vw, 76px);
+  line-height: 0.88;
+}
+#hud #mult { align-self: flex-start; margin-top: 6px; }
+#track-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+}
+#hud #goal,
+#hud #meter {
+  position: static;
+  top: auto;
+  left: auto;
+  width: min(148px, 100%);
+  flex: 0 0 auto;
+}
+#hud #pace,
+#hud #record,
+#hud #challenge,
+#hud #grade,
+#hud #ward {
+  max-width: 100%;
+}
+#hud #combo {
+  max-width: 100%;
+  white-space: nowrap;
+}
+#hud #combo.hot { font-size: 28px; }
+@media (max-width: 820px) {
+  #hud { width: min(210px, 58vw); gap: 4px; }
+  #hud #score { font-size: 40px; }
+  #hud #grade { font-size: 16px; }
+  #hud #pace,
+  #hud #record,
+  #hud #challenge,
+  #hud #ward { font-size: 12px; }
+  #hud #combo,
+  #hud #combo.hot { font-size: 15px; padding: 3px 8px; }
+  #hud #mult { font-size: 14px; padding: 1px 7px; }
+  #evo { width: auto; max-width: min(220px, 48vw); font-size: 15px; white-space: normal; }
 }
