@@ -277,9 +277,96 @@ while time.time() < deadline and seen != "ok":
     if not chunk:
         break
     wbuf += chunk
-ws.close()
 if seen != "ok":
+    ws.close()
     fail("page websocket did not return a no-llm welcome")
+
+def ws_send(sock, opcode, payload):
+    mask = os.urandom(4)
+    header = bytearray([0x80 | opcode, 0x80 | len(payload)])
+    header += mask
+    header += bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+    sock.sendall(header)
+
+# Release the core's one client, then the next welcome must be immediate.
+ws_send(ws, 1, b'{"op":"bye"}')
+ws.settimeout(0.1)
+release_end = time.time() + 1.0
+while time.time() < release_end:
+    try:
+        chunk = ws.recv(65536)
+    except socket.timeout:
+        continue
+    except OSError:
+        break
+    if not chunk:
+        break
+try:
+    ws.shutdown(socket.SHUT_RDWR)
+except OSError:
+    pass
+ws.close()
+
+def welcome_within(limit):
+    t0 = time.time()
+    sock = socket.create_connection(("127.0.0.1", web), 2)
+    key = base64.b64encode(os.urandom(16)).decode()
+    sock.sendall((
+        "GET /ws HTTP/1.1\r\nHost: 127.0.0.1:%d\r\nUpgrade: websocket\r\n"
+        "Connection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n"
+        % (web, key)
+    ).encode())
+    buf = b""
+    sock.settimeout(0.2)
+    shook = False
+    while time.time() - t0 < limit:
+        try:
+            chunk = sock.recv(65536)
+        except socket.timeout:
+            continue
+        if not chunk:
+            break
+        buf += chunk
+        if not shook:
+            if b"\r\n\r\n" not in buf:
+                continue
+            head, buf = buf.split(b"\r\n\r\n", 1)
+            if not head.startswith(b"HTTP/1.1 101"):
+                break
+            shook = True
+            ws_send(sock, 1, b'{"op":"hello","seed":9}')
+        while len(buf) >= 2:
+            op = buf[0] & 0x0f
+            ln = buf[1] & 0x7f
+            off = 2
+            if ln == 126:
+                if len(buf) < 4:
+                    break
+                ln = int.from_bytes(buf[2:4], "big")
+                off = 4
+            elif ln == 127:
+                if len(buf) < 10:
+                    break
+                ln = int.from_bytes(buf[2:10], "big")
+                off = 10
+            if len(buf) < off + ln:
+                break
+            body = buf[off:off + ln]
+            buf = buf[off + ln:]
+            if op == 1 and b'"op":"welcome"' in body:
+                try:
+                    ws_send(sock, 1, b'{"op":"bye"}')
+                except OSError:
+                    pass
+                sock.close()
+                return time.time() - t0
+    sock.close()
+    return None
+
+second = welcome_within(1.0)
+if second is None:
+    fail("the next browser did not get a welcome within 1s of the probe releasing")
+print("next_welcome %.3f" % second)
 
 off = False
 for _ in range(50):

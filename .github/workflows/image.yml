@@ -44,6 +44,8 @@ jobs:
             -t lumen-run:ci .
       - name: Smoke test
         run: LUMEN_IMAGE=lumen-run:ci bash scripts/check-docker.sh
+      - name: run.sh container fallback answers a welcome
+        run: bash scripts/check-fallback.sh
 
   publish:
     needs: [play, smoke]

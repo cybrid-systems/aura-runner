@@ -1,55 +1,85 @@
 # syntax=docker/dockerfile:1
 # Lumen Run. Aura is the prebuilt nightly tarball ./run.sh already
 # downloads (sha256-checked). Node is the official linux tarball, not an
-# npm install. The only apt step is CA certificates, because Aura's
-# OpenSSL reads /usr/lib/ssl/certs. linux/amd64 and linux/arm64.
+# npm install. CA certificates are installed because Aura's OpenSSL reads
+# /usr/lib/ssl/certs. linux/amd64 and linux/arm64.
 
 ARG BUILDPLATFORM
 ARG TARGETARCH
 ARG NODE_VERSION=22.23.5
 
-FROM --platform=$BUILDPLATFORM debian:bookworm-slim AS fetch-amd64
+# curl is its own layer, so a later nightly checksum does not reinstall it.
+# The tarballs live in a cache mount and are fetched again only when the
+# published checksum changes.
+FROM --platform=$BUILDPLATFORM debian:bookworm-slim AS fetch-tools
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl \
+ && rm -rf /var/lib/apt/lists/*
+
+FROM fetch-tools AS fetch-amd64
 ARG AURA_SHA_AMD64=
 ARG NODE_VERSION
-ADD https://github.com/cybrid-systems/aura/releases/download/nightly/aura-nightly-linux-x86_64.tar.gz /tmp/aura.tar.gz
-ADD https://github.com/cybrid-systems/aura/releases/download/nightly/aura-nightly-linux-x86_64.tar.gz.sha256 /tmp/aura.sha256
-ADD https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz /tmp/node.tar.gz
-RUN set -eu; \
-    got="$(sha256sum /tmp/aura.tar.gz | awk '{print $1}')"; \
+RUN --mount=type=cache,target=/dl,sharing=locked \
+    set -eu; \
+    aura=aura-nightly-linux-x86_64.tar.gz; \
+    node=node-v${NODE_VERSION}-linux-x64.tar.gz; \
+    base=https://github.com/cybrid-systems/aura/releases/download/nightly; \
+    curl -fsSL --retry 5 --max-time 60 -o /tmp/aura.sha256 "$base/$aura.sha256"; \
     want="$(awk 'NF { print $1; exit }' /tmp/aura.sha256)"; \
     test -n "$want"; \
-    test "$got" = "$want"; \
     if [ -n "$AURA_SHA_AMD64" ] && [ "$AURA_SHA_AMD64" != "$want" ]; then \
       echo "the published Aura checksum changed during the build" >&2; \
       exit 1; \
     fi; \
+    got=""; \
+    if [ -f "/dl/$aura" ]; then got="$(sha256sum "/dl/$aura" | awk '{print $1}')"; fi; \
+    if [ "$got" != "$want" ]; then \
+      curl -fL --retry 5 --retry-delay 2 --max-time 300 -o "/dl/$aura.partial" "$base/$aura"; \
+      mv "/dl/$aura.partial" "/dl/$aura"; \
+      got="$(sha256sum "/dl/$aura" | awk '{print $1}')"; \
+      test "$got" = "$want"; \
+    fi; \
+    if [ ! -s "/dl/$node" ]; then \
+      curl -fL --retry 5 --retry-delay 2 --max-time 300 -o "/dl/$node.partial" "https://nodejs.org/dist/v${NODE_VERSION}/$node"; \
+      mv "/dl/$node.partial" "/dl/$node"; \
+    fi; \
     mkdir -p /opt/aura /out; \
-    tar -xzf /tmp/aura.tar.gz -C /opt/aura --strip-components=1; \
-    tar -xzf /tmp/node.tar.gz -C /out --strip-components=1 node-v${NODE_VERSION}-linux-x64/bin/node; \
-    rm -f /tmp/aura.tar.gz /tmp/aura.sha256 /tmp/node.tar.gz; \
+    tar -xzf "/dl/$aura" -C /opt/aura --strip-components=1; \
+    tar -xzf "/dl/$node" -C /out --strip-components=1 "node-v${NODE_VERSION}-linux-x64/bin/node"; \
     test -x /opt/aura/bin/aura; \
     test -x /opt/aura/rt/ld.so; \
     test -x /out/bin/node
 
-FROM --platform=$BUILDPLATFORM debian:bookworm-slim AS fetch-arm64
+FROM fetch-tools AS fetch-arm64
 ARG AURA_SHA_ARM64=
 ARG NODE_VERSION
-ADD https://github.com/cybrid-systems/aura/releases/download/nightly/aura-nightly-linux-arm64.tar.gz /tmp/aura.tar.gz
-ADD https://github.com/cybrid-systems/aura/releases/download/nightly/aura-nightly-linux-arm64.tar.gz.sha256 /tmp/aura.sha256
-ADD https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-arm64.tar.gz /tmp/node.tar.gz
-RUN set -eu; \
-    got="$(sha256sum /tmp/aura.tar.gz | awk '{print $1}')"; \
+RUN --mount=type=cache,target=/dl,sharing=locked \
+    set -eu; \
+    aura=aura-nightly-linux-arm64.tar.gz; \
+    node=node-v${NODE_VERSION}-linux-arm64.tar.gz; \
+    base=https://github.com/cybrid-systems/aura/releases/download/nightly; \
+    curl -fsSL --retry 5 --max-time 60 -o /tmp/aura.sha256 "$base/$aura.sha256"; \
     want="$(awk 'NF { print $1; exit }' /tmp/aura.sha256)"; \
     test -n "$want"; \
-    test "$got" = "$want"; \
     if [ -n "$AURA_SHA_ARM64" ] && [ "$AURA_SHA_ARM64" != "$want" ]; then \
       echo "the published Aura checksum changed during the build" >&2; \
       exit 1; \
     fi; \
+    got=""; \
+    if [ -f "/dl/$aura" ]; then got="$(sha256sum "/dl/$aura" | awk '{print $1}')"; fi; \
+    if [ "$got" != "$want" ]; then \
+      curl -fL --retry 5 --retry-delay 2 --max-time 300 -o "/dl/$aura.partial" "$base/$aura"; \
+      mv "/dl/$aura.partial" "/dl/$aura"; \
+      got="$(sha256sum "/dl/$aura" | awk '{print $1}')"; \
+      test "$got" = "$want"; \
+    fi; \
+    if [ ! -s "/dl/$node" ]; then \
+      curl -fL --retry 5 --retry-delay 2 --max-time 300 -o "/dl/$node.partial" "https://nodejs.org/dist/v${NODE_VERSION}/$node"; \
+      mv "/dl/$node.partial" "/dl/$node"; \
+    fi; \
     mkdir -p /opt/aura /out; \
-    tar -xzf /tmp/aura.tar.gz -C /opt/aura --strip-components=1; \
-    tar -xzf /tmp/node.tar.gz -C /out --strip-components=1 node-v${NODE_VERSION}-linux-arm64/bin/node; \
-    rm -f /tmp/aura.tar.gz /tmp/aura.sha256 /tmp/node.tar.gz; \
+    tar -xzf "/dl/$aura" -C /opt/aura --strip-components=1; \
+    tar -xzf "/dl/$node" -C /out --strip-components=1 "node-v${NODE_VERSION}-linux-arm64/bin/node"; \
     test -x /opt/aura/bin/aura; \
     test -x /opt/aura/rt/ld.so; \
     test -x /out/bin/node
