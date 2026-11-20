@@ -30,6 +30,8 @@ Hold Space and speak, then let go. The game receives the words, not the sound. A
 
 加速 steps the pace through 8, 10, 12, 13, and 14. 慢一点 steps it down. 难一点 and 简单一点 step the course. 终点远 and 终点近 move the finish.
 
+花园, 城市, 太空, or 海边 (garden, city, space, coast) switches the venue at once. 换场景 or "next scene" steps to the next one. 夜晚, 白天, 日落, or 霓虹 (night, day, sunset, neon) changes the light on top of that venue. The run does not stop, and the combo stays. A level gate moves to the next venue on its own. The score multiplier starts at ×1, steps up when that level's three coins land and again at the gate, and returns to ×1 only when the run starts over.
+
 A bright wish still changes the picture at once: a pink, blue, gold, or violet sky, flowers, a star, a gate, or a small friend. Any other bright line picks a garden, and steps to another one when that garden is already on screen. A gloomy line is turned away and the picture stays. The road keeps its hurdles, gates, and blocks.
 
 One friend keeps up after the opening lesson. It changes its speed, how often it switches lanes, or where it appears, one small step at a time, and only after a short trial still gets through. A miss puts the previous step back. The opening lesson has none of that friend. Its three looks are a fox, a bird, and a beetle.
@@ -119,6 +121,7 @@ aura --quiet --preset dev scripts/play-review.aura
 node scripts/check-sim.mjs
 node scripts/check-lanes.mjs
 node scripts/check-contrast.mjs
+node scripts/check-run.mjs
 node scripts/check-world.mjs
 node scripts/check-voice.mjs
 node scripts/check-probe.mjs

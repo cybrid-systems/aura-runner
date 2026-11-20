@@ -2,6 +2,8 @@
 // are worth more. The rating climbs with points and drops one step
 // when the runner hits something solid.
 
+import { clampMult } from "./runstate.mjs";
+
 export const GRADES = ["", "Sprout", "Runner", "Bloom", "Shine", "Lumen"];
 export const GRADE_STEP = 100;
 // A clean pass pays a little. It stays under a coin.
@@ -35,13 +37,15 @@ export function dropGrade(grade) {
   return grade > 1 ? grade - 1 : 1;
 }
 
-// The step already added `worth` once. A combo adds the extra copies.
-// Combo resets when the gap since the last pickup is 2.4s or more.
-export function awardPickup(worth, combo, comboUntil, now, grade, bank) {
+// The step already added `worth` once. A combo adds the extra copies,
+// then the run multiplier scales the whole award. Combo resets when the
+// gap since the last pickup is 2.4s or more. mult 1 keeps the old totals.
+export function awardPickup(worth, combo, comboUntil, now, grade, bank, mult = 1) {
   const base = Number.isFinite(worth) && worth > 0 ? worth : 25;
+  const scale = clampMult(mult);
   const nextCombo = now < comboUntil ? Math.min(5, combo + 1) : 1;
-  const extra = nextCombo > 1 ? base * (nextCombo - 1) : 0;
-  const gained = Math.round(base * nextCombo);
+  const gained = Math.round(base * nextCombo * scale);
+  const extra = gained - base;
   const rated = takePoints(grade, bank, gained);
   const text = nextCombo > 1 ? "+" + gained + " ×" + nextCombo : "+" + gained;
   return {
@@ -57,9 +61,11 @@ export function awardPickup(worth, combo, comboUntil, now, grade, bank) {
 }
 
 // Sliding under a bar, or leaving a bursting popper's lane, pays this.
-export function praise(grade, bank) {
-  const rated = takePoints(grade, bank, NICE_POINTS);
-  return { points: NICE_POINTS, grade: rated.grade, bank: rated.bank, text: "Nice! +" + NICE_POINTS };
+// The run multiplier scales the skill points. One grade step still.
+export function praise(grade, bank, mult = 1) {
+  const points = Math.round(NICE_POINTS * clampMult(mult));
+  const rated = takePoints(grade, bank, points);
+  return { points, grade: rated.grade, bank: rated.bank, text: "Nice! +" + points };
 }
 
 // Passing close to a hurdle or a block. Under Nice, so a skim is a
@@ -67,14 +73,16 @@ export function praise(grade, bank) {
 export const NEAR_POINTS = 15;
 export const OVERTAKE_POINTS = 30;
 
-export function nearMiss(grade, bank) {
-  const rated = takePoints(grade, bank, NEAR_POINTS);
-  return { points: NEAR_POINTS, grade: rated.grade, bank: rated.bank, text: "Close! +" + NEAR_POINTS };
+export function nearMiss(grade, bank, mult = 1) {
+  const points = Math.round(NEAR_POINTS * clampMult(mult));
+  const rated = takePoints(grade, bank, points);
+  return { points, grade: rated.grade, bank: rated.bank, text: "Close! +" + points };
 }
 
-export function overtake(grade, bank) {
-  const rated = takePoints(grade, bank, OVERTAKE_POINTS);
-  return { points: OVERTAKE_POINTS, grade: rated.grade, bank: rated.bank, text: "Overtake! +" + OVERTAKE_POINTS };
+export function overtake(grade, bank, mult = 1) {
+  const points = Math.round(OVERTAKE_POINTS * clampMult(mult));
+  const rated = takePoints(grade, bank, points);
+  return { points, grade: rated.grade, bank: rated.bank, text: "Overtake! +" + points };
 }
 
 // The spark already uses this window. A pot one lane over, or a hurdle

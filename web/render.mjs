@@ -84,6 +84,138 @@ export function palette(h, scene) {
   };
 }
 
+const BIOME_NAMES = ["garden", "city", "space", "coast"];
+const MOOD_NAMES = ["day", "night", "sunset", "neon"];
+
+function knownName(name, list, fallback) {
+  return list.includes(name) ? name : fallback;
+}
+
+// Garden in daylight is the palette above, unchanged. Other venues replace
+// sky, ground, and road colours. Hurdles, gates, coins, and pots stay put
+// so every biome keeps the same readable obstacles.
+export function dressPalette(base, biome, mood) {
+  const name = knownName(biome, BIOME_NAMES, "garden");
+  const tone = knownName(mood, MOOD_NAMES, "day");
+  const pal = Object.assign({}, base, {
+    biome: name,
+    mood: tone,
+    stars: 0,
+    nebula: [0, 0, 0],
+    disc: 1,
+    sunUv: base.sunUv.slice(),
+  });
+  if (name === "city") {
+    pal.sky0 = [0.42, 0.52, 0.82];
+    pal.sky1 = [0.98, 0.58, 0.34];
+    pal.sky = [0.55, 0.48, 0.72];
+    pal.fog = [0.96, 0.72, 0.52];
+    pal.fogAmt = Math.min(0.28, pal.fogAmt);
+    pal.hill = [0.18, 0.2, 0.32];
+    pal.hill2 = [0.28, 0.24, 0.38];
+    pal.path = [0.22, 0.24, 0.28];
+    pal.grass = [0.52, 0.54, 0.58];
+    pal.grassL = [0.62, 0.64, 0.66];
+    pal.grassR = [0.46, 0.48, 0.52];
+    pal.hedge = [0.32, 0.36, 0.48];
+    pal.soil = [0.2, 0.18, 0.16];
+    pal.leaf = [0.28, 0.55, 0.38];
+    pal.leaf2 = [0.42, 0.68, 0.46];
+    pal.trunk = [0.28, 0.3, 0.34];
+    pal.water = [0.16, 0.38, 0.58];
+    pal.flower = [1, 0.78, 0.32];
+    pal.flower2 = [0.45, 0.82, 1];
+    pal.sun = [1, 0.72, 0.38];
+    pal.lightAmt = Math.max(0.72, pal.lightAmt);
+  } else if (name === "space") {
+    pal.sky0 = [0.05, 0.06, 0.16];
+    pal.sky1 = [0.22, 0.12, 0.36];
+    pal.sky = [0.1, 0.1, 0.22];
+    pal.fog = [0.08, 0.07, 0.16];
+    pal.fogAmt = Math.min(0.16, pal.fogAmt);
+    pal.hill = [0.08, 0.07, 0.14];
+    pal.hill2 = [0.12, 0.08, 0.2];
+    pal.path = [0.12, 0.16, 0.28];
+    pal.grass = [0.07, 0.08, 0.14];
+    pal.grassL = [0.1, 0.12, 0.2];
+    pal.grassR = [0.08, 0.09, 0.16];
+    pal.hedge = [0.2, 0.28, 0.48];
+    pal.soil = [0.16, 0.14, 0.18];
+    pal.leaf = [0.35, 0.55, 0.9];
+    pal.leaf2 = [0.55, 0.85, 1];
+    pal.trunk = [0.35, 0.32, 0.38];
+    pal.water = [0.15, 0.35, 0.7];
+    pal.flower = [0.65, 0.9, 1];
+    pal.flower2 = [0.85, 0.55, 1];
+    pal.sun = [0.82, 0.9, 1];
+    pal.lightAmt = Math.max(0.84, pal.lightAmt);
+    pal.stars = 1;
+    pal.nebula = [0.35, 0.18, 0.55];
+    pal.sunUv = [0.78, 0.84];
+  } else if (name === "coast") {
+    pal.sky0 = [0.42, 0.7, 0.95];
+    pal.sky1 = [0.96, 0.78, 0.52];
+    pal.sky = [0.55, 0.74, 0.9];
+    pal.fog = [0.78, 0.88, 0.95];
+    pal.fogAmt = Math.min(0.22, pal.fogAmt);
+    pal.hill = [0.28, 0.52, 0.64];
+    pal.hill2 = [0.18, 0.42, 0.58];
+    pal.path = [0.93, 0.82, 0.52];
+    pal.grass = [0.22, 0.58, 0.68];
+    pal.grassL = [0.3, 0.66, 0.74];
+    pal.grassR = [0.16, 0.48, 0.6];
+    pal.hedge = [0.18, 0.5, 0.4];
+    pal.soil = [0.72, 0.58, 0.32];
+    pal.leaf = [0.18, 0.58, 0.34];
+    pal.leaf2 = [0.32, 0.72, 0.4];
+    pal.trunk = [0.5, 0.34, 0.2];
+    pal.water = [0.12, 0.48, 0.62];
+    pal.lily = [0.85, 0.92, 0.78];
+    pal.flower = [1, 0.62, 0.55];
+    pal.flower2 = [1, 0.86, 0.45];
+    pal.sun = [1, 0.9, 0.62];
+    pal.lightAmt = Math.max(0.78, pal.lightAmt);
+  }
+  if (name === "garden" && tone === "day") return pal;
+  if (tone === "night") {
+    pal.sky0 = mix3(pal.sky0, [0.06, 0.08, 0.16], 0.72);
+    pal.sky1 = mix3(pal.sky1, [0.14, 0.16, 0.28], 0.62);
+    pal.sky = mix3(pal.sky, [0.1, 0.12, 0.22], 0.55);
+    pal.fog = mix3(pal.fog, [0.16, 0.18, 0.28], 0.45);
+    pal.fogAmt = Math.min(0.26, pal.fogAmt);
+    pal.hill = mix3(pal.hill, [0.06, 0.07, 0.12], 0.5);
+    pal.hill2 = mix3(pal.hill2, [0.04, 0.05, 0.1], 0.5);
+    pal.sun = [0.82, 0.88, 1];
+    pal.lightAmt = Math.max(0.62, pal.lightAmt * 0.82);
+    pal.stars = Math.max(pal.stars, 0.9);
+    pal.nebula = name === "space" ? pal.nebula : [0.12, 0.16, 0.32];
+    pal.disc = 0.5;
+    pal.sunUv = [pal.sunUv[0], Math.min(0.9, pal.sunUv[1] + 0.06)];
+  } else if (tone === "sunset") {
+    pal.sky0 = mix3(pal.sky0, [0.55, 0.38, 0.62], 0.45);
+    pal.sky1 = mix3(pal.sky1, [1, 0.48, 0.28], 0.55);
+    pal.fog = mix3(pal.fog, [1, 0.62, 0.4], 0.35);
+    pal.fogAmt = Math.min(0.28, Math.max(pal.fogAmt, 0.16));
+    pal.sun = [1, 0.64, 0.32];
+    pal.stars = Math.max(pal.stars, 0.18);
+    pal.nebula = [0.85, 0.4, 0.28];
+    pal.lightAmt = Math.max(0.74, pal.lightAmt);
+  } else if (tone === "neon") {
+    pal.sky0 = mix3(pal.sky0, [0.08, 0.06, 0.2], 0.62);
+    pal.sky1 = mix3(pal.sky1, [0.9, 0.22, 0.62], 0.58);
+    pal.sky = mix3(pal.sky, [0.2, 0.1, 0.32], 0.4);
+    pal.fog = mix3(pal.fog, [0.45, 0.18, 0.48], 0.4);
+    pal.fogAmt = Math.min(0.26, Math.max(0.12, pal.fogAmt));
+    pal.sun = [0.45, 0.95, 1];
+    pal.stars = Math.max(pal.stars, 0.45);
+    pal.nebula = [0.15, 0.85, 0.95];
+    pal.lightAmt = Math.max(0.88, pal.lightAmt);
+    pal.flower = [0.2, 0.95, 0.9];
+    pal.flower2 = [1, 0.35, 0.75];
+  }
+  return pal;
+}
+
 function cube() {
   const faces = [
     { n: [1, 0, 0], p: [[0.5, -0.5, -0.5], [0.5, 0.5, -0.5], [0.5, 0.5, 0.5], [0.5, -0.5, 0.5]] },
@@ -423,6 +555,8 @@ uniform vec3 uSky0; uniform vec3 uSky1; uniform vec3 uHill; uniform vec3 uHill2;
 uniform vec3 uSunCol; uniform vec2 uSun; uniform vec2 uRes;
 uniform float uTime; uniform float uCamZ; uniform float uYaw; uniform float uFov;
 uniform float uSunAmt; uniform float uRush;
+uniform float uStars;
+uniform vec3 uNebula;
 out vec4 o;
 void main() {
   vec2 uv = gl_FragCoord.xy / uRes;
@@ -460,6 +594,18 @@ void main() {
     float low = smoothstep(0.62, 0.22, uv.y);
     float streak = sin(uv.y * 36.0 - uTime * 16.0 + uv.x * 2.0);
     c += vec3(1.0, 0.98, 0.92) * edge * low * smoothstep(0.25, 0.92, streak) * 0.18;
+  }
+  // Pinpoints, not cells. A lit cell used to fill a wide dash.
+  if (uStars > 0.01) {
+    vec2 cell = vec2(floor((x + 8.0) * 110.0), floor(uv.y * 160.0));
+    vec2 fuv = vec2(fract((x + 8.0) * 110.0), fract(uv.y * 160.0));
+    float h1 = fract(sin(cell.x * 127.1 + cell.y * 311.7) * 43758.5);
+    float h2 = fract(sin(cell.y * 269.5 + cell.x * 183.3) * 12543.3);
+    float d = length(fuv - vec2(h1, h2));
+    float star = smoothstep(0.07, 0.0, d) * step(0.84, h1) * step(0.34, uv.y);
+    float tw = 0.7 + 0.3 * sin(uTime * 2.2 + h2 * 24.0);
+    c += vec3(0.96, 0.98, 1.0) * star * tw * uStars;
+    c = mix(c, uNebula, uStars * 0.18 * smoothstep(0.25, 0.85, uv.y));
   }
   // Highlight shoulder only. Below 0.9 the sky is unchanged, so the blue
   // stays blue; the sun core rolls toward white instead of clipping flat.
@@ -737,7 +883,17 @@ function boxPat(line) {
   float pulse = 0.85 + 0.15 * sin(uTime * 3.0 + vCenter.z);`,
   );
 }
-const MESH_FS_BOX_PAT = boxPat(`if (vKind < 3.5) col *= 0.94 + 0.1 * fract(vL.y * 12.0);
+const MESH_FS_BOX_PAT = boxPat(`if (vKind > 5.5 && vKind < 6.5) {
+    float side = max(abs(vL.x), abs(vL.z));
+    float face = smoothstep(0.32, 0.46, side);
+    float row = abs(fract(vL.y * 6.0) - 0.5);
+    float colu = abs(fract(vL.x * 3.0 + vL.z * 3.0) - 0.5);
+    float pane = (1.0 - smoothstep(0.06, 0.2, row)) * (1.0 - smoothstep(0.07, 0.2, colu));
+    float band = 1.0 - smoothstep(0.03, 0.11, row);
+    float warm = step(0.5, fract(floor(vL.y * 6.0) * 0.37 + vCenter.x));
+    vec3 glow = mix(vec3(0.42, 0.74, 1.0), vec3(1.0, 0.7, 0.3), warm);
+    col += glow * face * max(pane, band * 0.45) * 0.72;
+  } else if (vKind < 3.5) col *= 0.94 + 0.1 * fract(vL.y * 12.0);
   else if (vKind < 4.5) col *= 0.97 + 0.06 * fract(vL.x * 17.0 + vL.z * 11.0);
   else col += vec3(1.0, 0.97, 0.86) * (1.0 - step(0.07, abs(vL.y + 0.04))) * (0.18 + clamp(vSheen, 0.0, 1.0) * 0.22);`);
 
@@ -896,6 +1052,8 @@ export function createRenderer(canvas) {
     fov: gl.getUniformLocation(sky, "uFov"),
     sunAmt: gl.getUniformLocation(sky, "uSunAmt"),
     rush: gl.getUniformLocation(sky, "uRush"),
+    stars: gl.getUniformLocation(sky, "uStars"),
+    nebula: gl.getUniformLocation(sky, "uNebula"),
   };
   function meshLocs(prog) {
     return {
@@ -1359,7 +1517,8 @@ export function createRenderer(canvas) {
   }
 
   function frame(st) {
-    const pal = palette(st.hue || 0, st.scene);
+    const pal = dressPalette(palette(st.hue || 0, st.scene), st.biome, st.mood);
+    const gardenLook = pal.biome === "garden";
     const px = st.lx || 0;
     const py = st.y || 0;
     const pz = Number.isFinite(st.x) ? st.x : runS;
@@ -1454,12 +1613,14 @@ export function createRenderer(canvas) {
     gl.uniform1f(u.yaw, psi);
     gl.uniform1f(u.fov, camFov);
     const skyShow = visibleSky(st.props, st.sunHide);
-    gl.uniform1f(u.sunAmt, skyShow.shader);
+    gl.uniform1f(u.sunAmt, skyShow.shader * (pal.disc == null ? 1 : pal.disc));
     // The full-screen streak is a real-GPU extra. SwiftShader keeps the
     // few road-edge quads below and skips this pass.
     const softwareGL = /swiftshader|llvmpipe|softpipe|software/i.test(gpuName);
     const rush = !reduced && speed >= 12 && !softwareGL ? 1 : 0;
     gl.uniform1f(u.rush, rush);
+    gl.uniform1f(u.stars, pal.stars || 0);
+    gl.uniform3fv(u.nebula, pal.nebula || [0, 0, 0]);
     gl.uniform2f(u.res, w, h);
     gl.bindVertexArray(null);
     gl.bindBuffer(gl.ARRAY_BUFFER, tri);
@@ -1571,6 +1732,7 @@ export function createRenderer(canvas) {
           }
         }
       }
+      if (gardenLook) {
       if (dist < 36 && ((z / 2) | 0) % 2 === 0) {
         const hv = laneHash(z * 0.19 + 4.2);
         const hedgeH = 0.30 + hv * 0.22;
@@ -1608,6 +1770,92 @@ export function createRenderer(canvas) {
           push(extra.x, stem2 * 0.5, extra.z, 0.04, stem2, 0.04, 0, stem, 0.78, 0, extra.psi);
           push(extra.x, stem2 + 0.08, extra.z, 0.16, 0.16, 0.16, 1, pal.flower2, 0.3, 0.4, extra.psi);
         }
+      }
+      } else if (dist < 40 && n < MAX - 80) {
+        const step8 = ((z / 2) | 0) % 4 === 0;
+        const step4 = ((z / 2) | 0) % 2 === 0;
+        if (pal.biome === "city") {
+          if (step4) {
+            const dash = onRoad(cz, 0);
+            push(dash.x, 0.07, dash.z, 0.1, 0.02, 0.55, 0, [0.98, 0.9, 0.45], 0.3, 0.4, dash.psi);
+          }
+          if (step8) {
+            for (const side of [-1, 1]) {
+              const lat = side * (4.7 + laneHash(z + side) * 0.5);
+              const at = onRoad(cz, lat);
+              const h = 1.8 + laneHash(z * 0.31 + side) * 2.6;
+              const bw = 1.15 + laneHash(z * 0.17 + side * 3) * 0.7;
+              const body = mix3([0.28, 0.32, 0.46], [0.55, 0.36, 0.4], laneHash(z * 0.53 + side));
+              push(at.x, h * 0.5, at.z, bw, h, bw * 0.75, 0, body, 0.5, 0.04, at.psi, 0, 0, 6);
+              const lamp = onRoad(cz, side * 3.15);
+              push(lamp.x, 0.9, lamp.z, 0.08, 1.8, 0.08, 0, [0.24, 0.26, 0.3], 0.45, 0.05, lamp.psi);
+              push(lamp.x, 1.86, lamp.z, 0.2, 0.12, 0.2, 1, [1, 0.9, 0.55], 0.2, 0.9, lamp.psi);
+            }
+          }
+        } else if (pal.biome === "space") {
+          if (step4) {
+            for (const side of [-1, 1]) {
+              const rail = onRoad(cz, side * 0.92);
+              push(rail.x, 0.08, rail.z, 0.07, 0.05, 1.5, 0, [0.45, 0.9, 1], 0.2, 0.85, rail.psi);
+            }
+          }
+          if (step8) {
+            const railCol = [0.55, 0.88, 1];
+            for (const side of [-1, 1]) {
+              const kind = laneHash(z * 0.37 + side * 4);
+              if (kind > 0.62) {
+                const at = onRoad(cz, side * (5.15 + laneHash(z * 0.2 + side) * 0.5));
+                const y = 2.25 + laneHash(z + side) * 0.7;
+                push(at.x, y, at.z, 1.1, 1.1, 1.1, 1, [0.42, 0.55, 0.9], 0.3, 0.28, at.psi);
+                push(at.x, y, at.z, 1.85, 0.08, 1.85, 1, [0.7, 0.88, 1], 0.2, 0.45, at.psi);
+              } else if (kind > 0.28) {
+                const at = onRoad(cz, side * (5.05 + laneHash(z + side) * 0.7));
+                push(at.x, 1.1, at.z, 0.68, 0.5, 0.58, 1, [0.48, 0.44, 0.42], 0.7, 0.08, at.psi);
+              } else {
+                const inner = side * 4.2;
+                const outer = side * 6.05;
+                const a = onRoad(cz, inner);
+                const b = onRoad(cz, outer);
+                const mid = onRoad(cz, (inner + outer) * 0.5);
+                const h = 2.4;
+                push(a.x, h * 0.5, a.z, 0.1, h, 0.1, 0, railCol, 0.25, 0.55, a.psi);
+                push(b.x, h * 0.5, b.z, 0.1, h, 0.1, 0, railCol, 0.25, 0.55, b.psi);
+                push(mid.x, h, mid.z, Math.abs(outer - inner), 0.09, 0.1, 0, railCol, 0.2, 0.75, mid.psi);
+              }
+            }
+          }
+        } else {
+          if (step4) {
+            const foam = onRoad(cz, 1.65);
+            push(foam.x, 0.05, foam.z, 0.28, 0.02, 0.7, 0, [0.95, 0.98, 1], 0.3, 0.28, foam.psi);
+          }
+          if (step8) {
+            for (const side of [-1, 1]) {
+              const at = onRoad(cz, side * (4.6 + laneHash(z + side) * 0.4));
+              push(at.x, 0.9, at.z, 0.12, 1.8, 0.12, 0, [0.52, 0.36, 0.2], 0.7, 0, at.psi);
+              push(at.x, 1.85, at.z, 0.85, 0.12, 0.28, 0, pal.leaf, 0.5, 0.06, at.psi);
+              push(at.x, 1.9, at.z, 0.28, 0.1, 0.85, 0, pal.leaf2, 0.5, 0.06, at.psi);
+              if (laneHash(z * 1.7 + side) > 0.55) {
+                const buoy = onRoad(cz + 0.8, side * 3.15);
+                push(buoy.x, 0.32, buoy.z, 0.26, 0.26, 0.26, 1, [0.95, 0.32, 0.3], 0.3, 0.25, buoy.psi);
+              }
+            }
+          }
+        }
+      }
+    }
+    if (!(pal.biome === "garden" && pal.mood === "day") && n < MAX - 12) {
+      const motes = reduced ? 3 : 6;
+      const moteRgb = pal.biome === "space" ? [0.7, 0.9, 1]
+        : pal.biome === "city" ? [1, 0.72, 0.38]
+        : pal.biome === "coast" ? [0.75, 0.95, 1]
+        : [1, 0.88, 0.55];
+      for (let i = 0; i < motes; i++) {
+        const along = pz + 3 + i * 4.2;
+        const lat = (i % 2 ? 1 : -1) * (3.3 + (i % 3) * 0.35);
+        const at = onRoad(along, lat);
+        const bob = reduced ? 0 : Math.sin((st.time || 0) * 1.4 + i) * 0.18;
+        push(at.x, 1.1 + (i % 4) * 0.28 + bob, at.z, 0.06, 0.06, 0.06, 1, moteRgb, 0.2, 0.85, at.psi);
       }
     }
 
@@ -2312,6 +2560,8 @@ export function createRenderer(canvas) {
     canvas.dataset.instances = String(n);
     canvas.dataset.dust = String(dustN);
     canvas.dataset.rush = rush ? "1" : "0";
+    canvas.dataset.biome = pal.biome || "garden";
+    canvas.dataset.mood = pal.mood || "day";
     return n;
   }
 
