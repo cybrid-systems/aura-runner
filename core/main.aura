@@ -3486,7 +3486,7 @@
          (let ((intent (voice-intent text)))
            (if intent
              (voice-apply! intent)
-             (let ((theme (edsl-theme text)))
+             (let ((theme (edsl-place text biome-now)))
                (if theme
                  (edsl-hear! theme)
                  (let ((row (wish-with-lang (wish-answer text sky-r sky-g sky-b) wish-locale)))

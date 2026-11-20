@@ -24,7 +24,10 @@
 (define edsl-bodies (list "sun" "moon" "stars" "aurora" "none"))
 (define edsl-surfaces (list "grass" "stone" "dust" "sand" "ice" "cloud" "lava" "reef" "plank"))
 (define edsl-particles (list "fireflies" "stardust" "snow" "embers" "rain" "sparkles" "none"))
-(define edsl-kinds (list "tree" "tower" "arch" "crystal" "rock" "coral" "ring"))
+(define edsl-kinds (list "tree" "tower" "arch" "crystal" "rock" "coral" "ring"
+                         "pagoda" "palace-gate" "pearl-tower" "spire" "bridge-tower"
+                         "eiffel-tower" "clock-tower" "colonnade" "bamboo" "palm"
+                         "stone-bridge" "battlement" "willow" "cypress" "sakura"))
 (define edsl-recipes (list "garden" "city" "space" "coast" "mix"))
 (define edsl-builtins (list "garden" "city" "space" "coast"))
 (define EDSL-BUDGET 168.0)
@@ -47,6 +50,52 @@
   "(biome coral-reef (label Coral-Reef) (sky 0.25 0.55 0.82 0.45 0.78 0.88) (fog 0.55 0.78 0.86 0.18) (body sun) (road 0.88 0.76 0.50) (curb 0.72 0.48 0.36) (ground 0.16 0.42 0.58) (surface reef) (light 0.80) (mood 0.52) (particles sparkles 0.22) (props (coral 0.30 1.05) (rock 0.12 0.75)) (recipe mix))")
 (define edsl-cyber
   "(biome cyber-rain (label Cyber-Rain) (sky 0.16 0.18 0.36 0.35 0.22 0.55) (fog 0.25 0.30 0.42 0.20) (body moon) (road 0.45 0.52 0.62) (curb 0.18 0.22 0.32) (ground 0.10 0.28 0.22) (surface plank) (light 0.76) (mood 0.40) (particles rain 0.28) (props (tower 0.24 1.10) (arch 0.16 0.90)) (recipe mix))")
+(define edsl-beijing
+  "(biome beijing (label beijing) (sky 0.97 0.80 0.46 1.00 0.64 0.34) (fog 0.98 0.84 0.58 0.16) (body sun) (road 0.58 0.26 0.16) (curb 0.75 0.15 0.12) (ground 0.36 0.52 0.28) (surface stone) (light 0.90) (mood 0.72) (particles sparkles 0.16) (props (pagoda 0.26 1.20) (palace-gate 0.14 1.00)) (recipe mix))")
+(define edsl-shanghai
+  "(biome shanghai (label shanghai) (sky 0.16 0.14 0.36 0.86 0.30 0.58) (fog 0.40 0.22 0.48 0.18) (body moon) (road 0.34 0.36 0.46) (curb 0.15 0.78 0.86) (ground 0.12 0.16 0.22) (surface plank) (light 0.88) (mood 0.34) (particles sparkles 0.22) (props (pearl-tower 0.24 1.25) (spire 0.18 1.15)) (recipe mix))")
+(define edsl-hangzhou
+  "(biome hangzhou (label hangzhou) (sky 0.74 0.86 0.92 0.96 0.82 0.78) (fog 0.86 0.90 0.93 0.24) (body sun) (road 0.70 0.64 0.52) (curb 0.45 0.42 0.38) (ground 0.32 0.58 0.36) (surface grass) (light 0.84) (mood 0.48) (particles sparkles 0.14) (props (stone-bridge 0.22 1.05) (willow 0.20 1.00)) (recipe mix))")
+(define edsl-chengdu
+  "(biome chengdu (label chengdu) (sky 0.62 0.84 0.70 0.78 0.90 0.72) (fog 0.70 0.86 0.74 0.20) (body sun) (road 0.68 0.42 0.22) (curb 0.30 0.48 0.28) (ground 0.16 0.52 0.22) (surface grass) (light 0.82) (mood 0.55) (particles sparkles 0.12) (props (bamboo 0.28 1.10) (pagoda 0.16 1.00)) (recipe mix))")
+(define edsl-xian
+  "(biome xian (label xian) (sky 0.96 0.58 0.28 0.62 0.30 0.28) (fog 0.92 0.58 0.34 0.16) (body sun) (road 0.62 0.36 0.20) (curb 0.48 0.22 0.14) (ground 0.22 0.40 0.18) (surface dust) (light 0.86) (mood 0.70) (particles embers 0.14) (props (pagoda 0.22 1.15) (battlement 0.18 1.05)) (recipe mix))")
+(define edsl-chongqing
+  "(biome chongqing (label chongqing) (sky 0.32 0.14 0.26 0.90 0.34 0.22) (fog 0.48 0.22 0.28 0.18) (body moon) (road 0.42 0.30 0.28) (curb 0.55 0.18 0.14) (ground 0.16 0.18 0.16) (surface stone) (light 0.80) (mood 0.30) (particles embers 0.18) (props (bridge-tower 0.22 1.20) (spire 0.16 1.10)) (recipe mix))")
+(define edsl-hongkong
+  "(biome hongkong (label hongkong) (sky 0.14 0.18 0.40 0.95 0.32 0.55) (fog 0.35 0.20 0.45 0.16) (body moon) (road 0.32 0.34 0.42) (curb 0.10 0.80 0.75) (ground 0.10 0.14 0.22) (surface plank) (light 0.88) (mood 0.36) (particles sparkles 0.22) (props (spire 0.26 1.20) (pearl-tower 0.16 1.10)) (recipe mix))")
+(define edsl-newyork
+  "(biome newyork (label newyork) (sky 0.95 0.62 0.36 0.32 0.38 0.62) (fog 0.90 0.62 0.42 0.14) (body sun) (road 0.40 0.38 0.36) (curb 0.75 0.65 0.30) (ground 0.22 0.32 0.24) (surface stone) (light 0.86) (mood 0.62) (particles sparkles 0.12) (props (spire 0.30 1.25)) (recipe mix))")
+(define edsl-sanfrancisco
+  "(biome sanfrancisco (label sanfrancisco) (sky 0.46 0.74 0.96 0.82 0.90 0.96) (fog 0.78 0.86 0.92 0.20) (body sun) (road 0.55 0.50 0.44) (curb 0.70 0.22 0.16) (ground 0.22 0.48 0.34) (surface sand) (light 0.88) (mood 0.58) (particles sparkles 0.12) (props (bridge-tower 0.30 1.30)) (recipe mix))")
+(define edsl-losangeles
+  "(biome losangeles (label losangeles) (sky 0.98 0.55 0.40 0.98 0.40 0.55) (fog 0.98 0.70 0.58 0.14) (body sun) (road 0.75 0.64 0.46) (curb 0.90 0.55 0.45) (ground 0.40 0.55 0.28) (surface sand) (light 0.92) (mood 0.74) (particles sparkles 0.10) (props (palm 0.32 1.15)) (recipe mix))")
+(define edsl-paris
+  "(biome paris (label paris) (sky 0.55 0.42 0.58 0.96 0.55 0.40) (fog 0.86 0.64 0.55 0.16) (body sun) (road 0.62 0.52 0.42) (curb 0.55 0.42 0.32) (ground 0.28 0.40 0.26) (surface stone) (light 0.82) (mood 0.66) (particles sparkles 0.14) (props (eiffel-tower 0.28 1.30)) (recipe mix))")
+(define edsl-london
+  "(biome london (label london) (sky 0.52 0.60 0.70 0.70 0.74 0.78) (fog 0.68 0.72 0.78 0.22) (body sun) (road 0.42 0.40 0.38) (curb 0.45 0.28 0.20) (ground 0.24 0.36 0.26) (surface stone) (light 0.78) (mood 0.42) (particles sparkles 0.12) (props (clock-tower 0.28 1.25)) (recipe mix))")
+(define edsl-rome
+  "(biome rome (label rome) (sky 0.96 0.78 0.48 0.98 0.62 0.36) (fog 0.96 0.80 0.58 0.14) (body sun) (road 0.72 0.58 0.40) (curb 0.78 0.64 0.42) (ground 0.40 0.52 0.28) (surface stone) (light 0.90) (mood 0.70) (particles sparkles 0.10) (props (colonnade 0.24 1.10) (cypress 0.18 1.05)) (recipe mix))")
+(define edsl-venice
+  "(biome venice (label venice) (sky 0.64 0.76 0.90 0.96 0.72 0.64) (fog 0.78 0.84 0.90 0.16) (body sun) (road 0.62 0.50 0.52) (curb 0.85 0.55 0.55) (ground 0.32 0.50 0.42) (surface sand) (light 0.84) (mood 0.55) (particles sparkles 0.12) (props (stone-bridge 0.24 1.10) (colonnade 0.16 1.00)) (recipe mix))")
+(define edsl-tokyo
+  "(biome tokyo (label tokyo) (sky 0.96 0.74 0.80 0.98 0.55 0.62) (fog 0.96 0.78 0.84 0.14) (body sun) (road 0.58 0.44 0.36) (curb 0.75 0.20 0.24) (ground 0.18 0.42 0.22) (surface stone) (light 0.88) (mood 0.64) (particles sparkles 0.16) (props (spire 0.24 1.20) (sakura 0.22 1.05)) (recipe mix))")
+(define edsl-visit-china
+  "(biome visit-china (label visit-china) (sky 0.70 0.84 0.78 0.90 0.88 0.75) (fog 0.78 0.88 0.80 0.22) (body sun) (road 0.62 0.56 0.40) (curb 0.40 0.48 0.32) (ground 0.22 0.50 0.30) (surface grass) (light 0.84) (mood 0.50) (particles sparkles 0.14) (props (bamboo 0.24 1.05) (stone-bridge 0.16 1.00)) (recipe mix))")
+(define edsl-visit-high
+  "(biome visit-high (label visit-high) (sky 0.95 0.62 0.36 0.70 0.36 0.28) (fog 0.92 0.64 0.40 0.14) (body sun) (road 0.62 0.38 0.22) (curb 0.50 0.28 0.16) (ground 0.18 0.36 0.16) (surface dust) (light 0.86) (mood 0.68) (particles embers 0.12) (props (pagoda 0.22 1.10) (battlement 0.16 1.00)) (recipe mix))")
+(define edsl-visit-lake
+  "(biome visit-lake (label visit-lake) (sky 0.78 0.86 0.94 0.96 0.80 0.76) (fog 0.84 0.90 0.94 0.20) (body sun) (road 0.68 0.60 0.50) (curb 0.50 0.46 0.40) (ground 0.28 0.55 0.36) (surface grass) (light 0.86) (mood 0.52) (particles sparkles 0.12) (props (willow 0.24 1.05) (stone-bridge 0.18 1.00)) (recipe mix))")
+(define edsl-visit-canal
+  "(biome visit-canal (label visit-canal) (sky 0.62 0.74 0.88 0.95 0.70 0.60) (fog 0.76 0.82 0.90 0.16) (body sun) (road 0.58 0.50 0.48) (curb 0.80 0.55 0.50) (ground 0.30 0.48 0.40) (surface sand) (light 0.84) (mood 0.54) (particles sparkles 0.12) (props (stone-bridge 0.22 1.05) (colonnade 0.16 1.00)) (recipe mix))")
+(define edsl-visit-stone
+  "(biome visit-stone (label visit-stone) (sky 0.58 0.64 0.74 0.78 0.70 0.62) (fog 0.70 0.74 0.80 0.20) (body sun) (road 0.46 0.42 0.38) (curb 0.50 0.36 0.26) (ground 0.26 0.38 0.28) (surface stone) (light 0.80) (mood 0.46) (particles sparkles 0.12) (props (clock-tower 0.24 1.15) (colonnade 0.14 1.00)) (recipe mix))")
+(define edsl-visit-us
+  "(biome visit-us (label visit-us) (sky 0.70 0.78 0.90 0.95 0.60 0.40) (fog 0.85 0.78 0.68 0.14) (body sun) (road 0.40 0.38 0.36) (curb 0.70 0.55 0.30) (ground 0.22 0.34 0.24) (surface stone) (light 0.86) (mood 0.60) (particles sparkles 0.12) (props (spire 0.28 1.20)) (recipe mix))")
+(define edsl-visit-asia
+  "(biome visit-asia (label visit-asia) (sky 0.14 0.16 0.34 0.90 0.35 0.55) (fog 0.40 0.22 0.48 0.16) (body moon) (road 0.34 0.36 0.44) (curb 0.20 0.80 0.80) (ground 0.12 0.16 0.22) (surface plank) (light 0.88) (mood 0.38) (particles sparkles 0.18) (props (spire 0.22 1.15) (sakura 0.16 1.00)) (recipe mix))")
+(define edsl-visit-palm
+  "(biome visit-palm (label visit-palm) (sky 0.95 0.70 0.50 0.98 0.50 0.45) (fog 0.96 0.78 0.62 0.14) (body sun) (road 0.70 0.60 0.45) (curb 0.85 0.55 0.40) (ground 0.36 0.50 0.28) (surface sand) (light 0.90) (mood 0.72) (particles sparkles 0.10) (props (palm 0.28 1.10) (spire 0.14 1.05)) (recipe mix))")
 
 (define (edsl-boot)
   (list edsl-garden edsl-city edsl-space edsl-coast))
@@ -62,6 +111,29 @@
     ((string=? name "candy-clouds") edsl-candy)
     ((string=? name "coral-reef") edsl-coral)
     ((string=? name "cyber-rain") edsl-cyber)
+    ((string=? name "beijing") edsl-beijing)
+    ((string=? name "shanghai") edsl-shanghai)
+    ((string=? name "hangzhou") edsl-hangzhou)
+    ((string=? name "chengdu") edsl-chengdu)
+    ((string=? name "xian") edsl-xian)
+    ((string=? name "chongqing") edsl-chongqing)
+    ((string=? name "hongkong") edsl-hongkong)
+    ((string=? name "newyork") edsl-newyork)
+    ((string=? name "sanfrancisco") edsl-sanfrancisco)
+    ((string=? name "losangeles") edsl-losangeles)
+    ((string=? name "paris") edsl-paris)
+    ((string=? name "london") edsl-london)
+    ((string=? name "rome") edsl-rome)
+    ((string=? name "venice") edsl-venice)
+    ((string=? name "tokyo") edsl-tokyo)
+    ((string=? name "visit-china") edsl-visit-china)
+    ((string=? name "visit-high") edsl-visit-high)
+    ((string=? name "visit-lake") edsl-visit-lake)
+    ((string=? name "visit-canal") edsl-visit-canal)
+    ((string=? name "visit-stone") edsl-visit-stone)
+    ((string=? name "visit-us") edsl-visit-us)
+    ((string=? name "visit-asia") edsl-visit-asia)
+    ((string=? name "visit-palm") edsl-visit-palm)
     (else #f)))
 
 (define (edsl-int n)
@@ -200,6 +272,29 @@
     ((string=? id "candy-clouds") "Candy Clouds")
     ((string=? id "coral-reef") "Coral Reef")
     ((string=? id "cyber-rain") "Cyber Rain")
+    ((string=? id "beijing") "Beijing")
+    ((string=? id "shanghai") "Shanghai")
+    ((string=? id "hangzhou") "Hangzhou")
+    ((string=? id "chengdu") "Chengdu")
+    ((string=? id "xian") "Xi'an")
+    ((string=? id "chongqing") "Chongqing")
+    ((string=? id "hongkong") "Hong Kong")
+    ((string=? id "newyork") "New York")
+    ((string=? id "sanfrancisco") "San Francisco")
+    ((string=? id "losangeles") "Los Angeles")
+    ((string=? id "paris") "Paris")
+    ((string=? id "london") "London")
+    ((string=? id "rome") "Rome")
+    ((string=? id "venice") "Venice")
+    ((string=? id "tokyo") "Tokyo")
+    ((string=? id "visit-china") "China")
+    ((string=? id "visit-high") "Highlands")
+    ((string=? id "visit-lake") "Lake City")
+    ((string=? id "visit-canal") "Canal City")
+    ((string=? id "visit-stone") "Stone City")
+    ((string=? id "visit-us") "America")
+    ((string=? id "visit-asia") "Asia")
+    ((string=? id "visit-palm") "Palm City")
     ((string? id) (edsl-pretty id))
     (else "Garden")))
 
@@ -212,6 +307,21 @@
     ((string=? kind "rock") 3.0)
     ((string=? kind "coral") 4.0)
     ((string=? kind "ring") 4.0)
+    ((string=? kind "pagoda") 8.0)
+    ((string=? kind "palace-gate") 6.0)
+    ((string=? kind "pearl-tower") 6.0)
+    ((string=? kind "spire") 5.0)
+    ((string=? kind "bridge-tower") 6.0)
+    ((string=? kind "eiffel-tower") 7.0)
+    ((string=? kind "clock-tower") 5.0)
+    ((string=? kind "colonnade") 6.0)
+    ((string=? kind "bamboo") 5.0)
+    ((string=? kind "palm") 6.0)
+    ((string=? kind "stone-bridge") 5.0)
+    ((string=? kind "battlement") 5.0)
+    ((string=? kind "willow") 4.0)
+    ((string=? kind "cypress") 2.0)
+    ((string=? kind "sakura") 4.0)
     (else 6.0)))
 
 (define (edsl-cost props pamt)
@@ -486,7 +596,92 @@
         ((or (string-contains? text "赛博雨")
              (and (edsl-word? low "cyber") (edsl-word? low "rain")))
          "cyber-rain")
+        ((or (string-contains? text "北京") (edsl-word? low "beijing") (edsl-word? low "peking")) "beijing")
+        ((or (string-contains? text "上海") (edsl-word? low "shanghai")) "shanghai")
+        ((or (string-contains? text "杭州") (string-contains? text "西湖") (edsl-word? low "hangzhou")) "hangzhou")
+        ((or (string-contains? text "成都") (edsl-word? low "chengdu")) "chengdu")
+        ((or (string-contains? text "西安") (string-contains? low "xi'an") (string-contains? low "xi an") (edsl-word? low "xian")) "xian")
+        ((or (string-contains? text "重庆") (edsl-word? low "chongqing")) "chongqing")
+        ((or (string-contains? text "香港") (string-contains? low "hong kong") (edsl-word? low "hongkong")) "hongkong")
+        ((or (string-contains? text "纽约") (string-contains? low "new york") (edsl-word? low "newyork") (edsl-word? low "nyc")) "newyork")
+        ((or (string-contains? text "旧金山") (string-contains? low "san francisco") (edsl-word? low "sanfrancisco")) "sanfrancisco")
+        ((or (string-contains? text "洛杉矶") (string-contains? low "los angeles") (edsl-word? low "losangeles")) "losangeles")
+        ((or (string-contains? text "巴黎") (edsl-word? low "paris")) "paris")
+        ((or (string-contains? text "伦敦") (edsl-word? low "london")) "london")
+        ((or (string-contains? text "罗马") (edsl-word? low "rome")) "rome")
+        ((or (string-contains? text "威尼斯") (edsl-word? low "venice")) "venice")
+        ((or (string-contains? text "东京") (string-contains? text "東京") (edsl-word? low "tokyo")) "tokyo")
         (else #f)))))
+
+(define edsl-china-tour
+  (list "beijing" "shanghai" "hangzhou" "chengdu" "xian" "chongqing" "hongkong"))
+(define edsl-us-tour (list "newyork" "sanfrancisco" "losangeles"))
+(define edsl-europe-tour (list "paris" "london" "rome" "venice"))
+(define edsl-world-tour
+  (list "beijing" "shanghai" "hangzhou" "chengdu" "xian" "chongqing" "hongkong"
+        "newyork" "sanfrancisco" "losangeles" "paris" "london" "rome" "venice" "tokyo"))
+
+(define (edsl-after xs cur)
+  (let loop ((ys xs) (i 0) (at -1))
+    (if (or (not (pair? ys)) (null? ys))
+      (edsl-nth xs (modulo (+ at 1) (edsl-len xs)))
+      (loop (cdr ys) (+ i 1) (if (and (string? cur) (string=? (car ys) cur)) i at)))))
+
+(define (edsl-tour-next text current)
+  (let ((low (string-downcase text)))
+    (cond
+      ((or (string-contains? text "环球旅行") (string-contains? text "下一个城市") (string-contains? text "下个城市")
+           (string-contains? low "world tour")
+           (and (edsl-word? low "next") (edsl-word? low "city")))
+       (edsl-after edsl-world-tour current))
+      ((or (string-contains? text "中国城市") (string-contains? text "去中国")
+           (string-contains? low "chinese cities") (edsl-word? low "china"))
+       (edsl-after edsl-china-tour current))
+      ((or (string-contains? text "美国城市") (string-contains? text "去美国")
+           (string-contains? low "american cities") (edsl-word? low "america"))
+       (edsl-after edsl-us-tour current))
+      ((or (string-contains? text "欧洲城市") (string-contains? text "去欧洲")
+           (string-contains? low "european cities") (edsl-word? low "europe"))
+       (edsl-after edsl-europe-tour current))
+      (else #f))))
+
+(define (edsl-cjk? s)
+  (let ((n (string-length s)))
+    (let loop ((i 0))
+      (if (>= i n)
+        #f
+        (let ((c (string-ref s i)))
+          (if (and (>= c 19968) (<= c 40895)) #t (loop (+ i 1))))))))
+
+(define (edsl-hash s)
+  (let ((n (string-length s)))
+    (let loop ((i 0) (h 0))
+      (if (>= i n) h (loop (+ i 1) (modulo (+ (* h 33) (string-ref s i)) 997))))))
+
+; A city that is not on the curated list still gets a regional recipe.
+(define (edsl-ask text)
+  (let ((low (string-downcase text)))
+    (cond
+      ((or (string-contains? text "拉萨") (string-contains? text "藏") (string-contains? low "lhasa")) "visit-high")
+      ((or (string-contains? text "大理") (string-contains? low "dali")) "visit-lake")
+      ((or (string-contains? text "桂林") (string-contains? text "漓") (string-contains? low "guilin")) "visit-china")
+      ((or (string-contains? text "阿姆斯特丹") (string-contains? low "amsterdam")) "visit-canal")
+      ((or (string-contains? text "布拉格") (string-contains? low "prague")) "visit-stone")
+      ((or (string-contains? text "芝加哥") (string-contains? low "chicago")) "visit-us")
+      ((and (or (string-contains? text "去") (string-contains? text "前往")) (edsl-cjk? text)) "visit-china")
+      ((string-contains? low "go to ")
+       (edsl-nth (list "visit-stone" "visit-us" "visit-asia" "visit-palm") (modulo (edsl-hash low) 4)))
+      (else #f))))
+
+; Named city, regional tour, or an unseen city. Built-in venues stay #f.
+(define (edsl-place text current)
+  (if (not (and (string? text) (> (string-length text) 0)))
+    #f
+    (let ((named (edsl-theme text)))
+      (if named
+        named
+        (let ((step (edsl-tour-next text current)))
+          (if step step (edsl-ask text)))))))
 
 (define (edsl-join-props props)
   (let loop ((xs props) (acc ""))

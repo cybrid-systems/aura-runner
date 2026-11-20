@@ -82,4 +82,17 @@
 (show "theme-garden" (if (edsl-theme "花园") 1 0))
 (show "theme-cyber-word" (if (edsl-theme "cyber") 1 0))
 
+(line "beijing" (edsl-gate edsl-beijing))
+(line "shanghai" (edsl-gate edsl-shanghai))
+(line "hangzhou" (edsl-gate edsl-hangzhou))
+(line "paris" (edsl-gate edsl-paris))
+(line "sanfrancisco" (edsl-gate edsl-sanfrancisco))
+(show "theme-beijing" (edsl-theme "去北京"))
+(show "theme-paris" (edsl-theme "paris"))
+(show "theme-west" (edsl-theme "西湖"))
+(show "place-next" (edsl-place "下一个城市" "paris"))
+(show "place-china" (edsl-place "去中国" "garden"))
+(show "place-guilin" (edsl-place "去桂林" "garden"))
+(show "place-prague" (edsl-place "go to Prague" "garden"))
+
 (void)

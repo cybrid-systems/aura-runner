@@ -43,6 +43,7 @@ Hold Space, speak, and release. The page sends the words. Built-in lines apply a
 | 夜晚 / night, 白天 / day, 日落 / sunset, 霓虹 / neon | Lighting mood |
 | 变成狐狸 / become a fox | Hero look (also kitten, bird, bunny, bee, keeper, and the other pal kinds) |
 | 去火山 / volcano, ice palace / 冰宫, 糖果 / candy, 珊瑚 / coral | Custom Biome EDSL world |
+| 去北京 / paris, 下一个城市 / next city | World-tour city |
 
 ## How the game plays
 
