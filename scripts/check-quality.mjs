@@ -14,6 +14,7 @@ import {
   frameBudget,
   gapLimit,
   noteFbo,
+  resolutionScale,
   noteReduced,
   noteRefresh,
   noteVisibility,
@@ -24,6 +25,7 @@ import {
   setMode,
   softwareFromRenderer,
   tierProfile,
+  tierRank,
   writeQualityMode,
 } from "../web/quality.mjs";
 
@@ -53,6 +55,13 @@ assert(softwareFromRenderer("") === false, "blank renderer is not software");
 assert(softwareFromRenderer("ANGLE (NVIDIA, GeForce)") === false, "a named gpu is not software");
 assert(softwareFromRenderer("Google SwiftShader") === true, "swiftshader");
 assert(softwareFromRenderer("llvmpipe") === true, "llvmpipe");
+assert(softwareFromRenderer("ANGLE (Microsoft, Microsoft Basic Render Driver Direct3D11 vs_5_0 ps_5_0, D3D11)") === true, "warp basic render");
+assert(softwareFromRenderer("WARP") === true, "warp");
+assert(DEFAULT_POLICY.gapSlack >= 1.5, "a miss is a dropped refresh");
+assert(DEFAULT_POLICY.repromoteMs >= 60000, "a dropped tier stays down");
+assert(DEFAULT_POLICY.dprMedium >= 2 && DEFAULT_POLICY.dprHigh >= DEFAULT_POLICY.dprMedium, "policy dpr is monotonic");
+assert(10.3 < gapLimit(DEFAULT_POLICY, 120), "120 Hz jitter is inside the budget");
+assert(16.7 >= gapLimit(DEFAULT_POLICY, 120), "a missed 120 Hz vsync is outside the budget");
 
 const gpuCaps = probeCaps({ webgl2: true, maxTex: 8192, software: false, softwareKnown: false, floatFb: true, fboOk: true, gpu: "" });
 assert(gpuCaps.ceiling === "high" && gpuCaps.software === false, "unknown gpu can reach high");
@@ -162,6 +171,81 @@ for (let i = 0; i < 8; i++) noteRefresh(held, 1000 / 120);
 held.cooldownUntil = 0;
 snap = feed(held, 36 * 4, 3, 8.33, 200000);
 assert(held.tier === "medium", "3 ms of work can promote at 120 Hz");
+
+function jitterGap(i) {
+  const pattern = [6.5, 7.1, 8.3, 9.4, 10.3, 8.0, 8.6, 7.8, 10.1, 6.8];
+  return pattern[i % pattern.length];
+}
+const panel = createQuality(DEFAULT_POLICY, gpuCaps, 0);
+let clock120 = 0;
+let demotes = 0;
+let highAt = -1;
+let framei = 0;
+while (clock120 < 80000) {
+  const gap = jitterGap(framei++);
+  const before = panel.tier;
+  clock120 += gap;
+  observe(panel, { workMs: 1.5, gapMs: gap, now: clock120, refreshHz: 120 });
+  if (tierRank(panel.tier) < tierRank(before)) demotes++;
+  if (panel.tier === "high" && highAt < 0) highAt = clock120;
+}
+assert(demotes === 0, "120 Hz jitter must not demote, demotes " + demotes);
+assert(panel.tier === "high", "auto settles on high, got " + panel.tier);
+assert(highAt > 0 && highAt < 20000, "high arrived early, at " + highAt);
+assert(clock120 - highAt >= 60000, "high held for 60s");
+
+const steady = createQuality(DEFAULT_POLICY, gpuCaps, 0);
+setMode(steady, "auto", 0);
+steady.tier = "high";
+steady.cooldownUntil = 0;
+steady.samples = [];
+steady.pending = 0;
+for (let i = 0; i < 36 * 6; i++) {
+  observe(steady, { workMs: 1.5, gapMs: jitterGap(i), now: 300000 + i * 8.3, refreshHz: 120 });
+}
+assert(steady.tier === "high", "a high tier rides through jitter");
+
+const dropped = createQuality(DEFAULT_POLICY, gpuCaps, 0);
+setMode(dropped, "auto", 0);
+dropped.tier = "high";
+dropped.cooldownUntil = 0;
+dropped.samples = [];
+dropped.pending = 0;
+dropped.blockedUntil = { medium: 0, high: 0 };
+let dropAt = 400000;
+for (let i = 0; i < 36; i++) {
+  dropAt += i % 3 === 0 ? 16.7 : 8.3;
+  observe(dropped, { workMs: 1.5, gapMs: i % 3 === 0 ? 16.7 : 8.3, now: dropAt, refreshHz: 120 });
+}
+assert(dropped.tier === "medium", "a real drop pattern demotes, got " + dropped.tier);
+assert(dropped.blockedUntil.high >= dropAt + 50000, "high stays blocked after the drop");
+const heldFrom = dropAt;
+for (let i = 0; i < 5500; i++) {
+  dropAt += 8.3;
+  observe(dropped, { workMs: 1.5, gapMs: 8.3, now: dropAt, refreshHz: 120 });
+}
+assert(dropped.tier === "medium", "no immediate return to the tier that failed");
+assert(dropAt - heldFrom > 40000, "the backoff was actually simulated");
+dropAt = dropped.blockedUntil.high + 100;
+dropped.cooldownUntil = 0;
+for (let i = 0; i < 36 * 4; i++) {
+  dropAt += 8.3;
+  observe(dropped, { workMs: 1.5, gapMs: 8.3, now: dropAt, refreshHz: 120 });
+}
+assert(dropped.tier === "high", "the blocked tier can return after the backoff");
+
+function scales(device, base) {
+  return ["low", "medium", "high"].map((tier) => resolutionScale(tier, device, base, DEFAULT_POLICY));
+}
+for (const row of [scales(1, 2), scales(2, 2), scales(3, 2), scales(2, 1)]) {
+  assert(row[0] <= row[1] && row[1] <= row[2], "dpr monotonic " + row.join(","));
+}
+const retina = scales(2, 2);
+assert(retina[0] === 2 && retina[1] === 2 && retina[2] === 2, "medium keeps the retina buffer " + retina.join(","));
+assert(scales(2, 1).every((v) => v === 1), "software stays at 1x on every tier");
+const renderSrc = readFileSync(new URL("../web/render.mjs", import.meta.url), "utf8");
+assert(renderSrc.includes("softwareFromRenderer(gpuName)"), "render uses the shared detector");
+assert(!renderSrc.includes("llvmpipe|softpipe"), "render has no private software list");
 
 const mem = {
   bag: new Map(),
