@@ -1162,12 +1162,26 @@
                      (- hx 0.55))))
           (if (< far cap) far cap))))))
 
-(define (fit-count x0 limit step)
-  (let loop ((i 0))
-    (let ((x (+ x0 (* step (exact->inexact i)))))
-      (if (or (>= i CHAIN-MAX) (> x limit))
-        i
-        (loop (+ i 1))))))
+; Pressure 1 keeps the beat the chain tests already measure.
+; 0 opens the gaps. 2 and above pack the same window a little tighter.
+(define (chain-step pace pressure)
+  (let ((base (max 1.15 (* pace CHAIN-DT))))
+    (cond
+      ((<= pressure 0) (min 3.4 (* base 1.35)))
+      ((<= pressure 1) base)
+      ((<= pressure 2) (max 1.15 (* base 0.92)))
+      (else (max 1.15 (* base 0.82))))))
+
+(define (chain-cap pressure)
+  (if (<= pressure 0) 4 CHAIN-MAX))
+
+(define (fit-count x0 limit step cap)
+  (let ((max-n (if (and (number? cap) (>= cap 2)) cap CHAIN-MAX)))
+    (let loop ((i 0))
+      (let ((x (+ x0 (* step (exact->inexact i)))))
+        (if (or (>= i max-n) (> x limit))
+          i
+          (loop (+ i 1)))))))
 
 (define (chain-y mode i n base)
   (let* ((den (if (<= n 1) 1.0 (exact->inexact (- n 1))))
@@ -1206,7 +1220,7 @@
           (loop (+ i 1)
                 (cons (piece 5.0 x 0.42 0.42 (chain-y mode i n base) lane) acc)))))))
 
-(define (chain-for group hazards step pace span)
+(define (chain-for group hazards step pace span pressure)
   (let* ((head (car group))
          (x0 (piece-x head))
          (base (piece-y head))
@@ -1214,27 +1228,88 @@
          (mode (chain-mode mover x0 pace))
          (lane (chain-lane group hazards x0 pace))
          (limit (chain-limit mover mode x0 pace span))
-         (n (fit-count x0 limit step)))
+         (n (fit-count x0 limit step (chain-cap pressure))))
     (if (< n 2)
       group
       (let ((made (emit-chain hazards x0 lane n step mode base)))
         (if (< (length made) 2) group made)))))
 
-(define (lay-groups kept groups step pace span)
+(define (lay-groups kept groups step pace span pressure)
   (let loop ((gs groups) (acc kept))
     (if (null? gs)
       acc
       (let ((stop (if (pair? (cdr gs)) (piece-x (car (car (cdr gs)))) span)))
         (loop (cdr gs)
-              (append acc (chain-for (car gs) kept step pace (min span stop))))))))
+              (append acc (chain-for (car gs) kept step pace (min span stop) pressure)))))))
 
-(define (string-pickups pieces band span)
+; Same lane as a hurdle, gap, gate, or block, and close along the road.
+(define (near-hazard? pieces x lane)
+  (let loop ((ps pieces))
+    (if (null? ps)
+      #f
+      (let ((q (car ps)))
+        (if (and (mover? (piece-k q))
+                 (or (< (piece-lane q) -0.5)
+                     (< lane -0.5)
+                     (= (piece-lane q) lane))
+                 (< (abs-diff (+ (piece-x q) (* (piece-w q) 0.5)) (+ x 0.21)) 1.35))
+          #t
+          (loop (cdr ps)))))))
+
+; Ground pays the loot base. A high arc pays more. Sitting on the hazard's
+; lane pays more again. Pressure 0 trims it. Pressure 3 and 4 add a little.
+; The piece stays kind 5, so the magnet and the pickup walk do not change.
+; Integer ratios, then one rounding step. Decimal products such as
+; 25 * 2 * 1.15 are not exact in binary, and the worth has to be the
+; same number on every run.
+(define (worth-ratio num den)
+  (floor (/ (+ (* num 2) den) (* den 2))))
+
+(define (coin-risk-worth y near base pressure)
+  (let ((band (pressure-band pressure))
+        (pay (if (and (number? base) (> base 0.0)) (floor (+ base 0.001)) 25))
+        (height (if (number? y) y 0.5)))
+    (let* ((risk (cond
+                   ((and near (>= height 1.0)) (cons 2 1))
+                   ((>= height 1.0) (cons 8 5))
+                   (near (cons 27 20))
+                   ((< height 0.75) (cons 1 1))
+                   (else (cons 23 20))))
+           (kk (cond
+                 ((<= band 0) (cons 17 20))
+                 ((>= band 3) (cons 23 20))
+                 (else (cons 1 1))))
+           (num (* pay (* (car risk) (car kk))))
+           (den (* (cdr risk) (cdr kk))))
+      (exact->inexact (worth-ratio num den)))))
+
+(define (stamp-coin q pieces base pressure)
+  (piece 5.0 (piece-x q) (piece-w q) (piece-h q) (piece-y q) (piece-lane q)
+         (coin-risk-worth (piece-y q)
+                          (near-hazard? pieces (piece-x q) (piece-lane q))
+                          base pressure)))
+
+(define (stamp-coins pieces base pressure)
+  (let loop ((ps pieces) (acc (list)))
+    (if (null? ps)
+      (reverse acc)
+      (let ((q (car ps)))
+        (loop (cdr ps)
+              (cons (if (coin-piece? q) (stamp-coin q pieces base pressure) q) acc))))))
+
+(define (string-pickups pieces band span . rest)
   (if (or (not (pair? pieces)) (not (number? span)) (<= span 1.0))
     pieces
     (let* ((b (if (and (number? band) (>= band 0) (<= band 4)) band 0))
+           (pressure (if (and (pair? rest) (number? (car rest))) (pressure-band (car rest)) 1))
+           (base (if (and (pair? rest) (pair? (cdr rest)) (number? (car (cdr rest)))
+                          (> (car (cdr rest)) 0.0))
+                   (exact->inexact (car (cdr rest)))
+                   25.0))
            (pace (feel-speed (feel-for b)))
-           (step (max 1.15 (* pace CHAIN-DT)))
+           (step (chain-step pace pressure))
            (groups (cluster-coins (take-coins pieces) (* step 1.7))))
       (if (null? groups)
         pieces
-        (lay-groups (drop-coins pieces) groups step pace span)))))
+        (stamp-coins (lay-groups (drop-coins pieces) groups step pace span pressure)
+                     base pressure)))))

@@ -61,3 +61,64 @@ export function praise(grade, bank) {
   const rated = takePoints(grade, bank, NICE_POINTS);
   return { points: NICE_POINTS, grade: rated.grade, bank: rated.bank, text: "Nice! +" + NICE_POINTS };
 }
+
+// Passing close to a hurdle or a block. Under Nice, so a skim is a
+// small skill mark and a clean slide still reads as the bigger one.
+export const NEAR_POINTS = 15;
+export const OVERTAKE_POINTS = 30;
+
+export function nearMiss(grade, bank) {
+  const rated = takePoints(grade, bank, NEAR_POINTS);
+  return { points: NEAR_POINTS, grade: rated.grade, bank: rated.bank, text: "Close! +" + NEAR_POINTS };
+}
+
+export function overtake(grade, bank) {
+  const rated = takePoints(grade, bank, OVERTAKE_POINTS);
+  return { points: OVERTAKE_POINTS, grade: rated.grade, bank: rated.bank, text: "Overtake! +" + OVERTAKE_POINTS };
+}
+
+// The spark already uses this window. A pot one lane over, or a hurdle
+// just cleared, counts. q[3] is the height the spark compares against.
+export function skimmed(x, y, lane, q) {
+  const k = q[0];
+  if (k !== 3 && k !== 7) return false;
+  const end = q[1] + q[2];
+  if (x < end - 0.05 || x > end + 0.35) return false;
+  const pl = q.length > 5 ? q[5] : -1;
+  if (k === 7 && pl >= 0 && Math.abs(pl - lane) === 1) return true;
+  if (k === 3 && (pl < 0 || pl === lane) && y > q[3] && y < q[3] + 0.55) return true;
+  return false;
+}
+
+// One award the first time x pulls past this rival. Starting ahead
+// does not pay. `mark` is the rival's memory from the previous step.
+export function trackOvertake(mark, x, rivalMid) {
+  const seen = !!(mark && mark.seen);
+  const behind = !!(mark && mark.behind);
+  const done = !!(mark && mark.done);
+  if (done) return { seen: true, behind: false, done: true, award: false };
+  if (!seen) {
+    return { seen: true, behind: x + 0.15 < rivalMid, done: false, award: false };
+  }
+  if (behind && x > rivalMid + 0.35) {
+    return { seen: true, behind: false, done: true, award: true };
+  }
+  return { seen: true, behind, done: false, award: false };
+}
+
+// Level 1 asks for a clean run. Then a combo, then the rival, and around.
+export function challengeFor(level) {
+  const n = Number.isFinite(level) ? Math.max(1, Math.round(level)) : 1;
+  const k = n % 3;
+  if (k === 1) return { id: "clean", text: "Zero bumps" };
+  if (k === 2) return { id: "combo", text: "Reach ×3 combo" };
+  return { id: "overtake", text: "Overtake rival" };
+}
+
+export function challengeMet(id, stats) {
+  const s = stats || {};
+  if (id === "clean") return (s.bumps | 0) === 0;
+  if (id === "combo") return (s.combo | 0) >= 3;
+  if (id === "overtake") return (s.overtakes | 0) >= 1;
+  return false;
+}

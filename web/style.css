@@ -121,6 +121,24 @@ html, body {
   pointer-events: none;
 }
 #record[hidden] { display: none; }
+#challenge {
+  position: fixed;
+  top: max(260px, calc(env(safe-area-inset-top) + 248px));
+  left: max(18px, env(safe-area-inset-left));
+  margin: 0;
+  color: var(--cream);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-shadow: 0 2px 0 rgba(92, 52, 20, 0.28);
+  pointer-events: none;
+}
+#challenge[hidden] { display: none; }
+#challenge.done { color: #ffe08a; }
+#ward.boost {
+  color: #ffe08a;
+  text-shadow: 0 0 12px rgba(255, 224, 138, 0.9);
+}
 #meter {
   position: fixed;
   top: max(148px, calc(env(safe-area-inset-top) + 136px));

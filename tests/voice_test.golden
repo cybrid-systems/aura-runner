@@ -94,3 +94,14 @@ hero-en hero fox 0
 hero-keep hero keeper 0
 hero-form 1
 hero-line 1
+heat-low ease 1 2 0
+heat-combo scene 1 2 1
+heat-pass harder 1 3 1
+heat-step harder 1 1 5
+heat-lock dense 0 2 1
+heat-ease ease 1 1 0
+heat-streak scene 1 2 2
+heat-hold scene 1 2 0
+heat-cap harder 4 4 1
+heat-still hold 0 1 1
+line-dense 1

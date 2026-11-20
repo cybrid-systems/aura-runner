@@ -296,8 +296,13 @@
                (step (if (> adx cap) cap adx))
                (sign (if (< dx 0.0) -1.0 1.0))
                (nx (+ (piece-x q) (* sign step)))
-               (nlane (if (>= pl 0.0) bl pl)))
-          (piece 5.0 nx w (piece-h q) (piece-y q) nlane))))))
+               (nlane (if (>= pl 0.0) bl pl))
+               (worth (piece-nth q 6 0.0)))
+          ; A risk worth rides on field 6. A plain coin has none, and the
+          ; rebuilt piece stays the same length the golden trace expects.
+          (if (> worth 0.0)
+            (piece 5.0 nx w (piece-h q) (piece-y q) nlane worth)
+            (piece 5.0 nx w (piece-h q) (piece-y q) nlane)))))))
 
 ; Radius 0 returns the same list, so a run with the magnet off does
 ; not rebuild pieces and the pull stops on the same step it is cleared.
@@ -314,6 +319,11 @@
 (define (pickup-worth rules)
   (let ((n (hash-ref rules "worth" 25.0)))
     (if (and (number? n) (> n 0.0)) n 25.0)))
+
+; Field 6 is that coin's own worth. Missing or zero keeps the loot base.
+(define (coin-points q rules)
+  (let ((w (piece-nth q 6 0.0)))
+    (if (and (number? w) (> w 0.0)) w (pickup-worth rules))))
 
 (define (over-gap? x lane pieces)
   (let loop ((ps pieces))
@@ -369,21 +379,41 @@
 (define POP-BW 1.7)
 (define POP-BH 1.25)
 
-; Same id, same toss. A short stretch and every fifth later id skip it.
-; The opening id stays on the centre lane, after the slide, the lane
-; change, and the jump, when the stretch is long enough. Later ids stay
-; a short way down their own stretch.
-(define (popper-for id x0 span)
-  (if (< span 12.0)
-    #f
-    (if (and (> id 0) (= (modulo id 5) 0))
+; Whole bands 0..4. Missing input is the shipped density. A value
+; between two bands does not skip one.
+(define (pressure-band n)
+  (cond
+    ((not (number? n)) 1)
+    ((< n 0.5) 0)
+    ((< n 1.5) 1)
+    ((< n 2.5) 2)
+    ((< n 3.5) 3)
+    (else 4)))
+
+; Same id, same toss at pressure 1. A short stretch skips it, and so
+; does every fifth later id. The opening id stays on the centre lane,
+; after the slide, the lane change, and the jump, when the stretch is
+; long enough. Later ids stay a short way down their own stretch.
+; Pressure 0 skips more and tosses later. Pressure 3 and 4 allow the
+; fifth id and bring the toss forward. Still one lane, still past 6 m.
+(define (popper-for id x0 span . rest)
+  (let ((pressure (if (and (pair? rest) (number? (car rest))) (pressure-band (car rest)) 1)))
+    (if (< span (if (<= pressure 0) 16.0 12.0))
       #f
-      (let* ((want (if (= id 0) 62.0 (+ 10.0 (exact->inexact (modulo (+ id 2) 9)))))
-             (along (min want (- span 3.0)))
-             (lane (if (= id 0) 1.0 (exact->inexact (modulo id 3)))))
-        (if (< along 6.0)
-          #f
-          (piece 9.0 (+ x0 along) POP-W POP-H 1.85 lane 0.0 3.6 2.8 1.05))))))
+      (if (and (> id 0)
+               (or (and (<= pressure 2) (= (modulo id 5) 0))
+                   (and (<= pressure 0) (= (modulo id 4) 0))))
+        #f
+        (let* ((base (if (= id 0) 62.0 (+ 10.0 (exact->inexact (modulo (+ id 2) 9)))))
+               (want (cond
+                       ((<= pressure 0) (+ base 8.0))
+                       ((>= pressure 3) (* base 0.75))
+                       (else base)))
+               (along (min want (- span 3.0)))
+               (lane (if (= id 0) 1.0 (exact->inexact (modulo id 3)))))
+          (if (< along 6.0)
+            #f
+            (piece 9.0 (+ x0 along) POP-W POP-H 1.85 lane 0.0 3.6 2.8 1.05)))))))
 
 (define (step-one-pop q px dt)
   (let ((phase (piece-nth q 6 0.0))
@@ -585,7 +615,7 @@
                  (loop (cdr ps) (+ n 1)
                        (append coins
                                (list (cons n (piece 0.0 x1 (piece-w q) (piece-h q) y1 (piece-lane q)))))
-                       (pset player 6 (+ (player-score player) (pickup-worth rules)))
+                       (pset player 6 (+ (player-score player) (coin-points q rules)))
                        "coin"
                        #f))
                 ((and hit (= k 6.0) (<= (player-y player) 0.05) (<= (player-vy player) 0.0))
