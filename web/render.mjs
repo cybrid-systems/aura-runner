@@ -1195,14 +1195,21 @@ export function createRenderer(canvas) {
       const file = i % 3;
       const motion = pal.motion || "pace";
       let hop = 0;
+      let ahead = 0;
       if (motion === "float") hop = reduced ? 0.85 : 0.78 + Math.sin(t * 2.2 + i) * 0.22;
+      else if (motion === "cheer") hop = reduced ? 0.35 : 0.25 + Math.abs(Math.sin(t * 7 + i)) * 0.72;
       else if (!reduced && motion === "hop") hop = Math.abs(Math.sin(t * 6 + i)) * 0.55;
       else if (!reduced && motion === "follow") hop = Math.abs(Math.sin(t * 5 + i)) * 0.16;
       else if (!reduced) hop = Math.abs(Math.sin(t * 4 + i)) * 0.08;
-      const weave = !reduced && motion === "side" ? Math.sin(t * 1.4 + i) * 0.4 : 0;
+      if (motion === "pace-ahead") ahead = 3.1;
+      const weave = !reduced && (motion === "side" || motion === "cheer")
+        ? Math.sin(t * 1.4 + i) * (motion === "cheer" ? 0.22 : 0.4)
+        : 0;
       // Beside the lanes, spread along the road so six friends read as a crowd.
-      const lat = -(side * (2.25 + file * 0.22) + weave);
-      const z = pz - 0.8 + i * 1.45 + (reduced ? 0 : Math.sin(t * 0.8 + i) * 0.25);
+      // near tucks in but stays outside the body, so the picture never becomes a hit.
+      const baseLat = motion === "near" ? 2.12 : 2.25;
+      const lat = -(side * (baseLat + file * 0.22) + weave);
+      const z = pz - 0.8 + ahead + i * 1.45 + (reduced ? 0 : Math.sin(t * 0.8 + i) * 0.25);
       const at = sample(z, lat);
       spin = at.psi;
       if (Math.abs(lat) <= DECK) contactShadow(at.x, at.z, at.psi, hop, 0.34);
@@ -1218,29 +1225,33 @@ export function createRenderer(canvas) {
 
   // Cloth, clasp, and circlet in the road frame. Negative ds trails
   // behind the runner, toward the camera. spot() is the only placement.
-  function drawGear(spot, py, leanLat, sliding, t, reduced, gear, wardAmt, pal, stride) {
+  function drawGear(spot, py, leanLat, sliding, t, reduced, gear, wardAmt, pal, stride, cloak) {
     const rose = [0.86, 0.28, 0.32];
     const gold = pal.cape;
     const segs = reduced ? 2 : 3;
     const neckY = py + (sliding ? 0.42 : 0.74);
     const sway = reduced ? 0 : Math.sin(t * 2.4) * 0.04 + stride * 0.02;
-    for (let i = 0; i < segs; i++) {
-      const tip = reduced ? 0 : Math.sin(t * 2.4 + 0.5) * 0.02 * i;
-      const at = spot(-0.18 - i * 0.14, leanLat * 0.2 + sway + tip);
-      const cloth = i === 0 ? gold : rose;
-      const tall = Math.max(0.16, (sliding ? 0.22 : 0.42) - i * 0.05);
-      push(at.x, neckY - 0.04 - i * 0.05, at.z, 0.46 - i * 0.08, tall, 0.14, 0, cloth, 0.48, i === 0 ? 0.18 : 0.05);
-    }
-    if (gear >= 2) {
-      const clasp = spot(-0.2, leanLat + sway);
-      push(clasp.x, neckY + 0.12, clasp.z, 0.14, 0.14, 0.1, 1, gold, 0.16, 0.95);
-    }
-    if (gear >= 3 && !sliding) {
-      const hy = py + 1.08;
-      for (let i = 0; i < 6; i++) {
-        const a = (i / 6) * Math.PI * 2;
-        const at = spot(-0.08 + Math.sin(a) * 0.04, leanLat + Math.cos(a) * 0.28);
-        push(at.x, hy, at.z, 0.07, 0.045, 0.07, 0, gold, 0.18, 0.75);
+    // The cloak, clasp, and circlet belong to the light-keeper.
+    // An animal or a vehicle keeps the shield beads and the speed trail.
+    if (cloak !== false) {
+      for (let i = 0; i < segs; i++) {
+        const tip = reduced ? 0 : Math.sin(t * 2.4 + 0.5) * 0.02 * i;
+        const at = spot(-0.18 - i * 0.14, leanLat * 0.2 + sway + tip);
+        const cloth = i === 0 ? gold : rose;
+        const tall = Math.max(0.16, (sliding ? 0.22 : 0.42) - i * 0.05);
+        push(at.x, neckY - 0.04 - i * 0.05, at.z, 0.46 - i * 0.08, tall, 0.14, 0, cloth, 0.48, i === 0 ? 0.18 : 0.05);
+      }
+      if (gear >= 2) {
+        const clasp = spot(-0.2, leanLat + sway);
+        push(clasp.x, neckY + 0.12, clasp.z, 0.14, 0.14, 0.1, 1, gold, 0.16, 0.95);
+      }
+      if (gear >= 3 && !sliding) {
+        const hy = py + 1.08;
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * Math.PI * 2;
+          const at = spot(-0.08 + Math.sin(a) * 0.04, leanLat + Math.cos(a) * 0.28);
+          push(at.x, hy, at.z, 0.07, 0.045, 0.07, 0, gold, 0.18, 0.75);
+        }
       }
     }
     const beads = Math.max(0, Math.min(5, Math.round((Number(wardAmt) || 0) * 5)));
@@ -1691,64 +1702,34 @@ export function createRenderer(canvas) {
 
     // Kind 10 runs the lane toward the hero. The warm stripe is the
     // lane it is hunting. A jump or another lane misses it.
+    // Look 0 fox, 1 bird, 2 beetle drawn as a bee. The hit half-width
+    // stays in the sim; this only picks a body.
+    const RIVAL_PLANS = ["fox", "bird", "bee"];
+    function rivalPlan(code) {
+      const n = Math.round(Number(code) || 0);
+      const i = ((n % RIVAL_PLANS.length) + RIVAL_PLANS.length) % RIVAL_PLANS.length;
+      return RIVAL_PLANS[i];
+    }
+    function rivalTint(plan) {
+      if (plan === "bird") return [0.55, 0.78, 0.95];
+      if (plan === "bee") return [0.98, 0.82, 0.28];
+      return [0.95, 0.48, 0.22];
+    }
     function drawRival(q, here) {
       const look = Math.round(q.length > 6 ? q[6] : 0);
       const lane = q.length > 5 && q[5] >= 0 ? q[5] : 1;
       const face = here.psi + Math.PI;
       const lat = laneX(lane);
-      const along = q[1] + (q[2] || 0) * 0.5;
-      // Toward the hero. Road forward is (sin ψ, cos ψ).
+      const plan = rivalPlan(look);
       const toX = -Math.sin(here.psi);
       const toZ = -Math.cos(here.psi);
       const at = (ahead, y) => [here.x + toX * ahead, y, here.z + toZ * ahead];
       paintLane(q, lat, [1, 0.38, 0.22], 22);
       contactShadow(here.x, here.z, here.psi, 0, 0.4);
-      if (look === 1) {
-        const flap = q.length > 10 && q[10] > 0 && q[10] < 0.36 ? 12 : 9;
-        const wing = reduced ? 0.16 : 0.1 + Math.abs(Math.sin((st.time || 0) * flap)) * 0.14;
-        const body = at(0, 0.42);
-        const head = at(0.22, 0.68);
-        const beak = at(0.4, 0.66);
-        push(body[0], body[1], body[2], 0.48, 0.4, 0.52, 1, [0.16, 0.22, 0.48], 0.32, 0.08, face);
-        push(head[0], head[1], head[2], 0.32, 0.28, 0.3, 1, [0.93, 0.9, 0.82], 0.25, 0.12, face);
-        push(beak[0], beak[1], beak[2], 0.14, 0.1, 0.18, 0, [0.95, 0.55, 0.22], 0.3, 0.16, face);
-        const left = onRoad(along, lat - 0.42);
-        const right = onRoad(along, lat + 0.42);
-        push(left.x, 0.52, left.z, 0.5, wing, 0.22, 0, [0.22, 0.32, 0.62], 0.3, 0.08, face);
-        push(right.x, 0.52, right.z, 0.5, wing, 0.22, 0, [0.22, 0.32, 0.62], 0.3, 0.08, face);
-        const eyeL = at(0.28, 0.72);
-        const eyeR = at(0.28, 0.72);
-        const side = onRoad(along, lat + 0.08);
-        const side0 = onRoad(along, lat - 0.08);
-        push(side0.x + toX * 0.22, eyeL[1], side0.z + toZ * 0.22, 0.07, 0.07, 0.05, 1, [0.2, 0.14, 0.1], 0.2, 0.25, face);
-        push(side.x + toX * 0.22, eyeR[1], side.z + toZ * 0.22, 0.07, 0.07, 0.05, 1, [0.2, 0.14, 0.1], 0.2, 0.25, face);
-      } else if (look === 2) {
-        const shell = at(0, 0.32);
-        const back = at(-0.08, 0.48);
-        const head = at(0.28, 0.3);
-        push(shell[0], shell[1], shell[2], 0.72, 0.34, 0.8, 1, [0.36, 0.62, 0.32], 0.4, 0.06, face);
-        push(back[0], back[1], back[2], 0.8, 0.16, 0.52, 1, [0.22, 0.46, 0.2], 0.45, 0.05, face);
-        push(head[0], head[1], head[2], 0.22, 0.16, 0.22, 1, [0.5, 0.74, 0.4], 0.35, 0.08, face);
-        const side = onRoad(along, lat + 0.08);
-        const side0 = onRoad(along, lat - 0.08);
-        push(side0.x + toX * 0.32, 0.36, side0.z + toZ * 0.32, 0.07, 0.07, 0.05, 1, [0.2, 0.14, 0.1], 0.2, 0.2, face);
-        push(side.x + toX * 0.32, 0.36, side.z + toZ * 0.32, 0.07, 0.07, 0.05, 1, [0.2, 0.14, 0.1], 0.2, 0.2, face);
-      } else {
-        const body = at(0, 0.32);
-        const head = at(0.22, 0.58);
-        const earL = onRoad(along, lat - 0.1);
-        const earR = onRoad(along, lat + 0.1);
-        push(body[0], body[1], body[2], 0.36, 0.3, 0.58, 1, [0.95, 0.46, 0.18], 0.32, 0.08, face);
-        push(head[0], head[1], head[2], 0.28, 0.24, 0.28, 1, [0.95, 0.46, 0.18], 0.28, 0.1, face);
-        push(earL.x + toX * 0.2, 0.82, earL.z + toZ * 0.2, 0.08, 0.18, 0.06, 0, [0.72, 0.32, 0.12], 0.35, 0.05, face);
-        push(earR.x + toX * 0.2, 0.82, earR.z + toZ * 0.2, 0.08, 0.18, 0.06, 0, [0.72, 0.32, 0.12], 0.35, 0.05, face);
-        push(at(0.36, 0.52)[0], 0.52, at(0.36, 0.52)[2], 0.1, 0.08, 0.12, 0, [0.22, 0.14, 0.1], 0.3, 0.05, face);
-        const side = onRoad(along, lat + 0.07);
-        const side0 = onRoad(along, lat - 0.07);
-        push(side0.x + toX * 0.3, 0.64, side0.z + toZ * 0.3, 0.07, 0.07, 0.05, 1, [0.2, 0.14, 0.1], 0.2, 0.25, face);
-        push(side.x + toX * 0.3, 0.64, side.z + toZ * 0.3, 0.07, 0.07, 0.05, 1, [0.2, 0.14, 0.1], 0.2, 0.25, face);
-      }
-      const mark = at(0.1, 0.98);
+      spin = face;
+      drawBody(plan, here.x, 0, here.z, rivalTint(plan), st.time || 0, reduced);
+      spin = 0;
+      const mark = at(0.1, 1.05);
       push(mark[0], mark[1], mark[2], 0.16, 0.08, 0.08, 0, [0.9, 0.18, 0.14], 0.3, 0.55, face);
     }
 
@@ -2071,7 +2052,7 @@ export function createRenderer(canvas) {
           push(tuft.x, hy + 0.32 + flame + pulse * 0.05, tuft.z, 0.13, 0.3, 0.13, 1, pal.cape, 0.12, 1);
         }
       }
-      drawGear(spot, py, leanLat, sliding, st.time || 0, reduced, st.gear || 1, st.ward == null ? 1 : st.ward, pal, reduced ? 0 : stride);
+      drawGear(spot, py, leanLat, sliding, st.time || 0, reduced, st.gear || 1, st.ward == null ? 1 : st.ward, pal, reduced ? 0 : stride, !dressed);
       const trailN = reduced ? 0 : Math.min(6, 3 + Math.floor(Math.max(0, speed - 5)));
       for (let t = 1; t <= trailN; t++) {
         const fade = 1 - t / (trailN + 1);
