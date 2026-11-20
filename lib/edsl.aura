@@ -1,0 +1,606 @@
+; Aura Biome EDSL. One s-expression describes any venue: the four built-in
+; worlds and a world the model or the offline evolver just proposed.
+; The form is data. Nothing here calls eval.
+;
+; (biome ID
+;   (label WORD)
+;   (sky ZR ZG ZB HR HG HB)
+;   (fog FR FG FB AMT)
+;   (body sun|moon|stars|aurora|none)
+;   (road R G B) (curb R G B) (ground R G B)
+;   (surface grass|stone|dust|sand|ice|cloud|lava|reef|plank)
+;   (light L) (mood M)
+;   (particles fireflies|stardust|snow|embers|rain|sparkles|none DENSITY)
+;   (props (KIND DENSITY SCALE) ...)
+;   (recipe garden|city|space|coast|mix))
+;
+; KIND is tree, tower, arch, crystal, rock, coral, or ring.
+; A proposal is kept only after evo:trial (edsl-gate).
+(require "std/string" all:)
+(require "std/evo-core" all:)
+(require "lib/sexp")
+(require "lib/gen")
+
+(define edsl-bodies (list "sun" "moon" "stars" "aurora" "none"))
+(define edsl-surfaces (list "grass" "stone" "dust" "sand" "ice" "cloud" "lava" "reef" "plank"))
+(define edsl-particles (list "fireflies" "stardust" "snow" "embers" "rain" "sparkles" "none"))
+(define edsl-kinds (list "tree" "tower" "arch" "crystal" "rock" "coral" "ring"))
+(define edsl-recipes (list "garden" "city" "space" "coast" "mix"))
+(define edsl-builtins (list "garden" "city" "space" "coast"))
+(define EDSL-BUDGET 168.0)
+
+(define edsl-garden
+  "(biome garden (label Garden) (sky 0.55 0.72 0.95 0.86 0.91 0.98) (fog 0.78 0.86 0.94 0.22) (body sun) (road 0.93 0.78 0.52) (curb 0.45 0.32 0.22) (ground 0.42 0.68 0.38) (surface grass) (light 0.82) (mood 0.55) (particles fireflies 0.18) (props (tree 0.38 1.00)) (recipe garden))")
+(define edsl-city
+  "(biome city (label City) (sky 0.42 0.52 0.82 0.98 0.58 0.34) (fog 0.96 0.72 0.52 0.22) (body sun) (road 0.22 0.24 0.28) (curb 0.20 0.18 0.16) (ground 0.52 0.54 0.58) (surface stone) (light 0.78) (mood 0.62) (particles sparkles 0.22) (props (tower 0.28 1.10)) (recipe city))")
+(define edsl-space
+  "(biome space (label Space) (sky 0.05 0.06 0.16 0.22 0.12 0.36) (fog 0.08 0.07 0.16 0.12) (body stars) (road 0.12 0.16 0.28) (curb 0.16 0.14 0.18) (ground 0.07 0.08 0.14) (surface dust) (light 0.84) (mood 0.30) (particles stardust 0.28) (props (crystal 0.22 1.00) (ring 0.18 0.95)) (recipe space))")
+(define edsl-coast
+  "(biome coast (label Coast) (sky 0.42 0.70 0.95 0.96 0.78 0.52) (fog 0.78 0.88 0.95 0.18) (body sun) (road 0.93 0.82 0.52) (curb 0.72 0.58 0.32) (ground 0.22 0.58 0.68) (surface sand) (light 0.80) (mood 0.58) (particles sparkles 0.16) (props (coral 0.24 1.00) (rock 0.14 0.80)) (recipe coast))")
+(define edsl-lava
+  "(biome lava-canyon (label Lava-Canyon) (sky 0.42 0.16 0.18 0.86 0.40 0.22) (fog 0.55 0.28 0.22 0.18) (body sun) (road 0.70 0.42 0.28) (curb 0.42 0.24 0.16) (ground 0.22 0.16 0.16) (surface lava) (light 0.78) (mood 0.84) (particles embers 0.36) (props (rock 0.32 1.05) (arch 0.18 0.95)) (recipe mix))")
+(define edsl-ice
+  "(biome aurora-ice (label Aurora-Ice) (sky 0.16 0.28 0.48 0.62 0.86 0.78) (fog 0.70 0.86 0.92 0.16) (body aurora) (road 0.72 0.84 0.92) (curb 0.55 0.72 0.84) (ground 0.28 0.42 0.62) (surface ice) (light 0.78) (mood 0.28) (particles snow 0.30) (props (crystal 0.30 1.15) (ring 0.12 0.85)) (recipe mix))")
+(define edsl-candy
+  "(biome candy-clouds (label Candy-Clouds) (sky 0.95 0.72 0.88 0.99 0.86 0.94) (fog 0.98 0.86 0.92 0.16) (body sun) (road 0.96 0.55 0.72) (curb 0.92 0.42 0.58) (ground 0.30 0.62 0.42) (surface cloud) (light 0.90) (mood 0.70) (particles sparkles 0.34) (props (arch 0.22 1.00) (ring 0.16 0.90)) (recipe mix))")
+(define edsl-coral
+  "(biome coral-reef (label Coral-Reef) (sky 0.25 0.55 0.82 0.45 0.78 0.88) (fog 0.55 0.78 0.86 0.18) (body sun) (road 0.88 0.76 0.50) (curb 0.72 0.48 0.36) (ground 0.16 0.42 0.58) (surface reef) (light 0.80) (mood 0.52) (particles sparkles 0.22) (props (coral 0.30 1.05) (rock 0.12 0.75)) (recipe mix))")
+(define edsl-cyber
+  "(biome cyber-rain (label Cyber-Rain) (sky 0.16 0.18 0.36 0.35 0.22 0.55) (fog 0.25 0.30 0.42 0.20) (body moon) (road 0.45 0.52 0.62) (curb 0.18 0.22 0.32) (ground 0.10 0.28 0.22) (surface plank) (light 0.76) (mood 0.40) (particles rain 0.28) (props (tower 0.24 1.10) (arch 0.16 0.90)) (recipe mix))")
+
+(define (edsl-boot)
+  (list edsl-garden edsl-city edsl-space edsl-coast))
+
+(define (edsl-preset name)
+  (cond
+    ((string=? name "garden") edsl-garden)
+    ((string=? name "city") edsl-city)
+    ((string=? name "space") edsl-space)
+    ((string=? name "coast") edsl-coast)
+    ((string=? name "lava-canyon") edsl-lava)
+    ((string=? name "aurora-ice") edsl-ice)
+    ((string=? name "candy-clouds") edsl-candy)
+    ((string=? name "coral-reef") edsl-coral)
+    ((string=? name "cyber-rain") edsl-cyber)
+    (else #f)))
+
+(define (edsl-int n)
+  (let ((s (number->string (floor (exact->inexact (if (number? n) n 0))))))
+    (if (string-suffix? s ".0")
+      (substring s 0 (- (string-length s) 2))
+      s)))
+
+(define (edsl-2 n)
+  (let ((q (floor (+ (* (exact->inexact n) 100.0) 0.5))))
+    (let ((whole (floor (/ q 100.0)))
+          (frac (modulo q 100.0)))
+      (string-append (edsl-int whole) "."
+                     (if (< frac 10.0) "0" "")
+                     (edsl-int frac)))))
+
+(define (edsl-member? xs name)
+  (let loop ((ys xs))
+    (if (or (not (pair? ys)) (null? ys))
+      #f
+      (if (and (string? (car ys)) (string=? (car ys) name))
+        #t
+        (loop (cdr ys))))))
+
+(define (edsl-builtin? id)
+  (edsl-member? edsl-builtins id))
+
+(define (edsl-nth xs i)
+  (let loop ((ys xs) (k i))
+    (if (or (not (pair? ys)) (null? ys))
+      #f
+      (if (<= k 0) (car ys) (loop (cdr ys) (- k 1))))))
+
+(define (edsl-len xs)
+  (let loop ((ys xs) (n 0))
+    (if (or (not (pair? ys)) (null? ys))
+      n
+      (loop (cdr ys) (+ n 1)))))
+
+(define (edsl-clause form name)
+  (let loop ((xs (if (pair? form) (cdr (cdr form)) (list))))
+    (if (or (not (pair? xs)) (null? xs))
+      #f
+      (let ((sp (car xs)))
+        (if (and (pair? sp) (string? (car sp)) (string=? (car sp) name))
+          sp
+          (loop (cdr xs)))))))
+
+(define (edsl-head? s)
+  (or (string=? s "label") (string=? s "sky") (string=? s "fog")
+      (string=? s "body") (string=? s "road") (string=? s "curb")
+      (string=? s "ground") (string=? s "surface") (string=? s "light")
+      (string=? s "mood") (string=? s "particles") (string=? s "props")
+      (string=? s "recipe")))
+
+(define (edsl-heads-ok? form)
+  (let loop ((xs (cdr (cdr form))))
+    (if (or (not (pair? xs)) (null? xs))
+      #t
+      (let ((sp (car xs)))
+        (if (or (not (pair? sp)) (not (string? (car sp))) (not (edsl-head? (car sp))))
+          #f
+          (loop (cdr xs)))))))
+
+(define (edsl-nums sp n)
+  (let loop ((xs (if (pair? sp) (cdr sp) (list))) (k 0) (acc (list)))
+    (if (= k n)
+      (if (or (not (pair? xs)) (null? xs)) (reverse acc) #f)
+      (if (or (not (pair? xs)) (null? xs) (not (number? (car xs))))
+        #f
+        (loop (cdr xs) (+ k 1) (cons (exact->inexact (car xs)) acc))))))
+
+(define (edsl-sym sp)
+  (if (and (pair? sp) (pair? (cdr sp)) (string? (car (cdr sp)))
+           (or (not (pair? (cdr (cdr sp)))) (null? (cdr (cdr sp)))))
+    (car (cdr sp))
+    #f))
+
+(define (edsl-in? v lo hi)
+  (and (number? v) (>= v lo) (<= v hi)))
+
+(define (edsl-chan? xs)
+  (and (pair? xs)
+       (edsl-in? (car xs) 0.0 1.0)
+       (edsl-in? (car (cdr xs)) 0.0 1.0)
+       (edsl-in? (car (cdr (cdr xs))) 0.0 1.0)))
+
+(define (edsl-luma r g b)
+  (+ (* 0.25 r) (* 0.50 g) (* 0.25 b)))
+
+(define (edsl-abs x)
+  (if (< x 0) (- 0 x) x))
+
+(define (edsl-dist r g b ar ag ab)
+  (+ (* 0.5 (edsl-abs (- r ar)))
+     (* 0.3 (edsl-abs (- g ag)))
+     (* 0.2 (edsl-abs (- b ab)))))
+
+(define (edsl-id? s)
+  (and (string? s)
+       (>= (string-length s) 2)
+       (<= (string-length s) 24)
+       (let ((n (string-length s)))
+         (let loop ((i 0) (ok #t))
+           (if (or (not ok) (>= i n))
+             ok
+             (let ((c (string-ref s i)))
+               (loop (+ i 1)
+                     (or (and (>= c 97) (<= c 122))
+                         (and (> i 0) (or (and (>= c 48) (<= c 57)) (= c 45)))))))))))
+
+(define (edsl-cap ch)
+  (let ((i (string-index "abcdefghijklmnopqrstuvwxyz" ch 0)))
+    (if (< i 0)
+      ch
+      (substring "ABCDEFGHIJKLMNOPQRSTUVWXYZ" i (+ i 1)))))
+
+(define (edsl-pretty s)
+  (let ((n (string-length s)))
+    (let loop ((i 0) (up #t) (acc ""))
+      (if (>= i n)
+        acc
+        (let ((ch (substring s i (+ i 1))))
+          (if (string=? ch "-")
+            (loop (+ i 1) #t (string-append acc " "))
+            (loop (+ i 1) #f (string-append acc (if up (edsl-cap ch) ch)))))))))
+
+(define (edsl-title id)
+  (cond
+    ((string=? id "garden") "Garden")
+    ((string=? id "city") "City")
+    ((string=? id "space") "Space")
+    ((string=? id "coast") "Coast")
+    ((string=? id "lava-canyon") "Lava Canyon")
+    ((string=? id "aurora-ice") "Aurora Ice")
+    ((string=? id "candy-clouds") "Candy Clouds")
+    ((string=? id "coral-reef") "Coral Reef")
+    ((string=? id "cyber-rain") "Cyber Rain")
+    ((string? id) (edsl-pretty id))
+    (else "Garden")))
+
+(define (edsl-cubes kind)
+  (cond
+    ((string=? kind "tree") 4.0)
+    ((string=? kind "tower") 5.0)
+    ((string=? kind "arch") 4.0)
+    ((string=? kind "crystal") 3.0)
+    ((string=? kind "rock") 3.0)
+    ((string=? kind "coral") 4.0)
+    ((string=? kind "ring") 4.0)
+    (else 6.0)))
+
+(define (edsl-cost props pamt)
+  (let loop ((xs props) (n (* (if (number? pamt) pamt 0.0) 22.0)))
+    (if (or (not (pair? xs)) (null? xs))
+      n
+      (let ((row (car xs)))
+        (loop (cdr xs)
+              (+ n (* 28.0
+                      (hash-ref row "density" 0.0)
+                      (edsl-cubes (hash-ref row "kind" "")))))))))
+
+(define (edsl-prop? sp)
+  (and (pair? sp)
+       (string? (car sp))
+       (edsl-member? edsl-kinds (car sp))
+       (pair? (cdr sp))
+       (number? (car (cdr sp)))
+       (pair? (cdr (cdr sp)))
+       (number? (car (cdr (cdr sp))))
+       (or (not (pair? (cdr (cdr (cdr sp))))) (null? (cdr (cdr (cdr sp)))))))
+
+(define (edsl-props sp)
+  (if (or (not (pair? sp)) (not (pair? (cdr sp))))
+    #f
+    (let loop ((xs (cdr sp)) (n 0) (acc (list)))
+      (if (or (not (pair? xs)) (null? xs))
+        (if (and (>= n 1) (<= n 4)) (reverse acc) #f)
+        (if (not (edsl-prop? (car xs)))
+          #f
+          (let ((row (car xs))
+                (d (exact->inexact (car (cdr row))))
+                (sc (exact->inexact (car (cdr (cdr row))))))
+            (if (or (not (edsl-in? d 0.05 0.55)) (not (edsl-in? sc 0.55 1.45)))
+              #f
+              (loop (cdr xs) (+ n 1)
+                    (cons (hash "kind" (car row) "density" d "scale" sc) acc)))))))))
+
+(define (edsl-refuse why)
+  (hash "ok" #f "why" why "id" "" "label" "" "form" ""
+        "recipe" "" "cost" 0.0
+        "violations" (hash "budget" (if (string=? why "budget") 1.0 0.0)
+                           "geometry" 0.0
+                           "reachable" 1.0
+                           "safe" (if (string=? why "contrast") 1.0 0.0))))
+
+(define (edsl-near-obstacle? r g b)
+  (or (and (< (edsl-dist r g b 1.0 0.84 0.32) 0.055)
+           (< (edsl-abs (- (edsl-luma r g b) 0.75)) 0.08))
+      (and (< (edsl-dist r g b 0.28 0.62 0.98) 0.055)
+           (< (edsl-abs (- (edsl-luma r g b) 0.625)) 0.08))
+      (and (< (edsl-dist r g b 1.0 0.72 0.18) 0.055)
+           (< (edsl-abs (- (edsl-luma r g b) 0.655)) 0.08))
+      (and (< (edsl-dist r g b 0.98 0.48 0.16) 0.055)
+           (< (edsl-abs (- (edsl-luma r g b) 0.525)) 0.08))))
+
+; Lane paint must separate the centre road from the shoulders, and the
+; road must not wear the same colour as a coin, a hurdle, a gate, or a pot.
+(define (edsl-contrast? road ground fog fog-amt)
+  (let ((rr (car road)) (rg (car (cdr road))) (rb (car (cdr (cdr road))))
+        (gr (car ground)) (gg (car (cdr ground))) (gb (car (cdr (cdr ground))))
+        (fr (car fog)) (fg (car (cdr fog))) (fb (car (cdr (cdr fog)))))
+    (and (>= (+ rr rg rb) 0.34)
+         (>= (edsl-abs (- (edsl-luma rr rg rb) (edsl-luma gr gg gb))) 0.07)
+         (not (edsl-near-obstacle? rr rg rb))
+         (not (and (> fog-amt 0.30)
+                   (< (edsl-dist fr fg fb 1.0 0.72 0.18) 0.08))))))
+
+(define (edsl-check text)
+  (if (or (not (string? text)) (= (string-length text) 0))
+    (edsl-refuse "empty")
+    (if (banned? text)
+      (edsl-refuse "banned")
+      (let ((form (sexp-parse text)))
+        (if (or (not form) (not (pair? form)) (not (string? (car form)))
+                (not (string=? (car form) "biome"))
+                (not (pair? (cdr form))) (not (string? (car (cdr form)))))
+          (edsl-refuse "shape")
+          (let ((id (car (cdr form))))
+            (if (not (edsl-id? id))
+              (edsl-refuse "id")
+              (if (not (edsl-heads-ok? form))
+                (edsl-refuse "symbol")
+                (let ((sky (edsl-clause form "sky"))
+                      (fog (edsl-clause form "fog"))
+                      (body (edsl-clause form "body"))
+                      (road (edsl-clause form "road"))
+                      (curb (edsl-clause form "curb"))
+                      (ground (edsl-clause form "ground"))
+                      (surface (edsl-clause form "surface"))
+                      (light (edsl-clause form "light"))
+                      (mood (edsl-clause form "mood"))
+                      (parts (edsl-clause form "particles"))
+                      (props (edsl-clause form "props"))
+                      (recipe (edsl-clause form "recipe"))
+                      (label (edsl-clause form "label")))
+                  (if (or (not sky) (not fog) (not body) (not road) (not curb)
+                          (not ground) (not surface) (not light) (not mood)
+                          (not parts) (not props))
+                    (edsl-refuse "shape")
+                    (let ((sr (edsl-nums sky 6))
+                          (fr (edsl-nums fog 4))
+                          (bd (edsl-sym body))
+                          (rd (edsl-nums road 3))
+                          (cb (edsl-nums curb 3))
+                          (gd (edsl-nums ground 3))
+                          (sf (edsl-sym surface))
+                          (lv (edsl-nums light 1))
+                          (md (edsl-nums mood 1))
+                          (pk (if (and (pair? parts) (pair? (cdr parts)) (string? (car (cdr parts))))
+                                (car (cdr parts))
+                                #f))
+                          (pn (edsl-nums (if (and (pair? parts) (pair? (cdr parts)))
+                                           (cons "particles" (cdr (cdr parts)))
+                                           #f) 1))
+                          (pr (edsl-props props))
+                          (rc (if recipe (edsl-sym recipe) (if (edsl-builtin? id) id "mix")))
+                          (lb (if label (edsl-sym label) #f)))
+                      (cond
+                        ((or (not sr) (not fr) (not rd) (not cb) (not gd)
+                             (not lv) (not md) (not pn) (not pr) (not pk) (not bd) (not sf))
+                         (edsl-refuse "shape"))
+                        ((not (edsl-member? edsl-bodies bd)) (edsl-refuse "body"))
+                        ((not (edsl-member? edsl-surfaces sf)) (edsl-refuse "surface"))
+                        ((not (edsl-member? edsl-particles pk)) (edsl-refuse "particles"))
+                        ((not (and (string? rc) (edsl-member? edsl-recipes rc))) (edsl-refuse "recipe"))
+                        ((or (not (edsl-chan? sr))
+                             (not (edsl-chan? (list (car (cdr (cdr (cdr sr))))
+                                                    (car (cdr (cdr (cdr (cdr sr)))))
+                                                    (car (cdr (cdr (cdr (cdr (cdr sr))))))))))
+                         (edsl-refuse "color"))
+                        ((or (not (edsl-chan? fr)) (not (edsl-in? (car (cdr (cdr (cdr fr)))) 0.0 0.38)))
+                         (edsl-refuse "fog"))
+                        ((not (edsl-chan? rd)) (edsl-refuse "color"))
+                        ((not (edsl-chan? cb)) (edsl-refuse "color"))
+                        ((not (edsl-chan? gd)) (edsl-refuse "color"))
+                        ((< (edsl-luma (car sr) (car (cdr sr)) (car (cdr (cdr sr)))) 0.08)
+                         (edsl-refuse "dark"))
+                        ((not (edsl-in? (car lv) 0.50 1.0)) (edsl-refuse "light"))
+                        ((not (edsl-in? (car md) 0.0 1.0)) (edsl-refuse "mood"))
+                        ((not (edsl-in? (car pn) 0.0 0.55)) (edsl-refuse "particles"))
+                        ((not (edsl-contrast? rd gd fr (car (cdr (cdr (cdr fr))))))
+                         (edsl-refuse "contrast"))
+                        ((> (edsl-cost pr (car pn)) EDSL-BUDGET) (edsl-refuse "budget"))
+                        (else
+                         (hash "ok" #t "why" "fair" "id" id
+                               "label" (if (and (string? lb) (edsl-id? lb)) (edsl-title lb) (edsl-title id))
+                               "form" text
+                               "recipe" rc
+                               "sky" sr "fog" fr "body" bd
+                               "road" rd "curb" cb "ground" gd
+                               "surface" sf
+                               "light" (car lv) "mood" (car md)
+                               "particles" pk "pamt" (car pn)
+                               "props" pr
+                               "cost" (edsl-cost pr (car pn))
+                               "violations" (hash "budget" 0.0 "geometry" 0.0
+                                                  "reachable" 0.0 "safe" 0.0)))))))))))))))
+
+(define (edsl-gate text)
+  (let* ((found (edsl-check text))
+         (ok (and (hash? found) (hash-ref found "ok" #f)))
+         (viol (if ok
+                 (hash-ref found "violations")
+                 (hash-ref found "violations"
+                           (hash "budget" 0.0 "geometry" 0.0 "reachable" 1.0 "safe" 1.0))))
+         (cand (evo:candidate (if (string? text) text "")
+                              (hash "id" "biome" "target" "biome-form")))
+         (trial (evo:trial cand
+                           (hash "timeout-ms" 4000
+                                 "apply" (lambda (c) #t)
+                                 "evaluate"
+                                 (lambda (c)
+                                   (hash "status" "ok"
+                                         "objectives" (hash "fair" (if ok 1.0 0.0))
+                                         "constraints" viol
+                                         "behavior" (hash "band" 0.0)))))))
+    (let ((keep (and ok trial (evo:trial-ok? trial) (evo:feasible? trial))))
+      (hash "verdict" (if keep "KEEP" "ROLLBACK")
+            "why" (if keep "fair" (hash-ref found "why" "trial"))
+            "id" (if ok (hash-ref found "id" "") "")
+            "label" (if ok (hash-ref found "label" "") "")
+            "form" (if (string? text) text "")
+            "spec" (if ok found #f)
+            "trial" (if (and trial (evo:trial-ok? trial) (evo:feasible? trial)) "ok" "infeasible")))))
+
+(define (edsl-pub found)
+  (if (or (not (hash? found)) (not (hash-ref found "ok" #f)))
+    #f
+    (hash "id" (hash-ref found "id")
+          "label" (hash-ref found "label")
+          "recipe" (hash-ref found "recipe")
+          "sky" (list (car (hash-ref found "sky"))
+                      (car (cdr (hash-ref found "sky")))
+                      (car (cdr (cdr (hash-ref found "sky")))))
+          "horizon" (list (car (cdr (cdr (cdr (hash-ref found "sky")))))
+                          (car (cdr (cdr (cdr (cdr (hash-ref found "sky"))))))
+                          (car (cdr (cdr (cdr (cdr (cdr (hash-ref found "sky"))))))))
+          "fog" (list (car (hash-ref found "fog"))
+                      (car (cdr (hash-ref found "fog")))
+                      (car (cdr (cdr (hash-ref found "fog")))))
+          "fogAmt" (car (cdr (cdr (cdr (hash-ref found "fog")))))
+          "body" (hash-ref found "body")
+          "road" (hash-ref found "road")
+          "curb" (hash-ref found "curb")
+          "ground" (hash-ref found "ground")
+          "surface" (hash-ref found "surface")
+          "light" (hash-ref found "light")
+          "mood" (hash-ref found "mood")
+          "particles" (hash-ref found "particles")
+          "particleAmt" (hash-ref found "pamt")
+          "props" (hash-ref found "props"))))
+
+(define (edsl-has? pool id)
+  (let loop ((xs pool))
+    (if (or (not (pair? xs)) (null? xs))
+      #f
+      (let ((chk (edsl-check (car xs))))
+        (if (and (hash-ref chk "ok" #f) (string=? (hash-ref chk "id" "") id))
+          #t
+          (loop (cdr xs)))))))
+
+(define (edsl-drop-evolved xs)
+  (let loop ((ys xs) (acc (list)) (skipped #f))
+    (if (or (not (pair? ys)) (null? ys))
+      (reverse acc)
+      (let ((chk (edsl-check (car ys))))
+        (if (and (not skipped)
+                 (hash-ref chk "ok" #f)
+                 (not (edsl-builtin? (hash-ref chk "id" ""))))
+          (loop (cdr ys) acc #t)
+          (loop (cdr ys) (cons (car ys) acc) skipped))))))
+
+(define (edsl-register pool form)
+  (let ((gate (edsl-gate form)))
+    (if (not (string=? (hash-ref gate "verdict" "") "KEEP"))
+      pool
+      (let ((id (hash-ref gate "id" "")))
+        (if (edsl-has? pool id)
+          pool
+          (let ((next (append pool (list form))))
+            (if (> (edsl-len next) 12)
+              (edsl-drop-evolved next)
+              next)))))))
+
+(define (edsl-word? low w)
+  (string-contains? (string-append " " low " ") (string-append " " w " ")))
+
+; A novel place. Built-in venue words and the neon word stay with voice.
+(define (edsl-theme text)
+  (if (not (and (string? text) (> (string-length text) 0)))
+    #f
+    (let ((low (string-downcase text)))
+      (cond
+        ((or (string-contains? text "火山")
+             (edsl-word? low "volcano")
+             (edsl-word? low "lava"))
+         "lava-canyon")
+        ((or (string-contains? text "极光")
+             (string-contains? text "冰原")
+             (string-contains? text "冰宫")
+             (edsl-word? low "aurora")
+             (edsl-word? low "icefield")
+             (and (edsl-word? low "ice") (edsl-word? low "palace")))
+         "aurora-ice")
+        ((or (string-contains? text "糖果") (edsl-word? low "candy"))
+         "candy-clouds")
+        ((or (string-contains? text "珊瑚")
+             (edsl-word? low "coral")
+             (edsl-word? low "reef"))
+         "coral-reef")
+        ((or (string-contains? text "赛博雨")
+             (and (edsl-word? low "cyber") (edsl-word? low "rain")))
+         "cyber-rain")
+        (else #f)))))
+
+(define (edsl-join-props props)
+  (let loop ((xs props) (acc ""))
+    (if (or (not (pair? xs)) (null? xs))
+      acc
+      (let ((row (car xs)))
+        (loop (cdr xs)
+              (string-append acc " (" (hash-ref row "kind") " "
+                             (edsl-2 (hash-ref row "density")) " "
+                             (edsl-2 (hash-ref row "scale")) ")"))))))
+
+(define (edsl-emit id sky fog body road curb ground surface light mood particles pamt props recipe)
+  (string-append
+    "(biome " id
+    " (label " id ")"
+    " (sky " (edsl-2 (car sky)) " " (edsl-2 (car (cdr sky))) " " (edsl-2 (car (cdr (cdr sky))))
+    " " (edsl-2 (car (cdr (cdr (cdr sky))))) " " (edsl-2 (car (cdr (cdr (cdr (cdr sky))))))
+    " " (edsl-2 (car (cdr (cdr (cdr (cdr (cdr sky))))))) ")"
+    " (fog " (edsl-2 (car fog)) " " (edsl-2 (car (cdr fog))) " " (edsl-2 (car (cdr (cdr fog))))
+    " " (edsl-2 (car (cdr (cdr (cdr fog))))) ")"
+    " (body " body ")"
+    " (road " (edsl-2 (car road)) " " (edsl-2 (car (cdr road))) " " (edsl-2 (car (cdr (cdr road)))) ")"
+    " (curb " (edsl-2 (car curb)) " " (edsl-2 (car (cdr curb))) " " (edsl-2 (car (cdr (cdr curb)))) ")"
+    " (ground " (edsl-2 (car ground)) " " (edsl-2 (car (cdr ground))) " " (edsl-2 (car (cdr (cdr ground)))) ")"
+    " (surface " surface ")"
+    " (light " (edsl-2 light) ")"
+    " (mood " (edsl-2 mood) ")"
+    " (particles " particles " " (edsl-2 pamt) ")"
+    " (props" (edsl-join-props props) ")"
+    " (recipe " recipe "))"))
+
+(define (edsl-clamp n lo hi)
+  (max lo (min hi n)))
+
+(define (edsl-nudge n salt)
+  (edsl-clamp (+ n (* (- (modulo salt 5.0) 2.0) 0.02)) 0.05 0.98))
+
+(define (edsl-next-part name salt)
+  (let ((names edsl-particles))
+    (let loop ((xs names) (i 0) (at 0))
+      (if (or (not (pair? xs)) (null? xs))
+        (edsl-nth names (modulo salt (edsl-len names)))
+        (if (string=? (car xs) name)
+          (edsl-nth names (modulo (+ i 1 (modulo salt 3)) (edsl-len names)))
+          (loop (cdr xs) (+ i 1) at))))))
+
+(define (edsl-vary found seed)
+  (let ((sky (hash-ref found "sky"))
+        (fog (hash-ref found "fog"))
+        (road (hash-ref found "road"))
+        (curb (hash-ref found "curb"))
+        (ground (hash-ref found "ground"))
+        (sid (modulo seed 9000)))
+    (edsl-emit
+      (string-append "evo-" (edsl-int sid))
+      (list (edsl-nudge (car sky) sid)
+            (edsl-nudge (car (cdr sky)) (+ sid 1))
+            (edsl-nudge (car (cdr (cdr sky))) (+ sid 2))
+            (edsl-nudge (car (cdr (cdr (cdr sky)))) (+ sid 3))
+            (edsl-nudge (car (cdr (cdr (cdr (cdr sky))))) (+ sid 4))
+            (edsl-nudge (car (cdr (cdr (cdr (cdr (cdr sky)))))) (+ sid 5)))
+      (list (edsl-nudge (car fog) (+ sid 6))
+            (edsl-nudge (car (cdr fog)) (+ sid 7))
+            (edsl-nudge (car (cdr (cdr fog))) (+ sid 8))
+            (edsl-clamp (car (cdr (cdr (cdr fog)))) 0.08 0.32))
+      (hash-ref found "body")
+      (list (edsl-nudge (car road) (+ sid 9))
+            (edsl-nudge (car (cdr road)) (+ sid 10))
+            (edsl-nudge (car (cdr (cdr road))) (+ sid 11)))
+      curb
+      (list (edsl-nudge (car ground) (+ sid 12))
+            (edsl-nudge (car (cdr ground)) (+ sid 13))
+            (edsl-nudge (car (cdr (cdr ground))) (+ sid 14)))
+      (hash-ref found "surface")
+      (hash-ref found "light")
+      (hash-ref found "mood")
+      (edsl-next-part (hash-ref found "particles") sid)
+      (hash-ref found "pamt")
+      (hash-ref found "props")
+      "mix")))
+
+; Recombine two kept forms, then nudge. A miss falls back to a particle
+; swap on the first form, which stays inside the same contrast gate.
+(define (edsl-evolve pool seed)
+  (let ((n (edsl-len pool)))
+    (if (< n 1)
+      #f
+      (let ((a (edsl-check (edsl-nth pool (modulo seed n))))
+            (b (edsl-check (edsl-nth pool (modulo (+ seed 1) n)))))
+        (if (not (and (hash-ref a "ok" #f) (hash-ref b "ok" #f)))
+          #f
+          (let ((mixed (edsl-emit
+                         (string-append "evo-" (edsl-int (modulo seed 9000)))
+                         (hash-ref a "sky")
+                         (hash-ref a "fog")
+                         (hash-ref a "body")
+                         (hash-ref b "road")
+                         (hash-ref b "curb")
+                         (hash-ref b "ground")
+                         (hash-ref b "surface")
+                         (hash-ref a "light")
+                         (hash-ref b "mood")
+                         (edsl-next-part (hash-ref a "particles") seed)
+                         (hash-ref a "pamt")
+                         (hash-ref b "props")
+                         "mix")))
+            (let ((chk (edsl-check mixed)))
+              (if (hash-ref chk "ok" #f)
+                mixed
+                (let ((soft (edsl-vary a seed)))
+                  (let ((chk2 (edsl-check soft)))
+                    (if (hash-ref chk2 "ok" #f)
+                      soft
+                      #f)))))))))))
+
+(define (edsl-banner label)
+  (string-append "A new world: " label))

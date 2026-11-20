@@ -91,11 +91,114 @@ function knownName(name, list, fallback) {
   return list.includes(name) ? name : fallback;
 }
 
+const PROP_KINDS = new Set(["tree", "tower", "arch", "crystal", "rock", "coral", "ring"]);
+const PROP_CUBES = { tree: 4, tower: 5, arch: 4, crystal: 3, rock: 3, coral: 4, ring: 4 };
+const SPEC_BODIES = new Set(["sun", "moon", "stars", "aurora", "none"]);
+
+function color3(v) {
+  return Array.isArray(v) && v.length >= 3 && v.slice(0, 3).every((n) => typeof n === "number" && n >= 0 && n <= 1);
+}
+
+// A synced Biome EDSL object. Densities and scales are clamped so a bad
+// payload cannot inflate the instance list. The Aura gate is stricter.
+export function acceptSpec(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  if (typeof raw.id !== "string" || !/^[a-z][a-z0-9-]{1,23}$/.test(raw.id)) return null;
+  if (!color3(raw.sky) || !color3(raw.horizon) || !color3(raw.road) || !color3(raw.ground) || !color3(raw.curb)) return null;
+  const recipe = raw.recipe === "mix" || BIOME_NAMES.includes(raw.recipe) ? raw.recipe : "mix";
+  const props = [];
+  const list = Array.isArray(raw.props) ? raw.props.slice(0, 4) : [];
+  for (const row of list) {
+    if (!row || !PROP_KINDS.has(row.kind)) continue;
+    props.push({
+      kind: row.kind,
+      density: Math.max(0.05, Math.min(0.55, Number(row.density) || 0.2)),
+      scale: Math.max(0.55, Math.min(1.45, Number(row.scale) || 1)),
+    });
+  }
+  if (!props.length) props.push({ kind: "rock", density: 0.2, scale: 1 });
+  return {
+    id: raw.id,
+    label: typeof raw.label === "string" && raw.label ? raw.label.slice(0, 32) : raw.id,
+    recipe,
+    sky: raw.sky.slice(0, 3),
+    horizon: raw.horizon.slice(0, 3),
+    fog: color3(raw.fog) ? raw.fog.slice(0, 3) : raw.horizon.slice(0, 3),
+    fogAmt: Math.max(0, Math.min(0.38, Number(raw.fogAmt) || 0.18)),
+    body: SPEC_BODIES.has(raw.body) ? raw.body : "sun",
+    road: raw.road.slice(0, 3),
+    curb: raw.curb.slice(0, 3),
+    ground: raw.ground.slice(0, 3),
+    surface: typeof raw.surface === "string" ? raw.surface : "stone",
+    light: Math.max(0.5, Math.min(1, Number(raw.light) || 0.8)),
+    mood: Math.max(0, Math.min(1, Number(raw.mood) || 0.5)),
+    particles: typeof raw.particles === "string" ? raw.particles : "none",
+    particleAmt: Math.max(0, Math.min(0.55, Number(raw.particleAmt) || 0)),
+    props,
+  };
+}
+
+export function specInstances(spec) {
+  if (!spec) return 0;
+  let n = (Number(spec.particleAmt) || 0) * 22;
+  const props = Array.isArray(spec.props) ? spec.props : [];
+  for (const row of props) n += 28 * (Number(row.density) || 0) * (PROP_CUBES[row.kind] || 4);
+  return n;
+}
+
+function applyMix(pal, spec) {
+  const sky = spec.sky;
+  const horizon = spec.horizon;
+  const ground = spec.ground;
+  pal.sky0 = sky.slice();
+  pal.sky1 = horizon.slice();
+  pal.sky = mix3(sky, horizon, 0.35);
+  pal.fog = spec.fog.slice();
+  pal.fogAmt = spec.fogAmt;
+  pal.hill = mix3(ground, sky, 0.25);
+  pal.hill2 = mix3(ground, [0.08, 0.08, 0.1], 0.35);
+  pal.path = spec.road.slice();
+  pal.grass = ground.slice();
+  pal.grassL = mix3(ground, [1, 1, 1], 0.16);
+  pal.grassR = mix3(ground, [0.06, 0.07, 0.08], 0.18);
+  pal.soil = spec.curb.slice();
+  pal.hedge = mix3(ground, spec.road, 0.35);
+  pal.leaf = mix3(ground, [0.45, 0.75, 0.4], 0.45);
+  pal.leaf2 = mix3(spec.road, [1, 1, 1], 0.25);
+  pal.trunk = mix3(spec.curb, [0.2, 0.14, 0.1], 0.35);
+  pal.flower = mix3(spec.road, [1, 0.9, 0.55], 0.35);
+  pal.flower2 = mix3(sky, [1, 1, 1], 0.35);
+  pal.sun = spec.body === "moon" || spec.body === "stars" ? [0.82, 0.9, 1] : mix3(horizon, [1, 0.9, 0.6], 0.4);
+  pal.lightAmt = spec.light;
+  pal.surface = spec.surface;
+  pal.particles = spec.particles;
+  pal.particleAmt = spec.particleAmt;
+  pal.props = spec.props;
+  pal.custom = 1;
+  if (spec.body === "stars") {
+    pal.stars = 1;
+    pal.nebula = mix3(sky, [0.35, 0.2, 0.6], 0.45);
+    pal.disc = 0.15;
+  } else if (spec.body === "aurora") {
+    pal.stars = 0.45;
+    pal.nebula = [0.35, 0.9, 0.62];
+    pal.disc = 0.35;
+  } else if (spec.body === "moon") {
+    pal.stars = 0.7;
+    pal.nebula = mix3(sky, [0.15, 0.18, 0.32], 0.4);
+    pal.disc = 0.45;
+  } else if (spec.body === "none") {
+    pal.stars = 0;
+    pal.disc = 0;
+  }
+}
+
 // Garden in daylight is the palette above, unchanged. Other venues replace
-// sky, ground, and road colours. Hurdles, gates, coins, and pots stay put
-// so every biome keeps the same readable obstacles.
-export function dressPalette(base, biome, mood) {
-  const name = knownName(biome, BIOME_NAMES, "garden");
+// sky, ground, and road colours. A mix recipe is painted from its EDSL spec.
+// Hurdles, gates, coins, and pots stay put so every biome stays readable.
+export function dressPalette(base, biome, mood, spec) {
+  const custom = !!(spec && spec.recipe === "mix" && spec.id);
+  const name = custom ? spec.id : knownName(biome, BIOME_NAMES, "garden");
   const tone = knownName(mood, MOOD_NAMES, "day");
   const pal = Object.assign({}, base, {
     biome: name,
@@ -104,7 +207,13 @@ export function dressPalette(base, biome, mood) {
     nebula: [0, 0, 0],
     disc: 1,
     sunUv: base.sunUv.slice(),
+    custom: 0,
+    props: null,
+    particles: "none",
+    particleAmt: 0,
+    surface: "grass",
   });
+  if (custom) applyMix(pal, spec);
   if (name === "city") {
     pal.sky0 = [0.42, 0.52, 0.82];
     pal.sky1 = [0.98, 0.58, 0.34];
@@ -1517,8 +1626,8 @@ export function createRenderer(canvas) {
   }
 
   function frame(st) {
-    const pal = dressPalette(palette(st.hue || 0, st.scene), st.biome, st.mood);
-    const gardenLook = pal.biome === "garden";
+    const pal = dressPalette(palette(st.hue || 0, st.scene), st.biome, st.mood, st.spec);
+    const gardenLook = !pal.custom && pal.biome === "garden";
     const px = st.lx || 0;
     const py = st.y || 0;
     const pz = Number.isFinite(st.x) ? st.x : runS;
@@ -1690,6 +1799,81 @@ export function createRenderer(canvas) {
         if (near) push(top[0] + 0.16, 1.22 * scale, top[1], 0.11, 0.11, 0.11, 1, [0.95, 0.34, 0.3], 0.32, 0.16, at.psi);
       }
     }
+    function drawMix(cz, dist) {
+      const props = Array.isArray(pal.props) ? pal.props : [];
+      const sway = reduced ? 0 : Math.sin((st.time || 0) * 1.1 + cz * 0.13) * 0.05;
+      for (let p = 0; p < props.length && n < MAX - 70; p++) {
+        const prop = props[p];
+        const density = Math.max(0.05, Math.min(0.55, Number(prop.density) || 0.2));
+        const scale = Math.max(0.55, Math.min(1.45, Number(prop.scale) || 1));
+        for (const side of [-1, 1]) {
+          if (n >= MAX - 70) return;
+          if (laneHash(cz * 0.17 + side * (3 + p) + prop.kind.length) > density + 0.2) continue;
+          const lat = side * (4.65 + laneHash(cz * 0.29 + side + p) * 0.9);
+          const along = cz + (laneHash(cz * 0.41 + side * 2) - 0.5) * 1.1;
+          const at = onRoad(along, lat);
+          const glow = pal.flower;
+          const body = mix3(pal.trunk, pal.hedge, 0.4);
+          if (prop.kind === "tree") {
+            drawTree(along, lat, 1 + (p % 4), scale, dist < 16, sway);
+          } else if (prop.kind === "tower") {
+            const h = 2.1 * scale;
+            push(at.x, h * 0.42, at.z, 0.55 * scale, h * 0.84, 0.46 * scale, 0, body, 0.45, 0.04, at.psi, 0.15, 0.05, 0);
+            push(at.x, h * 0.55, at.z, 0.18 * scale, 0.28 * scale, 0.5 * scale, 0, glow, 0.2, 0.8, at.psi);
+            push(at.x, h * 0.92, at.z, 0.22 * scale, 0.16 * scale, 0.22 * scale, 0, mix3(body, [1, 1, 1], 0.2), 0.3, 0.2, at.psi);
+          } else if (prop.kind === "arch") {
+            const h = 1.7 * scale;
+            const span = 1.35 * scale;
+            const left = onRoad(along, lat - span * 0.35);
+            const right = onRoad(along, lat + span * 0.35);
+            const mid = onRoad(along, lat);
+            push(left.x, h * 0.45, left.z, 0.16 * scale, h * 0.9, 0.16 * scale, 0, body, 0.4, 0.05, left.psi);
+            push(right.x, h * 0.45, right.z, 0.16 * scale, h * 0.9, 0.16 * scale, 0, body, 0.4, 0.05, right.psi);
+            push(mid.x, h * 0.92, mid.z, span, 0.16 * scale, 0.18 * scale, 0, glow, 0.25, 0.55, mid.psi);
+          } else if (prop.kind === "crystal") {
+            const h = 1.6 * scale;
+            const ice = mix3(pal.sky, [0.8, 0.95, 1], 0.45);
+            push(at.x, h * 0.45, at.z, 0.28 * scale, h, 0.28 * scale, 2, ice, 0.15, 0.55, at.psi);
+            push(at.x, h * 0.2, at.z, 0.5 * scale, 0.35 * scale, 0.5 * scale, 2, mix3(ice, pal.flower2, 0.3), 0.18, 0.35, at.psi);
+          } else if (prop.kind === "rock") {
+            const rock = mix3(pal.soil, [0.15, 0.08, 0.06], 0.25);
+            push(at.x, 0.28 * scale, at.z, 0.85 * scale, 0.48 * scale, 0.7 * scale, 1, rock, 0.75, 0.04, at.psi);
+            push(at.x + sway, 0.52 * scale, at.z, 0.48 * scale, 0.36 * scale, 0.42 * scale, 1, mix3(rock, glow, 0.25), 0.6, 0.12, at.psi);
+          } else if (prop.kind === "coral") {
+            const coral = mix3(pal.flower, [1, 0.45, 0.55], 0.4);
+            push(at.x, 0.35 * scale, at.z, 0.22 * scale, 0.7 * scale, 0.22 * scale, 0, pal.trunk, 0.6, 0.02, at.psi);
+            push(at.x, 0.85 * scale, at.z, 0.55 * scale, 0.55 * scale, 0.55 * scale, 1, coral, 0.35, 0.2, at.psi);
+            push(at.x + 0.2 * scale, 1.15 * scale, at.z, 0.32 * scale, 0.32 * scale, 0.32 * scale, 1, pal.flower2, 0.3, 0.35, at.psi);
+          } else if (prop.kind === "ring") {
+            const y = 1.55 * scale;
+            const ring = mix3(pal.flower2, [1, 1, 1], 0.2);
+            push(at.x, y, at.z, 0.95 * scale, 0.08 * scale, 0.95 * scale, 1, ring, 0.2, 0.65, at.psi);
+            push(at.x, y, at.z, 0.28 * scale, 0.28 * scale, 0.28 * scale, 1, glow, 0.2, 0.8, at.psi);
+          }
+        }
+      }
+      const kind = pal.particles;
+      const amt = Number(pal.particleAmt) || 0;
+      if (!kind || kind === "none" || amt < 0.05 || reduced || n >= MAX - 24) return;
+      if (((cz / 2) | 0) % 2 !== 0) return;
+      const count = Math.min(2, Math.max(1, Math.round(amt * 3)));
+      for (let i = 0; i < count && n < MAX - 16; i++) {
+        const side = i % 2 === 0 ? -1 : 1;
+        const at = onRoad(cz + i * 0.4, side * (3.1 + (i % 3) * 0.4));
+        const bob = Math.sin((st.time || 0) * 1.5 + cz + i) * 0.15;
+        let y = 1.05 + (i % 3) * 0.35 + bob;
+        let rgb = pal.flower;
+        let shape = 1;
+        let sy = 0.06;
+        if (kind === "snow") { y = 1.6 + bob; rgb = [0.95, 0.97, 1]; }
+        else if (kind === "embers") { y = 0.45 + (i % 3) * 0.4; rgb = [1, 0.42, 0.12]; }
+        else if (kind === "rain") { y = 1.7; rgb = [0.7, 0.84, 0.98]; shape = 0; sy = 0.28; }
+        else if (kind === "stardust") { y = 1.9 + bob; rgb = [0.85, 0.92, 1]; }
+        else if (kind === "sparkles") { rgb = i % 2 ? [1, 0.7, 0.9] : [1, 0.95, 0.55]; }
+        else { rgb = [0.85, 1, 0.5]; }
+        push(at.x, y, at.z, 0.07, sy, 0.07, shape, rgb, 0.2, 0.82, at.psi);
+      }
+    }
     for (let z = Math.floor(z0 / 2) * 2; z < z1; z += 2) {
       const cz = z + 1;
       const s0 = cz - 1;
@@ -1708,8 +1892,8 @@ export function createRenderer(canvas) {
             const vary = (laneHash(mid * 0.23 + lane * 17.2) - 0.5) * 0.09;
             const top = vary >= 0 ? mix3(baseTop, [1, 1, 1], vary) : mix3(baseTop, [0.16, 0.18, 0.1], -vary);
             const len = end - cursor;
-            const grass = lane !== 1 && dist > -2 && dist < 4 ? 4 : 0;
-            push(tile.x, 0.02, tile.z, 1.74, 0.12, len + 0.02, 0, top, lane === 1 ? 0.55 : 0.8, 0, tile.psi, 0, 0, grass);
+            const grass = lane !== 1 && dist > -2 && dist < 4 ? (pal.custom && (pal.surface === "stone" || pal.surface === "plank" || pal.surface === "lava") ? 3 : pal.custom && (pal.surface === "ice" || pal.surface === "cloud") ? 5 : 4) : 0;
+            push(tile.x, 0.02, tile.z, 1.74, 0.12, len + 0.02, 0, top, lane === 1 ? 0.55 : 0.8, pal.custom && lane === 1 ? 0.08 : 0, tile.psi, 0, 0, grass);
           }
           if (i < spans.length) cursor = spans[i][1];
         }
@@ -1732,7 +1916,9 @@ export function createRenderer(canvas) {
           }
         }
       }
-      if (gardenLook) {
+      if (pal.custom) {
+        if (dist < 36 && n < MAX - 80) drawMix(cz, dist);
+      } else if (gardenLook) {
       if (dist < 36 && ((z / 2) | 0) % 2 === 0) {
         const hv = laneHash(z * 0.19 + 4.2);
         const hedgeH = 0.30 + hv * 0.22;
@@ -1844,7 +2030,7 @@ export function createRenderer(canvas) {
         }
       }
     }
-    if (!(pal.biome === "garden" && pal.mood === "day") && n < MAX - 12) {
+    if (!pal.custom && !(pal.biome === "garden" && pal.mood === "day") && n < MAX - 12) {
       const motes = reduced ? 3 : 6;
       const moteRgb = pal.biome === "space" ? [0.7, 0.9, 1]
         : pal.biome === "city" ? [1, 0.72, 0.38]
