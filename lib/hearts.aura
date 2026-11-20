@@ -1,0 +1,118 @@
+(require "std/string" all:)
+
+; Three hearts sit outside the player list. A shield takes the hit
+; first. An unshielded hit costs one heart and opens a short window
+; so one cluster cannot take another. Coins are not this module's
+; job: a hit never clears them. Zero hearts ends the run.
+;
+; The physics golden still uses its own grace and the 15-point bump.
+; This state is only the hearts.
+
+(define HEARTS-MAX 3)
+(define HEART-IFRAME 1.2)
+; The combo cap. Reaching it once can give a heart back.
+(define COMBO-HEART 5)
+
+(define (hearts-blank)
+  (hash "hearts" HEARTS-MAX
+        "max" HEARTS-MAX
+        "iframe" 0.0
+        "over" #f
+        "lost" 0))
+
+(define (hearts-get h k d)
+  (if (hash? h) (hash-ref h k d) d))
+
+(define (hearts-over? state)
+  (equal? (hearts-get state "over" #f) #t))
+
+(define (hearts-copy state hearts iframe over lost)
+  (hash "hearts" hearts
+        "max" HEARTS-MAX
+        "iframe" iframe
+        "over" over
+        "lost" lost
+        "shield" #f
+        "heart" #f
+        "coins" #t
+        "combo-reset" #f
+        "clean-fail" #f
+        "recovered" #f))
+
+; shield? spends the ward and keeps the heart. A live iframe also
+; keeps it. Otherwise one heart, the window opens, the combo should
+; drop, and a zero-bump try is missed. coins stays true.
+(define (hearts-hit state shield?)
+  (let ((hearts (hearts-get state "hearts" HEARTS-MAX))
+        (iframe (hearts-get state "iframe" 0.0))
+        (lost (hearts-get state "lost" 0))
+        (over (hearts-over? state)))
+    (if over
+      (hearts-copy state hearts iframe #t lost)
+      (if shield?
+        (hash "hearts" hearts
+              "max" HEARTS-MAX
+              "iframe" iframe
+              "over" #f
+              "lost" lost
+              "shield" #t
+              "heart" #f
+              "coins" #t
+              "combo-reset" #f
+              "clean-fail" #f
+              "recovered" #f)
+        (if (> iframe 0.0)
+          (hash "hearts" hearts
+                "max" HEARTS-MAX
+                "iframe" iframe
+                "over" #f
+                "lost" lost
+                "shield" #f
+                "heart" #f
+                "coins" #t
+                "combo-reset" #f
+                "clean-fail" #f
+                "recovered" #f)
+          (let ((next (max 0 (- hearts 1))))
+            (hash "hearts" next
+                  "max" HEARTS-MAX
+                  "iframe" HEART-IFRAME
+                  "over" (<= next 0)
+                  "lost" (+ lost 1)
+                  "shield" #f
+                  "heart" #t
+                  "coins" #t
+                  "combo-reset" #t
+                  "clean-fail" #t
+                  "recovered" #f)))))))
+
+(define (hearts-tick state dt)
+  (let ((iframe (hearts-get state "iframe" 0.0))
+        (t (if (and (number? dt) (> dt 0.0)) dt 0.0)))
+    (hash "hearts" (hearts-get state "hearts" HEARTS-MAX)
+          "max" HEARTS-MAX
+          "iframe" (max 0.0 (- iframe t))
+          "over" (hearts-over? state)
+          "lost" (hearts-get state "lost" 0))))
+
+; A clean level or the high combo can give one heart back.
+; A settled run stays at zero.
+(define (hearts-recover state reason)
+  (let ((hearts (hearts-get state "hearts" HEARTS-MAX))
+        (ok (or (and (string? reason) (string=? reason "clean"))
+                (and (string? reason) (string=? reason "combo")))))
+    (if (or (hearts-over? state) (<= hearts 0) (>= hearts HEARTS-MAX) (not ok))
+      (hash "hearts" hearts
+            "max" HEARTS-MAX
+            "iframe" (hearts-get state "iframe" 0.0)
+            "over" (hearts-over? state)
+            "lost" (hearts-get state "lost" 0)
+            "recovered" #f
+            "reason" (if (string? reason) reason ""))
+      (hash "hearts" (+ hearts 1)
+            "max" HEARTS-MAX
+            "iframe" (hearts-get state "iframe" 0.0)
+            "over" #f
+            "lost" (hearts-get state "lost" 0)
+            "recovered" #t
+            "reason" reason))))

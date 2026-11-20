@@ -3,6 +3,8 @@
 import { readFileSync } from "node:fs";
 import { DT, bodyLane, makePlayer, mm, praiseClear, pressJump, pressLane, pressSlide, rulesOf, step } from "../web/sim.mjs";
 import { NEAR_POINTS, NICE_POINTS, OVERTAKE_POINTS, challengeFor, challengeMet, nearMiss, overtake, skimmed, trackOvertake } from "../web/score.mjs";
+import { COMBO_HEART, HEART_IFRAME, HEARTS_MAX, heartsBlank, heartsHit, heartsRecover, heartsTick } from "../web/hearts.mjs";
+import { gateLine, raceGate, raceRead } from "../web/race.mjs";
 
 const rules = rulesOf(32, 11.2, 5, 0.48, 0.12, 0.12);
 const lines = [];
@@ -416,6 +418,68 @@ if (popperFor(5, 0, 40) || !popperFor(5, 0, 40, 4) || popperFor(4, 0, 40, 0) || 
 }
 if (!early || !plainPop || !late || !(early.x < plainPop.x) || !(late.x > plainPop.x) || early.x < 6 || late.lane < 0 || late.lane > 2) {
   console.error(`popper pressure ${JSON.stringify({ early, plainPop, late })}`);
+  process.exit(1);
+}
+let life = heartsBlank();
+if (life.hearts !== HEARTS_MAX || life.over || HEARTS_MAX !== 3 || COMBO_HEART !== 5) {
+  console.error("a run starts with 3 hearts");
+  process.exit(1);
+}
+const shielded = heartsHit(life, true);
+if (shielded.hearts !== 3 || shielded.heart || !shielded.coins || shielded.comboReset) {
+  console.error("a shield absorbs the hit and keeps the heart and the combo");
+  process.exit(1);
+}
+life = heartsHit(life, false);
+if (life.hearts !== 2 || !life.heart || !life.coins || !life.comboReset || !life.cleanFail || Math.abs(life.iframe - HEART_IFRAME) > 1e-9 || Math.abs(HEART_IFRAME - 1.2) > 1e-9) {
+  console.error("an unshielded bump costs one heart and opens the window");
+  process.exit(1);
+}
+const clustered = heartsHit(life, false);
+if (clustered.hearts !== 2 || clustered.heart) {
+  console.error("the invulnerability window blocks a second heart");
+  process.exit(1);
+}
+life = heartsHit(heartsTick(life, 1.2), false);
+if (life.hearts !== 1) {
+  console.error("a hit after the window costs the next heart");
+  process.exit(1);
+}
+const healed = heartsRecover(life, "combo");
+if (!healed.recovered || healed.hearts !== 2) {
+  console.error("a high combo gives one heart back");
+  process.exit(1);
+}
+const clean = heartsRecover(healed, "clean");
+if (!clean.recovered || clean.hearts !== 3) {
+  console.error("a clean level gives one heart back");
+  process.exit(1);
+}
+if (heartsRecover(clean, "clean").hearts !== 3) {
+  console.error("hearts stop at 3");
+  process.exit(1);
+}
+let gone = heartsBlank();
+gone = heartsHit(gone, false);
+gone = heartsHit(heartsTick(gone, HEART_IFRAME), false);
+gone = heartsHit(heartsTick(gone, HEART_IFRAME), false);
+const again = heartsBlank();
+if (!gone.over || gone.hearts !== 0 || !gone.coins || again.hearts !== 3 || again.over || again.iframe !== 0) {
+  console.error("zero hearts settles, and a fresh run clears it");
+  process.exit(1);
+}
+const lead = raceRead(20, 15);
+const trail = raceRead(10, 13);
+if (lead.place !== 1 || lead.label !== "+5m" || trail.place !== 2 || trail.label !== "-3m") {
+  console.error(`standing ${lead.label} ${trail.label}`);
+  process.exit(1);
+}
+if (raceGate(128, 100, 128) !== "player" || raceGate(128, 140, 128) !== "rival" || raceGate(40, 20, 128) !== "") {
+  console.error("gate winner");
+  process.exit(1);
+}
+if (gateLine("Level clear", "player", "keen") !== "Level clear · You led · Rival trains harder") {
+  console.error("level banner");
   process.exit(1);
 }
 console.log(`sim matches aura golden (${got.length} lines)`);
