@@ -83,12 +83,51 @@ export function shakeOffset(amp, time) {
   ];
 }
 
-// Radial blur weight. Quiet under 10 m/s so the opening is sharp.
+// Radial blur weight. Quiet through 9 m/s so the opening stays sharp.
+// The curve is already a quarter of the budget at 12 m/s and full at 18,
+// which is the range that should read as speed. The hero is masked in
+// the high finish pass, so a stronger weight does not smear the runner.
 export function blurAmount(speed, budget) {
   const b = budget > 0 ? budget : 0;
   if (!(b > 0)) return 0;
-  const t = Math.min(1, Math.max(0, ((Number(speed) || 0) - 10) / 8));
-  return b * t;
+  const s = Number(speed) || 0;
+  if (s <= 9) return 0;
+  const t = Math.min(1, (s - 9) / 9);
+  const shaped = t * t * (3 - 2 * t);
+  return b * shaped;
+}
+
+// Whoosh amplitude. age 0 is the pass, age 1 has settled.
+// The renderer points it away from the obstacle.
+export function whooshNudge(amp, age) {
+  const a = amp > 0 ? amp : 0;
+  if (!(a > 0)) return 0;
+  const u = Math.max(0, Math.min(1, Number(age) || 0));
+  return a * (1 - u) * (1 - u);
+}
+
+// Squash, widen, and lane lean. Medium and low keep the picture they
+// already had. High stretches the jump and leans harder into a lane change.
+export function heroShape(air, land, lean, tier) {
+  const high = tier === "high";
+  const landed = Number(land) || 0;
+  const side = Number(lean) || 0;
+  return {
+    squash: air ? (high ? 1.28 : 1.14) : 1 - landed * (high ? 0.28 : 0.16),
+    widen: air ? (high ? 0.82 : 0.9) : 1 + landed * (high ? 0.22 : 0.12),
+    lean: -side * (high ? 0.62 : 0.35),
+  };
+}
+
+// 1 on an icy road, 0.85 on a city road, 0 everywhere else.
+// High multiplies this by the reflect budget. Medium stays at 0.
+export function glossFor(pal) {
+  const src = pal || {};
+  const biome = typeof src.biome === "string" ? src.biome : "";
+  const surface = typeof src.surface === "string" ? src.surface : "";
+  if (biome === "aurora-ice" || surface === "ice" || src.particles === "snow" || src.body === "aurora") return 1;
+  if (biome === "city") return 0.85;
+  return 0;
 }
 
 // Screen position of the sky disc. Matches the yaw shift in the sky shader.
