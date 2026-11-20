@@ -443,6 +443,7 @@ function chunkThing(raw) {
 }
 
 function addChunk(msg) {
+  if (typeof msg.x1 === "number" && msg.x1 > roadEnd) roadEnd = msg.x1;
   if (seenChunks.has(msg.id)) return;
   seenChunks.add(msg.id);
   const born = msg.origin === "motif" ? performance.now() : 0;
@@ -481,12 +482,16 @@ function prune() {
 // Last server run clock, in ms. A stall leaves it where it was. reset-run!
 // and a fresh process put it back near zero.
 let serverRun = -1;
+// Far end of the road the server has actually sent. The picture must not
+// run past it: a stalled tick used to leave the runner in empty air.
+let roadEnd = 0;
 
 function resetLocal() {
   const p = makePlayer(1.2);
   player.set(p);
   pieces = [];
   seenChunks = new Set();
+  roadEnd = 0;
   thingChunks = [];
   alive = true;
   acc = 0;
@@ -1003,6 +1008,7 @@ function connect() {
       // chunks it still has instead of inventing an empty road.
       pieces = [];
       seenChunks = new Set();
+      roadEnd = 0;
       ws.send(JSON.stringify({ op: "resync" }));
     } else {
       const seedParam = params.get("seed");
@@ -1053,6 +1059,7 @@ function connect() {
       freshRun = false;
       pieces = [];
       seenChunks = new Set();
+      roadEnd = 0;
       booted = true;
     } else if (msg.op === "rules") {
       applyRules(msg);
@@ -1106,8 +1113,9 @@ function connect() {
   };
 }
 
-function sendTick() {
+function sendTick(dtMs) {
   if (!connected || ws.readyState !== 1) return;
+  const dt = Math.max(0, Math.min(200, Math.round(Number(dtMs) || 0)));
   ws.send(JSON.stringify({
     op: "tick",
     jump: jumpQ,
@@ -1119,6 +1127,8 @@ function sendTick() {
     overtakes: levelOvertakes | 0,
     level: levelN | 0,
     hearts: runOver ? 0 : (hearts.hearts | 0),
+    dt,
+    x: Number.isFinite(player[0]) ? Math.round(player[0] * 10) / 10 : 0,
   }));
   jumpQ = 0;
   slideQ = 0;
@@ -1132,7 +1142,7 @@ function sendTick() {
 function pumpNet(now) {
   const dt = Math.min(0.1, Math.max(0.016, (now - lastPump) / 1000));
   lastPump = now;
-  sendTick();
+  sendTick(dt * 1000);
   lerpScene(dt);
   publishProbe();
 }
@@ -1365,7 +1375,9 @@ let stepping = false;
 
 function frame(now) {
   if (!stepping) requestAnimationFrame(frame);
-  const dt = Math.min(0.05, (now - lastNow) / 1000);
+  // A backwards stamp (a stepped probe, a hidden tab) must not dig a
+  // hole in the accumulator. That hole used to freeze the runner.
+  const dt = Math.min(0.05, Math.max(0, (now - lastNow) / 1000));
   lastNow = now;
   frames[frameN % frames.length] = dt * 1000;
   frameN++;
@@ -1384,9 +1396,12 @@ function frame(now) {
     if (inp.jump) { pressJump(player); jumpQ = 1; audio.jump(); }
     if (inp.slide) { pressSlide(player); slideQ = 1; audio.slide(); }
     if (inp.lane) { pressLane(player, inp.lane); laneQ = inp.lane; }
-    acc += dt;
+    acc = Math.min(0.25, Math.max(0, acc + dt));
     let guard = 0;
-    while (acc >= DT && guard < 4) {
+    // Stay on the road that has been sent. Stepping past it draws an
+    // empty track, and once past the end the picture would not come back.
+    const roadStop = roadEnd > 24 ? roadEnd - 10 : Infinity;
+    while (acc >= DT && guard < 4 && player[0] < roadStop) {
       const before = player[2];
       const wasY = player[1];
       const scoreBefore = player[6];
@@ -1492,8 +1507,9 @@ function frame(now) {
   }
   sendAcc += dt;
   if (sendAcc >= 0.05) {
-    sendTick();
+    const sent = sendAcc;
     sendAcc = 0;
+    sendTick(sent * 1000);
     lastPump = now;
   }
   stumble = Math.max(0, stumble - dt * 1000);

@@ -1,7 +1,9 @@
 // The spoken sun, moon and plane are a fixed picture. The shader disc
 // stays soft until a wish turns it up, and a spoken removal turns it off.
+// The soft music voice is chosen once and does not hop pitch.
 import { visibleSky } from "../web/render.mjs";
 import { showBox } from "../web/thing.mjs";
+import { SESSION_VOICE, voiceForBeat } from "../web/audio.mjs";
 
 let failed = 0;
 function check(name, ok) {
@@ -39,5 +41,15 @@ check("box-slide", slide.lat === 3.6 && slide.ahead === 8.5 && slide.w === 1.4);
 
 const decor = showBox({ role: "decor", size: 1.2 }, 2);
 check("box-decor", decor.lat === -3.6 && decor.ahead === 11.5 && Math.abs(decor.h - 1.62) < 1e-9);
+
+const beats = [0, 1, 2, 7, 40, 200, 1000];
+const voices = beats.map((n) => voiceForBeat(n));
+check("voice-once", voices.every((v) =>
+  v.name === SESSION_VOICE.name
+  && v.type === SESSION_VOICE.type
+  && v.freq === SESSION_VOICE.freq
+  && v.pitch === SESSION_VOICE.pitch
+  && v.freq === 196
+  && v.pitch === 1));
 
 if (failed) process.exit(1);
