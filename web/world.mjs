@@ -5,6 +5,8 @@ export const WORLD_KEY = "lumen-world";
 
 const LOOTS = new Set(["coin", "blossom", "apple", "star", "gem"]);
 const FLOWERS = new Set(["daisy", "tulip", "blossom", "buttercup"]);
+const BIOMES = new Set(["garden", "city", "space", "coast"]);
+const MOODS = new Set(["day", "night", "sunset", "neon"]);
 
 export function blankWorld() {
   return { nodes: [], tip: "", n: 0 };
@@ -69,6 +71,14 @@ function channels(v) {
   return Array.isArray(v) && v.length === 3 && v.every((n) => numIn(n, 0, 1));
 }
 
+function venueOk(v, names) {
+  return v == null || v === "" || (typeof v === "string" && names.has(v));
+}
+
+function venueOf(v, names, fallback) {
+  return typeof v === "string" && names.has(v) ? v : fallback;
+}
+
 export function snapOk(snap) {
   if (!snap || typeof snap !== "object" || Array.isArray(snap)) return false;
   if (truthy(snap.audio) || truthy(snap.key) || truthy(snap.token) || truthy(snap.api) || truthy(snap.secret)) {
@@ -104,6 +114,8 @@ export function snapOk(snap) {
     && numIn(snap.density, 0.15, 1)
     && numIn(snap.light, 0.5, 1)
     && numIn(snap.fog, 0, 0.38)
+    && venueOk(snap.biome, BIOMES)
+    && venueOk(snap.mood, MOODS)
     && numIn(snap.bend, 0, 0.65)
     && typeof chase === "number"
     && chase >= 1.6
@@ -148,6 +160,8 @@ export function cleanSnap(snap) {
     density: snap.density,
     light: snap.light,
     fog: snap.fog,
+    biome: venueOf(snap.biome, BIOMES, "garden"),
+    mood: venueOf(snap.mood, MOODS, "day"),
   };
 }
 

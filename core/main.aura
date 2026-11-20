@@ -14,6 +14,7 @@
 (require "lib/cards")
 (require "lib/wish")
 (require "lib/voice")
+(require "lib/biome")
 (require "lib/thing")
 (require "lib/chase")
 (require "lib/world")
@@ -313,7 +314,9 @@
         "flower" flower-now
         "density" density-now
         "light" light-now
-        "fog" fog-now))
+        "fog" fog-now
+        "biome" biome-now
+        "mood" mood-now))
 
 (define (note! kind why arm . rest)
   (let ((cue (if (and (pair? rest) (string? (car rest))) (car rest) ""))
@@ -518,6 +521,19 @@
 (define level-near 0)
 (define level-overtakes 0)
 (define level-streak 0)
+; The multiplier climbs at a gate and when the three-coin challenge lands.
+; A gate does not put it back to one. Restart does. The pickup combo on
+; the page is separate and is not cleared here.
+(define run-mult 1)
+(define chal-coins 0)
+(define chal-done #f)
+(define biome-now "garden")
+(define mood-now "day")
+(define biome-pin #f)
+(define banner-id 0)
+(define banner-kind "")
+(define banner-text "")
+(define banner-gain 0)
 ; A spoken finish stays until this level ends. Sky props are names the
 ; view draws. sun-hide turns off the soft disc when the child sends the sun home.
 (define goal-lock #f)
@@ -544,6 +560,13 @@
     (set! level-x1 (+ level-x0 (adapt-span speed-now (player-score player) level-n)))))
 
 ; A known-fair garden, painted at once. The rebind waits while a chat is up.
+(define (raise-banner! kind text gain)
+  (set! banner-id (+ banner-id 1))
+  (set! banner-kind kind)
+  (set! banner-text text)
+  (set! banner-gain (if (and (number? gain) (> gain 0)) (floor gain) 0))
+  (set! rules-dirty #t))
+
 (define (paint-env! i say)
   (let ((row (wish-at i)))
     (if (not row)
@@ -573,46 +596,75 @@
                    " · close " (int-str near)
                    " · pass " (int-str overs))))
 
-(define (finish-level!)
+; bonus is a challenge step that landed on this same tick. The gate
+; still adds its own step. The page's pickup combo is not this counter.
+(define (finish-level! bonus)
   (let* ((played form)
          (bumps level-bumps)
          (combo level-combo)
          (near level-near)
          (overs level-overtakes)
-         (plan (adapt-finish played bumps (player-score player) level-n (skill-now)))
-         (act (hash-ref plan "act" "scene"))
-         (scene-i (hash-ref plan "scene" -1)))
-    (set! pressure-now (hash-ref plan "pressure" pressure-now))
-    (set! level-streak (hash-ref plan "streak" 0))
+         (cross (gate-cross level-n played bumps (player-score player) run-mult combo (skill-now)))
+         (act (hash-ref cross "act" "scene"))
+         (scene-i (hash-ref cross "scene" -1))
+         (gain (+ (hash-ref cross "gain" 0)
+                  (if (and (number? bonus) (> bonus 0)) bonus 0))))
+    (set! pressure-now (hash-ref cross "pressure" pressure-now))
+    (set! level-streak (hash-ref cross "streak" 0))
     (set! chase-recent (chase-remember chase-recent bumps))
-    (set! form (hash-ref plan "form" played))
-    (set! level-n (+ level-n 1))
+    (set! form (hash-ref cross "form" played))
+    (set! level-n (hash-ref cross "level" (+ level-n 1)))
     (set! level-bumps 0)
     (set! level-combo 0)
     (set! level-near 0)
     (set! level-overtakes 0)
     (set! goal-lock #f)
+    (set! biome-pin #f)
+    (set! biome-now (hash-ref cross "biome" (biome-for-level level-n)))
+    (set! chal-coins 0)
+    (set! chal-done #f)
+    (set! run-mult (hash-ref cross "mult" run-mult))
     (advance-pace!)
     (begin-level!)
+    (raise-banner! "evo"
+                   (evo-line level-n biome-now run-mult gain
+                             (hash-ref cross "what" "rival") wish-locale)
+                   gain)
     (let ((say (adapt-line act wish-locale)))
       (if (and (number? scene-i) (>= scene-i 0))
         (if (paint-env! scene-i say)
           #f
-          (note! "KEEP" act "run" say))
+          (note! "KEEP" act "run" say "level"))
         (if (or (string=? act "harder") (string=? act "dense"))
-          (note! "KEEP" act "run" say)
+          (note! "KEEP" act "run" say "level")
           #f)))
-    (note! "KEEP" "level" "run" (level-clear-line combo near overs))
+    (note! "KEEP" "level" "run" (level-clear-line combo near overs) "level")
     (queue-chase! played bumps (chase-sum chase-recent) speed-now)
     (roster-evolve! "Level clear")))
+
+; Three coins in one level step the multiplier once. A gate does not
+; clear a combo, and this counter starts over for the next level only.
+(define (bank-coin!)
+  (if chal-done
+    0
+    (let ((saw (chal-see chal-coins #f run-mult)))
+      (set! chal-coins (hash-ref saw "coins" 0))
+      (set! chal-done (equal? (hash-ref saw "done" #f) #t))
+      (set! run-mult (hash-ref saw "mult" run-mult))
+      (hash-ref saw "gain" 0))))
 
 (define (watch-level! ev)
   (if (string=? ev "bump")
     (set! level-bumps (+ level-bumps 1))
     #f)
-  (if (>= (player-x player) level-x1)
-    (finish-level!)
-    #f))
+  (let ((bonus (if (string=? ev "coin") (bank-coin!) 0)))
+    (if (>= (player-x player) level-x1)
+      (finish-level! bonus)
+      (if (> bonus 0)
+        (begin
+          (raise-banner! "chal" (chal-line run-mult wish-locale) bonus)
+          (note! "KEEP" "coins" "run" (chal-line run-mult wish-locale) "coins"))
+        #f))))
 
 (define (flush-owed!)
   (let loop ((xs (reverse owed)))
@@ -878,6 +930,16 @@
   (set! level-streak 0)
   (set! pressure-now 1)
   (set! skill-seen 0.0)
+  (set! run-mult 1)
+  (set! chal-coins 0)
+  (set! chal-done #f)
+  (set! biome-now "garden")
+  (set! mood-now "day")
+  (set! biome-pin #f)
+  (set! banner-id 0)
+  (set! banner-kind "")
+  (set! banner-text "")
+  (set! banner-gain 0)
   (set! rival-for 0)
   (set! chase (chase-blank))
   (set! chase-recent (list))
@@ -964,7 +1026,10 @@
         "pals" pals-rows "hero" (hero-public) "provider" llm-provider
         "model" (active-model) "providers" (ready-providers)
         "props" props "sun-hide" sun-hide "shown" shown
-        "level" level-n "goal" level-x1 "level0" level-x0))
+        "level" level-n "goal" level-x1 "level0" level-x0
+        "mult" run-mult "biome" biome-now "mood" mood-now
+        "banner-id" banner-id "banner-kind" banner-kind
+        "banner" banner-text "banner-gain" banner-gain))
 
 (define (welcome-msg)
   (hash "op" "welcome" "seed" seed
@@ -989,7 +1054,10 @@
         "world" (hash-ref world-tree "tip" "")
         "thing" (if (hash? thing-live) (hash-ref thing-live "public" #f) #f)
         "deck" deck-ids
-        "props" props "sun-hide" sun-hide "shown" shown))
+        "props" props "sun-hide" sun-hide "shown" shown
+        "mult" run-mult "biome" biome-now "mood" mood-now
+        "banner-id" banner-id "banner-kind" banner-kind
+        "banner" banner-text "banner-gain" banner-gain))
 
 ; The event is part of the hash when it is built. A later hash-set! on
 ; this value is the site cybrid-systems/aura #5274 exits from.
@@ -1049,7 +1117,10 @@
         "pals-busy" (if pals-busy #t #f)
         "watchdogs" llm-watchdogs
         "stall" (if stall-waiting #t #f)
-        "props" props "sun-hide" sun-hide "shown" shown))
+        "props" props "sun-hide" sun-hide "shown" shown
+        "mult" run-mult "biome" biome-now "mood" mood-now
+        "banner-id" banner-id "banner-kind" banner-kind
+        "banner" banner-text "banner-gain" banner-gain))
 
 (define (chunk-msg c)
   (hash "op" "chunk"
@@ -3059,6 +3130,30 @@
                   (voice-line act name "missing" wish-locale))
            (consider-pals! (hero-src kind)
                            (voice-line act name "fair" wish-locale)))))
+      ((or (string=? act "biome") (string=? act "biome-next") (string=? act "mood"))
+       (let* ((mood? (string=? act "mood"))
+              (next (cond
+                      (mood? (mood-known name))
+                      ((string=? act "biome-next") (biome-next biome-now))
+                      (else (biome-known name))))
+              (cur (if mood? mood-now biome-now))
+              (same (string=? next cur)))
+         (if same
+           (begin
+             (raise-banner! (if mood? "mood" "venue")
+                            (venue-line next run-mult wish-locale) 0)
+             (note! "KEEP" "same" "voice"
+                    (voice-line act next "same" wish-locale) next))
+           (begin
+             (if mood?
+               (set! mood-now next)
+               (begin
+                 (set! biome-now next)
+                 (set! biome-pin #t)))
+             (raise-banner! (if mood? "mood" "venue")
+                            (venue-line next run-mult wish-locale) 0)
+             (note! "KEEP" "fair" "voice"
+                    (voice-line act next "fair" wish-locale) next)))))
       ((string=? act "drop-thing")
        (let ((got (shown-drop shown name)))
          (if (not (hash-ref got "ok" #f))
@@ -3251,6 +3346,17 @@
             (set! pace fm)
             (set! band fm)
             (set! player (pset player 6 pts))
+            (set! run-mult (mult-clamp (if (number? (hash-ref row "mult" #f))
+                                         (hash-ref row "mult")
+                                         lv)))
+            (let ((b (hash-ref row "biome" #f)))
+              (if (biome-name? b)
+                (begin (set! biome-now b) (set! biome-pin #t))
+                (set! biome-now (biome-for-level lv))))
+            (let ((m (hash-ref row "mood" #f)))
+              (if (mood-name? m) (set! mood-now m) #f))
+            (set! chal-coins 0)
+            (set! chal-done #f)
             (let ((f (feel-for band)))
               (set! g-now (gravity-now f))
               (set! jump-now (feel-jump f))
@@ -3282,6 +3388,10 @@
         "bend" bend-now "loot" loot-now
         "deck" deck-ids "g-lock" g-lock "g-held" g-held "speed-lock" speed-lock
         "seed" seed "level" level-n "form" form "pace" pace "band" band
+        "mult" run-mult "biome" biome-now "mood" mood-now "pin" biome-pin
+        "chal-coins" chal-coins "chal-done" chal-done
+        "banner-id" banner-id "banner-kind" banner-kind
+        "banner-text" banner-text "banner-gain" banner-gain
         "chase" chase "recent" chase-recent
         "card-phase" card-phase "hold-phase" hold-phase
         "primer-phase" primer-phase
@@ -3326,6 +3436,16 @@
   (set! speed-lock (hash-ref saved "speed-lock"))
   (set! seed (hash-ref saved "seed"))
   (set! level-n (hash-ref saved "level"))
+  (set! run-mult (mult-clamp (hash-ref saved "mult" 1)))
+  (set! biome-now (biome-known (hash-ref saved "biome" "garden")))
+  (set! mood-now (mood-known (hash-ref saved "mood" "day")))
+  (set! biome-pin (equal? (hash-ref saved "pin" #f) #t))
+  (set! chal-coins (if (number? (hash-ref saved "chal-coins" 0)) (floor (hash-ref saved "chal-coins" 0)) 0))
+  (set! chal-done (equal? (hash-ref saved "chal-done" #f) #t))
+  (set! banner-id (if (number? (hash-ref saved "banner-id" 0)) (floor (hash-ref saved "banner-id" 0)) 0))
+  (set! banner-kind (if (string? (hash-ref saved "banner-kind" "")) (hash-ref saved "banner-kind" "") ""))
+  (set! banner-text (if (string? (hash-ref saved "banner-text" "")) (hash-ref saved "banner-text" "") ""))
+  (set! banner-gain (if (number? (hash-ref saved "banner-gain" 0)) (floor (hash-ref saved "banner-gain" 0)) 0))
   (set! form (hash-ref saved "form"))
   (set! pace (hash-ref saved "pace"))
   (set! band (hash-ref saved "band"))
@@ -3460,6 +3580,9 @@
                         "knob" 0
                         "prev" #f))
       (set! chase-recent (list))
+      (set! biome-now (biome-known (hash-ref snap "biome" "garden")))
+      (set! mood-now (mood-known (hash-ref snap "mood" "day")))
+      (set! biome-pin #f)
       (and (scene-install! (hash-ref snap "scene" ""))
            (pals-install! (hash-ref snap "pals" ""))
            (motif-install! (hash-ref snap "motif" ""))))))
@@ -3478,6 +3601,13 @@
     (set! rival-for 0)
     (set! run-ms 0.0)
     (set! level-bumps 0)
+    (set! run-mult 1)
+    (set! chal-coins 0)
+    (set! chal-done #f)
+    (set! banner-id 0)
+    (set! banner-kind "")
+    (set! banner-text "")
+    (set! banner-gain 0)
     (set! acc 0.0)
     (set! last-ms 0)
     (set! feel-cue "")
@@ -3526,6 +3656,16 @@
               (send-all-chunks c)
               (send c (state-msg "ok")))))))))
 
+(define (take-hello-venue! msg)
+  (let ((b (hash-ref msg "venue" #f))
+        (m (hash-ref msg "mood" #f)))
+    (if (biome-name? b)
+      (begin (set! biome-now b) (set! biome-pin #t))
+      #f)
+    (if (mood-name? m)
+      (set! mood-now m)
+      #f)))
+
 (define (on-hello c msg)
   (let ((parsed (parse-seed (hash-ref msg "seed" #f))))
     (world-trunk!)
@@ -3534,6 +3674,7 @@
     (set! speed-now 8.0)
     (reset-run!)
     (resume-run! msg)
+    (take-hello-venue! msg)
     (send c (welcome-msg))
     (send-all-chunks c)
     (send c (state-msg "ok"))
@@ -3544,6 +3685,7 @@
     (world-trunk!)
     (if parsed (set! seed parsed) #f)
     (reset-run!)
+    (take-hello-venue! msg)
     (send c (welcome-msg))
     (send-all-chunks c)
     (send c (state-msg "ok"))

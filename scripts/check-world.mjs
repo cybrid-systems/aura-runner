@@ -91,6 +91,11 @@ const edited = snap("", ["light", "double"], 24, 1);
 const drift = snap("", ["light", "double"], 22, 0);
 if (snapOk(weak) || snapOk(sword) || snapOk(drift)) fail("bounds");
 if (!snapOk(edited)) fail("primer-g");
+if (snapOk({ ...phrase, biome: "mars" }) || snapOk({ ...phrase, mood: "dark" })) fail("venue");
+if (!snapOk({ ...phrase, biome: "space", mood: "neon" })) fail("venue-ok");
+const cleaned = cleanSnap(phrase);
+if (!cleaned || cleaned.biome !== "garden" || cleaned.mood !== "day") fail("venue-default");
+if (cleanSnap({ ...phrase, biome: "city", mood: "sunset" }).biome !== "city") fail("venue-keep");
 
 const adopted = adoptDecision(blankWorld(), {
   op: "decision", kind: "KEEP", why: "fair", arm: "motif", cue: "A new shape bloomed",

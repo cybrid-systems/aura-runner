@@ -3,6 +3,7 @@
 ; the current tip. Secrets are refused, not stored.
 (require "std/string" all:)
 (require "lib/cards")
+(require "lib/biome")
 
 (define WORLD-CAP 24)
 
@@ -95,6 +96,13 @@
   (let ((v (hash-ref snap k #f)))
     (if (string? v) v "")))
 
+; A missing venue is the garden in daylight. A bad name refuses the snap.
+(define (world-venue-ok? snap key names)
+  (let ((v (hash-ref snap key #f)))
+    (or (not v)
+        (and (string? v) (= (string-length v) 0))
+        (and (string? v) (biome-member? names v)))))
+
 (define (world-snap-ok? snap)
   (if (or (not (hash? snap)) (world-secret? snap))
     #f
@@ -133,6 +141,8 @@
            (world-num-in? (hash-ref snap "density" #f) 0.15 1.0)
            (world-num-in? (hash-ref snap "light" #f) 0.50 1.0)
            (world-num-in? (hash-ref snap "fog" #f) 0.0 0.38)
+           (world-venue-ok? snap "biome" biome-names)
+           (world-venue-ok? snap "mood" mood-names)
            (world-num-in? (hash-ref snap "bend" #f) 0.0 0.65)
            (number? chase)
            (>= chase 1.6)
@@ -178,7 +188,9 @@
           "flower" (world-str snap "flower")
           "density" (exact->inexact (hash-ref snap "density" 0.45))
           "light" (exact->inexact (hash-ref snap "light" 0.82))
-          "fog" (exact->inexact (hash-ref snap "fog" 0.22)))))
+          "fog" (exact->inexact (hash-ref snap "fog" 0.22))
+          "biome" (biome-known (world-str snap "biome"))
+          "mood" (mood-known (world-str snap "mood")))))
 
 (define (world-accept kind snap)
   (and (string? kind) (string=? kind "KEEP") (world-snap-ok? snap)))

@@ -1,0 +1,162 @@
+; Venues and the score multiplier. The picture follows these names.
+; A level gate does not put the multiplier back to one, and it does not
+; touch the combo the page is holding. Hit boxes stay in lib/phys.aura.
+(require "std/string" all:)
+
+(define biome-names (list "garden" "city" "space" "coast"))
+(define mood-names (list "day" "night" "sunset" "neon"))
+(define MULT-CAP 8)
+(define CHAL-NEED 3)
+
+(define (biome-int n)
+  (let ((s (number->string (floor (exact->inexact (if (number? n) n 0))))))
+    (if (string-suffix? s ".0")
+      (substring s 0 (- (string-length s) 2))
+      s)))
+
+(define (biome-member? xs name)
+  (let loop ((ys xs))
+    (if (or (not (pair? ys)) (null? ys))
+      #f
+      (if (and (string? (car ys)) (string=? (car ys) name))
+        #t
+        (loop (cdr ys))))))
+
+(define (biome-name? s)
+  (and (string? s) (biome-member? biome-names s)))
+
+(define (mood-name? s)
+  (and (string? s) (biome-member? mood-names s)))
+
+(define (biome-known s)
+  (if (biome-name? s) s "garden"))
+
+(define (mood-known s)
+  (if (mood-name? s) s "day"))
+
+; Exact integers. floor makes an inexact 2.0, and the feel table compares with =.
+(define (exact-small n lo hi)
+  (let ((start (if (and (number? lo) (>= lo 0)) lo 0))
+        (stop (if (and (number? hi) (> hi 0)) hi 8)))
+    (if (not (number? n))
+      start
+      (let loop ((k start))
+        (if (or (>= k stop) (< n (+ k 0.5)))
+          k
+          (loop (+ k 1)))))))
+
+(define (biome-level n)
+  (exact-small n 1 80))
+
+; Level 1 is the garden. Each clear steps to the next venue, then around.
+(define (biome-for-level level)
+  (let ((n (biome-level level)))
+    (list-ref biome-names (modulo (- n 1) 4))))
+
+(define (biome-index name)
+  (let ((known (biome-known name)))
+    (let loop ((xs biome-names) (i 0))
+      (if (or (null? xs) (string=? (car xs) known))
+        i
+        (loop (cdr xs) (+ i 1))))))
+
+(define (biome-next name)
+  (list-ref biome-names (modulo (+ (biome-index name) 1) 4)))
+
+(define (biome-title name lang)
+  (let ((zh (string=? lang "zh"))
+        (b (biome-known name)))
+    (cond
+      ((string=? b "city") (if zh "城市" "City"))
+      ((string=? b "space") (if zh "太空" "Space"))
+      ((string=? b "coast") (if zh "海边" "Coast"))
+      (else (if zh "花园" "Garden")))))
+
+(define (mood-title name lang)
+  (let ((zh (string=? lang "zh"))
+        (m (mood-known name)))
+    (cond
+      ((string=? m "night") (if zh "夜晚" "Night"))
+      ((string=? m "sunset") (if zh "日落" "Sunset"))
+      ((string=? m "neon") (if zh "霓虹" "Neon"))
+      (else (if zh "白天" "Day")))))
+
+(define (biome-say name lang)
+  (if (string=? lang "zh")
+    (string-append "来到" (biome-title name "zh") "了")
+    (string-append (biome-title name "en") " is here")))
+
+(define (mood-say name lang)
+  (if (string=? lang "zh")
+    (string-append (mood-title name "zh") "到了")
+    (string-append (mood-title name "en") " light")))
+
+(define (mult-clamp n)
+  (exact-small n 1 MULT-CAP))
+
+; gain is how many steps actually landed, after the cap.
+(define (mult-add mult steps)
+  (let ((m (mult-clamp mult))
+        (g (exact-small steps 0 8)))
+    (let ((next (mult-clamp (+ m g))))
+      (hash "mult" next "gain" (- next m)))))
+
+; One coin toward this level's three-coin challenge. The bump happens once.
+(define (chal-see coins done mult)
+  (let ((n (exact-small coins 0 24))
+        (m (mult-clamp mult)))
+    (if (equal? done #t)
+      (hash "coins" n "done" #t "mult" m "gain" 0)
+      (let ((next (+ n 1)))
+        (if (>= next CHAL-NEED)
+          (let ((got (mult-add m 1)))
+            (hash "coins" next "done" #t
+                  "mult" (hash-ref got "mult")
+                  "gain" (hash-ref got "gain")))
+          (hash "coins" next "done" #f "mult" m "gain" 0))))))
+
+(define (chal-line mult lang)
+  (if (string=? lang "zh")
+    (string-append "金币 ×" (biome-int mult))
+    (string-append "Coins ×" (biome-int mult))))
+
+; What the child sees change at the gate. Difficulty wins, then the
+; cape at level 2 and the circlet at level 3, otherwise a new rival.
+(define (evo-what prev-form next-form next-level)
+  (let ((a (if (and (number? prev-form) (>= prev-form 0)) (floor prev-form) 0))
+        (b (if (and (number? next-form) (>= next-form 0)) (floor next-form) 0))
+        (lv (biome-level next-level)))
+    (cond
+      ((> b a) "harder")
+      ((< b a) "ease")
+      ((or (= lv 2) (= lv 3)) "hero")
+      (else "rival"))))
+
+(define (evo-what-line what lang)
+  (let ((zh (string=? lang "zh")))
+    (cond
+      ((string=? what "harder") (if zh "路更难一点" "Trickier path"))
+      ((string=? what "ease") (if zh "路轻松一点" "Gentler path"))
+      ((string=? what "hero") (if zh "英雄发光" "Hero shines"))
+      (else (if zh "新对手" "New rival")))))
+
+(define (evo-line level biome mult gain what lang)
+  (let ((zh (string=? lang "zh"))
+        (g (if (and (number? gain) (> gain 0)) (floor gain) 0)))
+    (string-append
+      (if zh
+        (string-append "第" (biome-int level) "关")
+        (string-append "Level " (biome-int level)))
+      " · "
+      (biome-title biome lang)
+      " · ×"
+      (biome-int mult)
+      (if (> g 0) (string-append " +" (biome-int g)) "")
+      " · "
+      (evo-what-line what lang))))
+
+(define (venue-line place mult lang)
+  (string-append
+    (if (biome-name? place) (biome-title place lang) (mood-title place lang))
+    " · ×"
+    (biome-int mult)))
