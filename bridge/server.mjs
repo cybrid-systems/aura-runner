@@ -223,6 +223,9 @@ server.on("upgrade", (req, socket) => {
   attachSocket(socket);
 });
 
-server.listen(webPort, "127.0.0.1", () => {
-  console.log(`Lumen Run  http://127.0.0.1:${webPort}`);
+// 127.0.0.1 keeps ./run.sh on this machine. The container sets
+// AURA_RUNNER_BIND=0.0.0.0 so Docker's published port can reach the page.
+const bindHost = process.env.AURA_RUNNER_BIND || "127.0.0.1";
+server.listen(webPort, bindHost, () => {
+  console.log(`Lumen Run  http://${bindHost}:${webPort}`);
 });

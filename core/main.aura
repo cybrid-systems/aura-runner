@@ -4609,6 +4609,12 @@
                8765)))
       (if (and (number? n) (> n 0)) n 8765))))
 
+; 127.0.0.1 is this machine. Docker sets AURA_RUNNER_BIND=0.0.0.0 so a
+; published port reaches the core. The rules of the run do not change.
+(define (bind-host)
+  (let ((raw (try (getenv "AURA_RUNNER_BIND") (catch (e) ""))))
+    (if (and (string? raw) (> (string-length raw) 0)) raw "127.0.0.1")))
+
 (define (guest-text i)
   (cond
     ((= i 0) "(pal taxi toot 0.98 0.86 0.28 pace)")
@@ -4655,7 +4661,7 @@
   ; Bind before the model fibers. A taken port used to exit while those
   ; three receivers were still blocked, and the runtime warned about them.
   (let ((port (port-number)))
-    (let ((listener (tcp-listen port "127.0.0.1")))
+    (let ((listener (tcp-listen port (bind-host))))
       (if (not (number? listener))
         (begin
           (display "listen-failed ")
