@@ -102,6 +102,35 @@ if ! check_sha256 "$sumdir/file" "$sumdir/good"; then
 fi
 rm -rf "$sumdir"
 
+echo "a 403 from the release API still reaches the container fallback" >&2
+(
+  cache403="$(mktemp -d)"
+  container_fallback_ok() { return 0; }
+  fetch_to() {
+    AURA_FETCH_CODE=403
+    AURA_FETCH_KIND=network
+    return 1
+  }
+  got403="$(AURA_CACHE_DIR="$cache403" pick_asset_from_api darwin arm64 2>"$cache403/err")" || {
+    echo "403 path did not fall back to the image:" >&2
+    cat "$cache403/err" >&2
+    exit 1
+  }
+  if [[ "$got403" != "CONTAINER" ]]; then
+    echo "403 path returned [$got403], wanted CONTAINER" >&2
+    exit 1
+  fi
+  if [[ ! -x "$cache403/aura/nightly/container/aura" ]]; then
+    echo "403 path did not write the docker wrapper" >&2
+    exit 1
+  fi
+  if ! grep -q "ghcr.io/cybrid-systems/aura:nightly" "$cache403/aura/nightly/container/aura"; then
+    echo "wrapper does not name the nightly image" >&2
+    exit 1
+  fi
+  rm -rf "$cache403"
+)
+
 echo "unsupported platform names the release assets" >&2
 set +e
 plat_err="$(AURA_OS=darwin AURA_ARCH=arm64 AURA_NO_DOCKER=1 install_aura "$work" 2>&1)"

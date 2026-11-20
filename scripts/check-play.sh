@@ -29,8 +29,8 @@ fail() {
 
 hide="$(mktemp -d)"
 mkdir -p "$hide/bin"
-ln -s /usr/bin/dirname "$hide/bin/dirname"
-ln -s /usr/bin/bash "$hide/bin/bash"
+ln -s "$(command -v dirname)" "$hide/bin/dirname"
+ln -s "$(command -v bash)" "$hide/bin/bash"
 out="$(PATH="$hide/bin" ./play.sh 2>&1 || true)"
 rm -rf "$hide"
 printf '%s\n' "$out" | grep -q "Docker is not installed" || fail "missing docker message"
@@ -68,6 +68,45 @@ if ./play.sh --help >/tmp/lumen-play-help.out 2>/tmp/lumen-play-help.err; then
 else
   fail "help"
 fi
+
+# A local image is reused. The missing registry is not pulled, and a
+# lumen-run:local tag is published under the ghcr name.
+imglog="$(mktemp)"
+imgbin="$(mktemp -d)"
+cat > "$imgbin/docker" << EOF
+#!/bin/sh
+printf '%s\n' "\$*" >> "$imglog"
+case "\$1" in
+  info) exit 0 ;;
+  image)
+    name="\$3"
+    if [ "\$name" = "ghcr.io/cybrid-systems/aura-runner:latest" ]; then
+      if [ -f "$imglog.tagged" ]; then exit 0; fi
+      exit 1
+    fi
+    if [ "\$name" = "lumen-run:local" ]; then exit 0; fi
+    exit 1
+    ;;
+  tag) touch "$imglog.tagged"; exit 0 ;;
+  pull) printf 'PULL\n' >> "$imglog"; exit 1 ;;
+  *) exit 0 ;;
+esac
+EOF
+chmod +x "$imgbin/docker"
+printf '%s\n' 'LUMEN_LLM_OFF=1' > "$ROOT/.env.playtest"
+chmod 600 "$ROOT/.env.playtest"
+chosen="$(PATH="$imgbin:$PATH" LUMEN_ENV_FILE="$ROOT/.env.playtest" LUMEN_PLAY_CHOOSE_ONLY=1 ./play.sh)"
+if [[ "$chosen" != "ghcr.io/cybrid-systems/aura-runner:latest" ]]; then
+  fail "chose [$chosen]"
+fi
+if grep -q '^PULL$' "$imglog"; then
+  fail "pulled even though a local image exists"
+fi
+if ! grep -q '^tag ' "$imglog"; then
+  fail "did not retag lumen-run:local"
+fi
+rm -rf "$imgbin" "$imglog" "$imglog.tagged"
+rm -f "$ROOT/.env.playtest"
 
 python3 - "$ROOT" << 'PY'
 import os, pty, select, subprocess, sys, time, threading

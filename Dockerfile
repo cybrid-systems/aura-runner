@@ -1,58 +1,68 @@
 # syntax=docker/dockerfile:1
-# Lumen Run in one image. Aura is the prebuilt nightly tarball ./run.sh
-# already downloads (sha256-checked). Nothing here compiles Aura.
-# linux/amd64 and linux/arm64: the fetch stage runs on the builder and
-# only the matching bundle is unpacked into the target image.
+# Lumen Run. Aura is the prebuilt nightly tarball ./run.sh already
+# downloads (sha256-checked). Node is the official linux tarball, not an
+# npm install. The only apt step is CA certificates, because Aura's
+# OpenSSL reads /usr/lib/ssl/certs. linux/amd64 and linux/arm64.
 
 ARG BUILDPLATFORM
-FROM --platform=$BUILDPLATFORM debian:bookworm-slim AS aura
 ARG TARGETARCH
-ARG AURA_VERSION=nightly
-# These two change when the nightly checksum changes, so the download
-# layer is reused until then. Empty means "trust the published .sha256".
+ARG NODE_VERSION=22.23.5
+
+FROM --platform=$BUILDPLATFORM debian:bookworm-slim AS fetch-amd64
 ARG AURA_SHA_AMD64=
-ARG AURA_SHA_ARM64=
-RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl \
- && rm -rf /var/lib/apt/lists/*
+ARG NODE_VERSION
+ADD https://github.com/cybrid-systems/aura/releases/download/nightly/aura-nightly-linux-x86_64.tar.gz /tmp/aura.tar.gz
+ADD https://github.com/cybrid-systems/aura/releases/download/nightly/aura-nightly-linux-x86_64.tar.gz.sha256 /tmp/aura.sha256
+ADD https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz /tmp/node.tar.gz
 RUN set -eu; \
-    case "$TARGETARCH" in \
-      amd64) arch=x86_64; note="$AURA_SHA_AMD64" ;; \
-      arm64) arch=arm64; note="$AURA_SHA_ARM64" ;; \
-      *) echo "unsupported architecture: $TARGETARCH" >&2; exit 1 ;; \
-    esac; \
-    echo "aura ${AURA_VERSION} ${arch} checksum ${note:-published}"; \
-    slug="$AURA_VERSION"; \
-    if [ "$AURA_VERSION" != nightly ]; then slug="${AURA_VERSION#v}"; fi; \
-    base="https://github.com/cybrid-systems/aura/releases/download/${AURA_VERSION}"; \
-    name="aura-${slug}-linux-${arch}.tar.gz"; \
-    curl -fL --retry 5 --retry-delay 2 --max-time 300 -o "/tmp/${name}.sha256" "${base}/${name}.sha256"; \
-    curl -fL --retry 5 --retry-delay 2 --max-time 300 -o "/tmp/${name}" "${base}/${name}"; \
-    got="$(sha256sum "/tmp/${name}" | awk '{print $1}')"; \
-    want="$(awk 'NF { print $1; exit }' "/tmp/${name}.sha256")"; \
-    if [ -z "$want" ] || [ "$got" != "$want" ]; then \
-      echo "sha256 mismatch for ${name}" >&2; \
-      exit 1; \
-    fi; \
-    if [ -n "$note" ] && [ "$note" != "$want" ]; then \
+    got="$(sha256sum /tmp/aura.tar.gz | awk '{print $1}')"; \
+    want="$(awk 'NF { print $1; exit }' /tmp/aura.sha256)"; \
+    test -n "$want"; \
+    test "$got" = "$want"; \
+    if [ -n "$AURA_SHA_AMD64" ] && [ "$AURA_SHA_AMD64" != "$want" ]; then \
       echo "the published Aura checksum changed during the build" >&2; \
       exit 1; \
     fi; \
-    mkdir -p /opt/aura; \
-    tar -xzf "/tmp/${name}" -C /opt/aura --strip-components=1; \
-    rm -f "/tmp/${name}" "/tmp/${name}.sha256"; \
+    mkdir -p /opt/aura /out; \
+    tar -xzf /tmp/aura.tar.gz -C /opt/aura --strip-components=1; \
+    tar -xzf /tmp/node.tar.gz -C /out --strip-components=1 node-v${NODE_VERSION}-linux-x64/bin/node; \
+    rm -f /tmp/aura.tar.gz /tmp/aura.sha256 /tmp/node.tar.gz; \
     test -x /opt/aura/bin/aura; \
-    test -x /opt/aura/rt/ld.so
+    test -x /opt/aura/rt/ld.so; \
+    test -x /out/bin/node
 
-FROM node:22-bookworm-slim AS node
+FROM --platform=$BUILDPLATFORM debian:bookworm-slim AS fetch-arm64
+ARG AURA_SHA_ARM64=
+ARG NODE_VERSION
+ADD https://github.com/cybrid-systems/aura/releases/download/nightly/aura-nightly-linux-arm64.tar.gz /tmp/aura.tar.gz
+ADD https://github.com/cybrid-systems/aura/releases/download/nightly/aura-nightly-linux-arm64.tar.gz.sha256 /tmp/aura.sha256
+ADD https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-arm64.tar.gz /tmp/node.tar.gz
+RUN set -eu; \
+    got="$(sha256sum /tmp/aura.tar.gz | awk '{print $1}')"; \
+    want="$(awk 'NF { print $1; exit }' /tmp/aura.sha256)"; \
+    test -n "$want"; \
+    test "$got" = "$want"; \
+    if [ -n "$AURA_SHA_ARM64" ] && [ "$AURA_SHA_ARM64" != "$want" ]; then \
+      echo "the published Aura checksum changed during the build" >&2; \
+      exit 1; \
+    fi; \
+    mkdir -p /opt/aura /out; \
+    tar -xzf /tmp/aura.tar.gz -C /opt/aura --strip-components=1; \
+    tar -xzf /tmp/node.tar.gz -C /out --strip-components=1 node-v${NODE_VERSION}-linux-arm64/bin/node; \
+    rm -f /tmp/aura.tar.gz /tmp/aura.sha256 /tmp/node.tar.gz; \
+    test -x /opt/aura/bin/aura; \
+    test -x /opt/aura/rt/ld.so; \
+    test -x /out/bin/node
+
+FROM fetch-${TARGETARCH} AS fetched
 
 FROM debian:bookworm-slim
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates libstdc++6 \
+ && apt-get install -y --no-install-recommends ca-certificates \
  && rm -rf /var/lib/apt/lists/*
-COPY --from=node /usr/local/bin/node /usr/local/bin/node
-COPY --from=aura /opt/aura /opt/aura
-ENV PATH="/opt/aura/bin:${PATH}" \
+COPY --from=fetched /out/bin/node /usr/local/bin/node
+COPY --from=fetched /opt/aura /opt/aura
+ENV PATH="/opt/aura/bin:/usr/local/bin:${PATH}" \
     AURA_SANDBOX=off \
     AURA_RUNNER_BIND=0.0.0.0 \
     AURA_RUNNER_WEB=8080 \
@@ -68,6 +78,6 @@ COPY core ./core
 COPY lib ./lib
 COPY web ./web
 COPY bridge ./bridge
-RUN chmod 755 /usr/local/bin/lumen-entrypoint
+RUN chmod 755 /usr/local/bin/lumen-entrypoint /usr/local/bin/node
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/lumen-entrypoint"]

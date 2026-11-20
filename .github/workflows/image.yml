@@ -80,12 +80,6 @@ jobs:
           tags: |
             ghcr.io/cybrid-systems/aura-runner:latest
             ghcr.io/cybrid-systems/aura-runner:sha-${{ github.sha }}
-      - name: Link the package to this repo
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh api --method PATCH \
-            -H "Accept: application/vnd.github+json" \
-            /orgs/cybrid-systems/packages/container/aura-runner \
-            -f visibility=public
+      # GitHub's REST API does not reliably change a container package from
+      # private to public. After the first publish, a maintainer sets
+      # aura-runner to Public in GitHub → Packages → Package settings.

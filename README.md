@@ -23,11 +23,11 @@ The first run downloads the [Aura nightly](https://github.com/cybrid-systems/aur
 On a Mac this is the short path. Docker Desktop and OrbStack both run the linux/arm64 image on Apple Silicon. You do not need Node or a compiler.
 
 1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) or [OrbStack](https://orbstack.dev) and open it.
-2. In this folder, run `./play.sh`.
-3. Press Enter to play with no API key, or paste a MiniMax key. The key is not shown. It is saved in `.env` (mode 0600, and git ignores it). `./play.sh --setup` asks again.
-4. The game opens in your browser. The script prints the URL and a `docker run` command you can copy. If port 8080 is taken, it picks another one.
+2. Get this folder: `git clone https://github.com/cybrid-systems/aura-runner.git` and `cd aura-runner`, or download the ZIP from GitHub and unzip it.
+3. Run `./play.sh`. The first question is which AI service; press Enter for MiniMax. The next question is the API key; press Enter to play with AI features off, or paste a key. The key is not shown. It is saved in `.env` (mode 0600, and git ignores it). `./play.sh --setup` asks both questions again.
+4. When the game is ready, it opens in the browser. The script prints the URL and a `docker run` command. If port 8080 is taken, it picks another one.
 
-The image is `ghcr.io/cybrid-systems/aura-runner`. If the download fails, `./play.sh` builds it from the same Aura nightly `./run.sh` downloads, and does not compile Aura. With no key, AI features stay off and the run still starts.
+The image is `ghcr.io/cybrid-systems/aura-runner`. If that download is not available yet, `./play.sh` builds it from the same Aura nightly `./run.sh` downloads, and does not compile Aura. The next start uses that copy and does not build again.
 
 ## Controls
 
