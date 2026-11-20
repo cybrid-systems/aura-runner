@@ -1,0 +1,977 @@
+; Where coins sit. A phrase still marks the beat. This pass chooses the
+; lane and the shape, from a seed, so the same stretch lays the same
+; coins and a different seed does not.
+;
+; The old chain always finished on the right. A plain coin has no lane,
+; so piece-lane is -1, and open-lane's last branch was 2. Band 0 also
+; wrote (coin-lane 2 ...) because the dodge steps right first. Coins
+; with no lane were drawn on the centre line. The left lane got nothing.
+;
+; Every coin now has lane 0, 1, or 2. Weights cannot fall through to one
+; side: each lane stays at or above a floor and under a cap, and the
+; trial also checks the lane entropy. Shapes are a single coin, a line,
+; a zig-zag, a lane-switch arc, and a jump arc into a hurdle or a gap.
+(require "lib/phys")
+(require "std/random" all:)
+(require "std/math" all:)
+
+(define COIN-FLOOR 0.18)
+(define COIN-CAP 0.52)
+; Natural log. Equal lanes are about 1.099. The corner (0.46 0.34 0.20)
+; is about 1.046, so it stays. (0.50 0.30 0.20) is about 1.030 and the
+; gate sends it back even though each weight is inside the floor and cap.
+(define COIN-ENTROPY-MIN 1.04)
+(define COIN-MIX-LO 0.15)
+(define COIN-MIX-HI 0.85)
+(define COIN-DENS-LO 0.25)
+(define COIN-DENS-HI 0.80)
+(define COIN-ARC-LO 0.08)
+(define COIN-ARC-HI 0.72)
+(define COIN-W-STEP 0.04)
+(define COIN-N-STEP 0.04)
+; Same lead the autopilot uses before a lane change. Kept here so the
+; placer does not depend on the chunk grammar.
+(define COIN-LEAD 0.22)
+
+(define (coin-get h k d)
+  (if (hash? h) (hash-ref h k d) d))
+
+(define (coin-blank)
+  (hash "left" 0.34 "center" 0.33 "right" 0.33
+        "mix" 0.55 "density" 0.55 "arc" 0.34
+        "knob" 0 "prev" #f "force" ""))
+
+(define (coin-abs x)
+  (if (< x 0.0) (- 0.0 x) x))
+
+(define (coin-apart? a b)
+  (> (coin-abs (- a b)) 0.0001))
+
+(define (coin-clamp x lo hi)
+  (if (< x lo) lo (if (> x hi) hi x)))
+
+(define (coin-density-scale density)
+  (let ((d (coin-clamp (if (number? density) density 0.55) COIN-DENS-LO COIN-DENS-HI)))
+    (+ 1.0 (* (- 0.55 d) 0.70))))
+
+(define (coin-entropy w0 w1 w2)
+  (let ((term (lambda (p)
+                (if (<= p 0.0001) 0.0 (- (* p (log p)))))))
+    (+ (term w0) (term w1) (term w2))))
+
+(define (coin-w p k)
+  (coin-get p k 0.0))
+
+(define (coin-weight-why w0 w1 w2)
+  (cond
+    ((or (< w0 COIN-FLOOR) (< w1 COIN-FLOOR) (< w2 COIN-FLOOR)
+         (> w0 COIN-CAP) (> w1 COIN-CAP) (> w2 COIN-CAP))
+     "floor")
+    ((> (coin-abs (- (+ w0 w1 w2) 1.0)) 0.03)
+     "bounds")
+    ((< (coin-entropy w0 w1 w2) COIN-ENTROPY-MIN)
+     "entropy")
+    (else "")))
+
+(define (coin-bounds? params)
+  (let ((w0 (coin-w params "left"))
+        (w1 (coin-w params "center"))
+        (w2 (coin-w params "right"))
+        (mix (coin-w params "mix"))
+        (density (coin-w params "density"))
+        (arc (coin-w params "arc")))
+    (and (string=? (coin-weight-why w0 w1 w2) "")
+         (>= mix COIN-MIX-LO) (<= mix COIN-MIX-HI)
+         (>= density COIN-DENS-LO) (<= density COIN-DENS-HI)
+         (>= arc COIN-ARC-LO) (<= arc COIN-ARC-HI))))
+
+(define (coin-static-why state proposal)
+  (let ((why (coin-weight-why (coin-w proposal "left")
+                              (coin-w proposal "center")
+                              (coin-w proposal "right"))))
+    (cond
+      ((not (string=? why "")) why)
+      ((not (coin-bounds? proposal)) "bounds")
+      ((> (coin-knob-changes state proposal) 1) "step")
+      (else ""))))
+
+(define (coin-weight-moved? a b)
+  (or (coin-apart? (coin-w a "left") (coin-w b "left"))
+      (coin-apart? (coin-w a "center") (coin-w b "center"))
+      (coin-apart? (coin-w a "right") (coin-w b "right"))))
+
+(define (coin-knob-changes a b)
+  (+ (if (coin-weight-moved? a b) 1 0)
+     (if (coin-apart? (coin-w a "mix") (coin-w b "mix")) 1 0)
+     (if (coin-apart? (coin-w a "density") (coin-w b "density")) 1 0)
+     (if (coin-apart? (coin-w a "arc") (coin-w b "arc")) 1 0)))
+
+(define (coin-chunk-seed seed index band)
+  (let ((n (modulo (+ (floor (if (number? seed) seed 1))
+                      (* (floor (if (number? index) index 0)) 9973)
+                      (* (floor (if (number? band) band 0)) 13)
+                      101)
+                   2147483646)))
+    (if (<= n 0) 1 n)))
+
+; No caller seed: mix the whole stretch in, so two phrases that both
+; start their first coin at the same x do not share a lane.
+(define (coin-fallback-seed pieces band)
+  (let loop ((ps pieces) (h 1))
+    (if (or (not (pair? ps)) (null? ps))
+      (coin-chunk-seed h 0 band)
+      (let ((q (car ps)))
+        (loop (cdr ps)
+              (modulo (+ (* h 131)
+                         (floor (+ (* (piece-x q) 10.0) (piece-k q) 1.0))
+                         (floor (+ (piece-lane q) 4.0)))
+                      2147483646))))))
+
+(define (coin-renorm a b c)
+  (let ((s (+ a b c)))
+    (if (<= s 0.001)
+      (list (/ 1.0 3.0) (/ 1.0 3.0) (/ 1.0 3.0))
+      (list (/ a s) (/ b s) (/ c s)))))
+
+(define (coin-nudge-w w0 w1 w2 i delta)
+  (coin-renorm (if (= i 0) (+ w0 delta) w0)
+               (if (= i 1) (+ w1 delta) w1)
+               (if (= i 2) (+ w2 delta) w2)))
+
+(define (coin-smallest w0 w1 w2)
+  (if (<= w0 w1)
+    (if (<= w0 w2) 0 2)
+    (if (<= w1 w2) 1 2)))
+
+(define (coin-largest w0 w1 w2)
+  (if (>= w0 w1)
+    (if (>= w0 w2) 0 2)
+    (if (>= w1 w2) 1 2)))
+
+(define (coin-with-weights params w0 w1 w2)
+  (hash "left" w0 "center" w1 "right" w2
+        "mix" (coin-w params "mix")
+        "density" (coin-w params "density")
+        "arc" (coin-w params "arc")
+        "knob" (coin-get params "knob" 0)
+        "prev" (coin-get params "prev" #f)
+        "force" (coin-get params "force" "")))
+
+(define (coin-with-knob params key value)
+  (hash "left" (coin-w params "left")
+        "center" (coin-w params "center")
+        "right" (coin-w params "right")
+        "mix" (if (string=? key "mix") value (coin-w params "mix"))
+        "density" (if (string=? key "density") value (coin-w params "density"))
+        "arc" (if (string=? key "arc") value (coin-w params "arc"))
+        "knob" (coin-get params "knob" 0)
+        "prev" (coin-get params "prev" #f)
+        "force" ""))
+
+(define (coin-weights-of params)
+  (list (coin-w params "left") (coin-w params "center") (coin-w params "right")))
+
+(define (coin-params-of state w mix density arc)
+  (hash "left" (car w) "center" (car (cdr w)) "right" (car (cdr (cdr w)))
+        "mix" mix "density" density "arc" arc
+        "knob" (coin-get state "knob" 0)
+        "prev" #f
+        "force" ""))
+
+; Keen spreads the quiet lane and opens the patterns up. Gentle pulls
+; the loud lane back and loosens the packing. One number moves.
+(define (coin-mood form bumps coins lanes near)
+  (let ((f (if (and (number? form) (>= form 0)) form 0))
+        (n (if (and (number? bumps) (> bumps 0)) bumps 0))
+        (c (if (and (number? coins) (> coins 0)) coins 0))
+        (s (if (and (number? lanes) (> lanes 0)) lanes 0))
+        (k (if (and (number? near) (> near 0)) near 0)))
+    (cond
+      ((< f 1) "hold")
+      ((>= n 2) "gentle")
+      ((and (>= c 3) (or (>= s 2) (>= k 1))) "keen")
+      ((>= n 1) "hold")
+      ((>= c 2) "keen")
+      (else "hold"))))
+
+(define (coin-knob-name k)
+  (cond ((= k 0) "lanes") ((= k 1) "mix") ((= k 2) "density") (else "arc")))
+
+(define (coin-try-weights state mood)
+  (let* ((w0 (coin-w state "left"))
+         (w1 (coin-w state "center"))
+         (w2 (coin-w state "right"))
+         (i (if (string=? mood "gentle")
+              (coin-largest w0 w1 w2)
+              (coin-smallest w0 w1 w2)))
+         (delta (if (string=? mood "gentle") (- 0.0 COIN-W-STEP) COIN-W-STEP))
+         (w (coin-nudge-w w0 w1 w2 i delta))
+         (next (coin-params-of state w (coin-w state "mix")
+                               (coin-w state "density") (coin-w state "arc"))))
+    (if (and (coin-bounds? next) (coin-weight-moved? state next))
+      next
+      #f)))
+
+(define (coin-try-scalar state mood key lo hi)
+  (let* ((cur (coin-w state key))
+         (delta (if (string=? mood "gentle") (- 0.0 COIN-N-STEP) COIN-N-STEP))
+         (next-v (coin-clamp (+ cur delta) lo hi))
+         (next (coin-with-knob state key next-v)))
+    (if (and (coin-bounds? next) (coin-apart? cur next-v))
+      next
+      #f)))
+
+(define (coin-attempt state mood knob)
+  (cond
+    ((= knob 0) (coin-try-weights state mood))
+    ((= knob 1) (coin-try-scalar state mood "mix" COIN-MIX-LO COIN-MIX-HI))
+    ((= knob 2) (coin-try-scalar state mood "density" COIN-DENS-LO COIN-DENS-HI))
+    (else (coin-try-scalar state mood "arc" COIN-ARC-LO COIN-ARC-HI))))
+
+(define (coin-step state form bumps coins lanes near . rest)
+  (let ((pace (if (and (pair? rest) (number? (car rest))) (car rest) 8.0))
+        (mood (coin-mood form bumps coins lanes near))
+        (knob (coin-get state "knob" 0)))
+    (if (string=? mood "hold")
+      (hash "moved" #f "why" "hold" "mood" mood "knob" knob "params" state "pace" pace)
+      (let loop ((k 0) (use knob))
+        (if (>= k 4)
+          (hash "moved" #f "why" "hold" "mood" mood "knob" knob "params" state "pace" pace)
+          (let ((params (coin-attempt state mood use)))
+            (if (not params)
+              (loop (+ k 1) (modulo (+ use 1) 4))
+              (hash "moved" #t
+                    "why" (coin-knob-name use)
+                    "mood" mood
+                    "knob" (modulo (+ use 1) 4)
+                    "params" params
+                    "pace" pace))))))))
+
+(define (coin-keep state step)
+  (let ((params (hash-ref step "params" state)))
+    (hash "left" (coin-w params "left")
+          "center" (coin-w params "center")
+          "right" (coin-w params "right")
+          "mix" (coin-w params "mix")
+          "density" (coin-w params "density")
+          "arc" (coin-w params "arc")
+          "knob" (hash-ref step "knob" 0)
+          "force" ""
+          "prev" (hash "left" (coin-w state "left")
+                       "center" (coin-w state "center")
+                       "right" (coin-w state "right")
+                       "mix" (coin-w state "mix")
+                       "density" (coin-w state "density")
+                       "arc" (coin-w state "arc")
+                       "knob" (coin-get state "knob" 0)))))
+
+(define (coin-undo state)
+  (let ((prev (coin-get state "prev" #f)))
+    (if (not (hash? prev))
+      state
+      (hash "left" (coin-w prev "left")
+            "center" (coin-w prev "center")
+            "right" (coin-w prev "right")
+            "mix" (coin-w prev "mix")
+            "density" (coin-w prev "density")
+            "arc" (coin-w prev "arc")
+            "knob" (coin-get prev "knob" 0)
+            "force" ""
+            "prev" #f))))
+
+(define (coin-engage coins lanes near)
+  (let ((c (min 1.0 (/ (exact->inexact (if (and (number? coins) (> coins 0)) coins 0)) 6.0)))
+        (v (min 1.0 (/ (exact->inexact (if (and (number? lanes) (> lanes 0)) lanes 0)) 4.0)))
+        (k (min 1.0 (/ (exact->inexact (if (and (number? near) (> near 0)) near 0)) 3.0))))
+    (+ (* 0.50 c) (* 0.30 v) (* 0.20 k))))
+
+(define (coin-is? q)
+  (= (piece-k q) 5.0))
+
+(define (coin-insert q xs)
+  (if (null? xs)
+    (list q)
+    (if (<= (piece-x q) (piece-x (car xs)))
+      (cons q xs)
+      (cons (car xs) (coin-insert q (cdr xs))))))
+
+(define (coin-sort ps)
+  (let loop ((xs ps) (acc (list)))
+    (if (null? xs)
+      acc
+      (loop (cdr xs) (coin-insert (car xs) acc)))))
+
+(define (coin-take pieces)
+  (let loop ((ps pieces) (acc (list)))
+    (if (null? ps)
+      (coin-sort acc)
+      (loop (cdr ps) (if (coin-is? (car ps)) (cons (car ps) acc) acc)))))
+
+(define (coin-drop pieces)
+  (let loop ((ps pieces) (acc (list)))
+    (if (null? ps)
+      (reverse acc)
+      (loop (cdr ps) (if (coin-is? (car ps)) acc (cons (car ps) acc))))))
+
+(define (coin-cluster coins gap)
+  (if (null? coins)
+    (list)
+    (let loop ((xs (cdr coins)) (cur (list (car coins))) (acc (list)))
+      (if (null? xs)
+        (reverse (cons (reverse cur) acc))
+        (let ((dx (- (piece-x (car xs)) (piece-x (car cur)))))
+          (if (<= dx gap)
+            (loop (cdr xs) (cons (car xs) cur) acc)
+            (loop (cdr xs) (list (car xs)) (cons (reverse cur) acc))))))))
+
+(define (coin-mover? k)
+  (or (= k 2.0) (= k 3.0) (= k 4.0) (= k 7.0) (= k 8.0)))
+
+(define (coin-next pieces x)
+  (let loop ((ps pieces) (best #f) (best-x 100000.0))
+    (if (null? ps)
+      best
+      (let ((q (car ps)))
+        (if (and (coin-mover? (piece-k q))
+                 (> (piece-x q) (+ x 0.25))
+                 (< (piece-x q) best-x))
+          (loop (cdr ps) q (piece-x q))
+          (loop (cdr ps) best best-x))))))
+
+(define (coin-hits-x? q x)
+  (let ((x1 (piece-x q))
+        (x2 (+ (piece-x q) (piece-w q))))
+    (and (< x x2) (> (+ x 0.42) x1))))
+
+(define (coin-blocked-lane? pieces x lane)
+  (let loop ((ps pieces))
+    (if (null? ps)
+      #f
+      (let ((q (car ps)))
+        (if (and (= (piece-k q) 7.0)
+                 (coin-hits-x? q x)
+                 (or (< (piece-lane q) -0.5) (< (coin-abs (- (piece-lane q) lane)) 0.1)))
+          #t
+          (loop (cdr ps)))))))
+
+(define (coin-gap-at? pieces x)
+  (let loop ((ps pieces))
+    (if (null? ps)
+      #f
+      (let ((q (car ps)))
+        (if (and (= (piece-k q) 2.0) (coin-hits-x? q x))
+          #t
+          (loop (cdr ps)))))))
+
+; A solid the coin's box would share. A jump may cross a gap once it
+; is in the air. A hurdle, a gate, a block and a flyer are never shared.
+(define (coin-body? pieces x lane y name)
+  (let loop ((ps pieces))
+    (if (null? ps)
+      #f
+      (let ((q (car ps)))
+        (if (not (coin-hits-x? q x))
+          (loop (cdr ps))
+          (let ((k (piece-k q)))
+            (cond
+              ((= k 2.0)
+               (if (and (string=? name "jump") (>= y 0.95))
+                 (loop (cdr ps))
+                 #t))
+              ((or (= k 3.0) (= k 4.0)) #t)
+              ((= k 7.0)
+               (if (or (< (piece-lane q) -0.5)
+                       (< (coin-abs (- (piece-lane q) lane)) 0.1))
+                 #t
+                 (loop (cdr ps))))
+              ((= k 8.0)
+               (if (or (< (piece-lane q) -0.5)
+                       (< (coin-abs (- (piece-lane q) lane)) 0.1))
+                 #t
+                 (loop (cdr ps))))
+              (else (loop (cdr ps))))))))))
+
+(define (coin-block-list pieces)
+  (let loop ((ps pieces) (acc (list)))
+    (if (null? ps)
+      acc
+      (let ((q (car ps)))
+        (if (= (piece-k q) 7.0)
+          (loop (cdr ps) (cons (list (piece-lane q) (piece-x q)
+                                     (+ (piece-x q) (piece-w q))) acc))
+          (loop (cdr ps) acc))))))
+
+; True when lane is free from x0 through x1. One pass over the crates.
+(define (coin-span-open? blocks lane x0 x1)
+  (let loop ((xs blocks))
+    (if (null? xs)
+      #t
+      (let* ((b (car xs))
+             (bl (car b))
+             (a (car (cdr b)))
+             (z (car (cdr (cdr b)))))
+        (if (and (or (< bl -0.5) (< (coin-abs (- bl lane)) 0.1))
+                 (< a (+ x1 0.42))
+                 (> z x0))
+          #f
+          (loop (cdr xs)))))))
+
+(define (coin-reach-table pieces span pace)
+  (let ((lead (max 1.15 (* pace COIN-LEAD)))
+        (blocks (coin-block-list pieces)))
+    (let loop ((at 0.0) (a #f) (b #t) (c #f) (acc (list (list 0.0 #f #t #f))))
+      (if (> at (+ span 0.1))
+        (reverse acc)
+        (let ((at2 (+ at lead)))
+          (let ((na (and (coin-span-open? blocks 0.0 at at2) (or a b)))
+                (nb (and (coin-span-open? blocks 1.0 at at2) (or b a c)))
+                (nc (and (coin-span-open? blocks 2.0 at at2) (or c b))))
+            (loop at2 na nb nc (cons (list at2 na nb nc) acc))))))))
+
+(define (coin-mask? row lane)
+  (if (not (pair? row))
+    #f
+    (cond
+      ((< lane 0.5) (car (cdr row)))
+      ((< lane 1.5) (car (cdr (cdr row))))
+      (else (car (cdr (cdr (cdr row))))))))
+
+(define (coin-stood? table lane x)
+  (let loop ((xs table) (best #f))
+    (if (null? xs)
+      (coin-mask? best lane)
+      (let ((row (car xs)))
+        (if (> (car row) (+ x 0.001))
+          (coin-mask? best lane)
+          (loop (cdr xs) row))))))
+
+(define (coin-spot-ok? pieces pace table x lane y name)
+  (and (>= lane -0.1) (<= lane 2.1)
+       (coin-stood? table lane x)
+       (not (coin-body? pieces x lane y name))))
+
+(define (coin-sum xs)
+  (let loop ((ys xs) (n 0.0))
+    (if (null? ys) n (loop (cdr ys) (+ n (car ys))))))
+
+(define (coin-pick rng weights)
+  (let* ((roll (random-float rng))
+         (u (car roll))
+         (rng2 (cadr roll))
+         (total (coin-sum weights))
+         (mark (* u (if (> total 0.0) total 1.0))))
+    (let loop ((xs weights) (i 0) (acc 0.0))
+      (if (or (null? xs) (null? (cdr xs)))
+        (list i rng2)
+        (let ((acc2 (+ acc (car xs))))
+          (if (< mark acc2)
+            (list i rng2)
+            (loop (cdr xs) (+ i 1) acc2)))))))
+
+(define (coin-lane-weights params)
+  (list (max 0.0 (coin-w params "left"))
+        (max 0.0 (coin-w params "center"))
+        (max 0.0 (coin-w params "right"))))
+
+(define (coin-choose-lane params rng pieces pace table x y name)
+  (let* ((w (coin-lane-weights params))
+         (ok0 (coin-spot-ok? pieces pace table x 0.0 y name))
+         (ok1 (coin-spot-ok? pieces pace table x 1.0 y name))
+         (ok2 (coin-spot-ok? pieces pace table x 2.0 y name))
+         (w0 (if ok0 (car w) 0.0))
+         (w1 (if ok1 (car (cdr w)) 0.0))
+         (w2 (if ok2 (car (cdr (cdr w))) 0.0)))
+    (if (<= (+ w0 w1 w2) 0.0)
+      (list -1.0 rng)
+      (let ((pick (coin-pick rng (list w0 w1 w2))))
+        (list (exact->inexact (car pick)) (cadr pick))))))
+
+(define (coin-forced mover x0 pace)
+  (if (not mover)
+    ""
+    (let ((dx (- (piece-x mover) x0))
+          (k (piece-k mover)))
+      (if (or (> dx (* pace 2.4)) (< dx 0.25))
+        ""
+        (cond
+          ((or (= k 2.0) (= k 3.0)) "jump")
+          ((= k 4.0) "low")
+          (else ""))))))
+
+(define (coin-pattern-weights params)
+  (let ((mix (coin-clamp (coin-w params "mix") 0.0 1.0))
+        (arc (coin-clamp (coin-w params "arc") 0.0 1.0)))
+    (list (+ 0.06 (* (- 1.0 mix) (- 1.0 arc) 0.40))
+          (+ 0.20 (* (- 1.0 mix) 0.42))
+          (+ 0.18 (* mix 0.50))
+          (+ 0.10 (* arc 0.34) (* mix 0.16)))))
+
+(define (coin-pattern-name i)
+  (cond ((= i 1) "line") ((= i 2) "zig") ((= i 3) "switch") (else "single")))
+
+(define (coin-choose mover x0 pace params rng n)
+  (let ((hard (coin-forced mover x0 pace))
+        (force (coin-get params "force" "")))
+    (if (> (string-length hard) 0)
+      (list hard rng)
+      (if (and (string? force) (> (string-length force) 0))
+        (list force rng)
+        (let ((pick (coin-pick rng (coin-pattern-weights params))))
+          (let ((name (coin-pattern-name (car pick))))
+            (if (and (string=? name "single") (>= n 4))
+              (list "line" (cadr pick))
+              (list name (cadr pick)))))))))
+
+(define (coin-limit mover name x0 pace span)
+  (let ((ahead (+ x0 (* pace 1.15)))
+        (end (- span 0.45)))
+    (let ((cap (if (< ahead end) ahead end)))
+      (if (not mover)
+        cap
+        (let ((hx (piece-x mover))
+              (far (if (and (string=? name "jump") (= (piece-k mover) 2.0))
+                     (+ hx (piece-w mover))
+                     (- hx 0.55))))
+          (if (< far cap) far cap))))))
+
+(define (coin-fit x0 limit step cap)
+  (let ((max-n (if (and (number? cap) (>= cap 2) (<= cap 6)) cap 6)))
+    (let loop ((i 0))
+      (let ((x (+ x0 (* step (exact->inexact i)))))
+        (if (or (>= i max-n) (> x limit))
+          (if (and (<= i 0) (<= x0 limit)) 1 i)
+          (loop (+ i 1)))))))
+
+(define (coin-y name i n base)
+  (let* ((den (if (<= n 1) 1.0 (exact->inexact (- n 1))))
+         (u (/ (exact->inexact i) den)))
+    (cond
+      ((string=? name "jump")
+       (let ((peak (min 1.32 (max 1.05 (if (and (number? base) (> base 0.4)) base 0.7)))))
+         (+ 0.56 (* u (- peak 0.56)))))
+      ((string=? name "low") 0.48)
+      ((string=? name "single") 0.62)
+      (else (+ 0.52 (* 0.72 (* u (- 1.0 u))))))))
+
+; Rotate through every lane. A bounce would sit on the centre twice as
+; often as either side, which is how the old right-hand fallback felt.
+(define (coin-zig start i)
+  (exact->inexact (modulo (+ (floor (+ start 0.5)) i) 3)))
+
+(define (coin-switch-lane start end i n)
+  (if (<= n 1)
+    start
+    (let ((u (/ (exact->inexact i) (exact->inexact (- n 1)))))
+      (exact->inexact (floor (+ 0.5 (+ start (* u (- end start)))))))))
+
+(define (coin-other params rng start)
+  (let* ((w (coin-lane-weights params))
+         (w0 (if (< (coin-abs (- start 0.0)) 0.1) 0.0 (car w)))
+         (w1 (if (< (coin-abs (- start 1.0)) 0.1) 0.0 (car (cdr w))))
+         (w2 (if (< (coin-abs (- start 2.0)) 0.1) 0.0 (car (cdr (cdr w))))))
+    (if (<= (+ w0 w1 w2) 0.0)
+      (list (if (< start 1.5) 2.0 0.0) rng)
+      (let ((pick (coin-pick rng (list w0 w1 w2))))
+        (list (exact->inexact (car pick)) (cadr pick))))))
+
+(define (coin-plan-lane name start end i n)
+  (cond
+    ((string=? name "zig") (coin-zig start i))
+    ((string=? name "switch") (coin-switch-lane start end i n))
+    ((string=? name "single") start)
+    (else start)))
+
+; weight * (placed + 1) - count. The lane furthest under its share wins.
+; A tie goes to the centre, then the left, so a centre crate does not
+; leave the rest of the line stuck on a side.
+(define (coin-score weights counts total lane)
+  (- (* (list-ref-weights weights lane) (+ total 1.0))
+     (exact->inexact (list-ref-counts counts lane))))
+
+(define (list-ref-weights w lane)
+  (cond
+    ((< lane 0.5) (car w))
+    ((< lane 1.5) (car (cdr w)))
+    (else (car (cdr (cdr w))))))
+
+(define (list-ref-counts c lane)
+  (cond
+    ((< lane 0.5) (car c))
+    ((< lane 1.5) (car (cdr c)))
+    (else (car (cdr (cdr c))))))
+
+(define (coin-bump counts lane)
+  (cond
+    ((< lane 0.5) (list (+ (car counts) 1) (car (cdr counts)) (car (cdr (cdr counts)))))
+    ((< lane 1.5) (list (car counts) (+ (car (cdr counts)) 1) (car (cdr (cdr counts)))))
+    (else (list (car counts) (car (cdr counts)) (+ (car (cdr (cdr counts))) 1)))))
+
+(define (coin-open-lanes pieces pace table x y name)
+  (list (if (coin-spot-ok? pieces pace table x 0.0 y name) #t #f)
+        (if (coin-spot-ok? pieces pace table x 1.0 y name) #t #f)
+        (if (coin-spot-ok? pieces pace table x 2.0 y name) #t #f)))
+
+(define (coin-lane-on? open lane)
+  (cond
+    ((< lane -0.1) #f)
+    ((< lane 0.5) (car open))
+    ((< lane 1.5) (car (cdr open)))
+    (else (car (cdr (cdr open))))))
+
+(define (coin-best-deficit weights counts open prefer)
+  (let ((total (+ (car counts) (car (cdr counts)) (car (cdr (cdr counts))))))
+    (let loop ((lane 0) (best -1.0) (best-s -1000.0))
+      (if (> lane 2)
+        best
+        (if (not (coin-lane-on? open (exact->inexact lane)))
+          (loop (+ lane 1) best best-s)
+          (let ((s (coin-score weights counts total (exact->inexact lane))))
+            (if (or (< best -0.1)
+                    (> s (+ best-s 0.0001))
+                    (and (< (coin-abs (- s best-s)) 0.0001)
+                         (or (< (coin-abs (- lane prefer)) 0.1)
+                             (and (>= (coin-abs (- best prefer)) 0.1) (= lane 1)))))
+              (loop (+ lane 1) (exact->inexact lane) s)
+              (loop (+ lane 1) best best-s))))))))
+
+; Keep a zig or a switch while the lanes are even. Once a lane is a
+; coin behind, the chain fills that lane instead of following the shape.
+(define (coin-want-shape weights counts open planned)
+  (let ((best (coin-best-deficit weights counts open planned)))
+    (if (or (< planned -0.1) (not (coin-lane-on? open planned)) (< best -0.1))
+      best
+      (let ((total (+ (car counts) (car (cdr counts)) (car (cdr (cdr counts))))))
+        (if (>= (coin-score weights counts total planned)
+                (- (coin-score weights counts total best) 0.08))
+          planned
+          best)))))
+
+; On the live course the same choice is held to the coins that were
+; actually laid in this three-level window.
+(define (coin-want weights counts open planned)
+  (if (not coin-course-on)
+    (coin-want-shape weights counts open planned)
+    (let* ((open (coin-fair-open counts open))
+           (best (coin-best-deficit weights counts open planned)))
+      (if (or (< planned -0.1) (not (coin-lane-on? open planned)) (< best -0.1))
+        best
+        (if (and (not (coin-share-over? counts planned))
+                 (not (coin-share-under? counts best)))
+          (coin-want-shape weights counts open planned)
+          best)))))
+
+; A lane already past 45% of the coins actually laid is closed when
+; another lane is open. Under 20%, once the window is large enough to
+; mean it, that lane is taken. One extra coin is what tips a short
+; window over the cap, so the test is strict greater-than.
+(define (coin-share-over? counts lane)
+  (let ((total (+ (car counts) (car (cdr counts)) (car (cdr (cdr counts)))))
+        (c (list-ref-counts counts lane)))
+    (> (* (+ c 1.0) 100.0) (* (+ total 1.0) 45.0))))
+
+(define (coin-share-under? counts lane)
+  (let ((total (+ (car counts) (car (cdr counts)) (car (cdr (cdr counts)))))
+        (c (list-ref-counts counts lane)))
+    (and (>= total 5)
+         (< (* c 100.0) (* total 20.0)))))
+
+(define (coin-fair-open counts open)
+  (let ((under (list (and (car open) (coin-share-under? counts 0.0))
+                     (and (car (cdr open)) (coin-share-under? counts 1.0))
+                     (and (car (cdr (cdr open))) (coin-share-under? counts 2.0)))))
+    (if (or (car under) (car (cdr under)) (car (cdr (cdr under))))
+      under
+      (let ((room (list (and (car open) (not (coin-share-over? counts 0.0)))
+                        (and (car (cdr open)) (not (coin-share-over? counts 1.0)))
+                        (and (car (cdr (cdr open))) (not (coin-share-over? counts 2.0))))))
+        (if (or (car room) (car (cdr room)) (car (cdr (cdr room))))
+          room
+          open)))))
+
+(define (coin-make x lane y)
+  (piece 5.0 x 0.42 0.42 y lane))
+
+; A slide or a jump used to lock onto the first open lane. That lane is
+; a side while the centre crate is in the way, so the rest of the chain
+; never came back. Each coin now takes the open lane furthest under its
+; share. A zig and a switch keep their shape, and fall back the same way
+; when the planned lane is blocked.
+(define (coin-spread? name)
+  (and (not (string=? name "zig"))
+       (not (string=? name "switch"))
+       (not (string=? name "single"))))
+
+; The live road clips a level at the gate, so the coins a player sees
+; are not the whole chain. The course remembers the coins that were
+; actually laid, by the level they fall in, and the next pick is judged
+; against that three-level window. A coin the clearance check drops is
+; never counted.
+(define coin-course-on #f)
+(define coin-note-on #t)
+(define coin-origin 0.0)
+(define coin-closed (list))
+(define coin-open #f)
+(define coin-ahead (list 0 0 0))
+
+(define (coin-set-origin! x)
+  (set! coin-origin (if (number? x) (exact->inexact x) 0.0)))
+
+(define (coin-reset-course!)
+  (set! coin-course-on #t)
+  (set! coin-note-on #t)
+  (set! coin-origin 0.0)
+  (set! coin-closed (list))
+  (set! coin-open #f)
+  (set! coin-ahead (list 0 0 0)))
+
+(define (coin-open-triple)
+  (list (car (cdr (cdr coin-open)))
+        (car (cdr (cdr (cdr coin-open))))
+        (car (cdr (cdr (cdr (cdr coin-open)))))))
+
+(define (coin-add3 a b)
+  (list (+ (car a) (car b))
+        (+ (car (cdr a)) (car (cdr b)))
+        (+ (car (cdr (cdr a))) (car (cdr (cdr b))))))
+
+(define (coin-len xs)
+  (let loop ((xs xs) (n 0))
+    (if (null? xs) n (loop (cdr xs) (+ n 1)))))
+
+(define (coin-drop-n xs n)
+  (if (or (<= n 0) (null? xs))
+    xs
+    (coin-drop-n (cdr xs) (- n 1))))
+
+(define (coin-last xs n)
+  (let ((k (coin-len xs)))
+    (if (<= k n) xs (coin-drop-n xs (- k n)))))
+
+(define (coin-sum-counts xs)
+  (let loop ((xs xs) (a (list 0 0 0)))
+    (if (null? xs)
+      a
+      (loop (cdr xs) (coin-add3 a (car xs))))))
+
+(define (coin-open-level! x0 x1)
+  (set! coin-course-on #t)
+  (if coin-open
+    (set! coin-closed (append coin-closed (list (coin-open-triple))))
+    #f)
+  (set! coin-open (list (exact->inexact x0) (exact->inexact x1)
+                        (car coin-ahead)
+                        (car (cdr coin-ahead))
+                        (car (cdr (cdr coin-ahead)))))
+  (set! coin-ahead (list 0 0 0)))
+
+(define (coin-span! x1)
+  (if (and coin-course-on coin-open (number? x1))
+    (set! coin-open (list (car coin-open) (exact->inexact x1)
+                          (car (cdr (cdr coin-open)))
+                          (car (cdr (cdr (cdr coin-open))))
+                          (car (cdr (cdr (cdr (cdr coin-open)))))))
+    #f))
+
+(define (coin-bump-open lane)
+  (let ((n0 (car (cdr (cdr coin-open))))
+        (n1 (car (cdr (cdr (cdr coin-open)))))
+        (n2 (car (cdr (cdr (cdr (cdr coin-open)))))))
+    (set! coin-open
+      (list (car coin-open) (car (cdr coin-open))
+            (if (< lane 0.5) (+ n0 1) n0)
+            (if (and (>= lane 0.5) (< lane 1.5)) (+ n1 1) n1)
+            (if (>= lane 1.5) (+ n2 1) n2)))))
+
+(define (coin-note! x lane)
+  (if (or (not coin-course-on) (not coin-note-on) (not coin-open))
+    #f
+    (let ((wx (+ x coin-origin)))
+      (if (>= wx (car (cdr coin-open)))
+        (set! coin-ahead (coin-bump coin-ahead lane))
+        (coin-bump-open lane)))))
+
+(define (coin-window-counts x)
+  (if (or (not coin-course-on) (not coin-note-on) (not coin-open))
+    #f
+    (let ((wx (+ x coin-origin)))
+      (if (>= wx (car (cdr coin-open)))
+        (coin-add3 (coin-add3 (coin-sum-counts (coin-last coin-closed 1))
+                              (coin-open-triple))
+                   coin-ahead)
+        (coin-add3 (coin-sum-counts (coin-last coin-closed 2))
+                   (coin-open-triple))))))
+
+(define (coin-emit hazards pace table params rng name x0 n step base counts0)
+  (let* ((y0 (coin-y name 0 n base))
+         (weights (coin-lane-weights params))
+         (spread (coin-spread? name))
+         (start-pick (coin-choose-lane params rng hazards pace table x0 y0 name))
+         (start (car start-pick))
+         (rng1 (cadr start-pick)))
+    (if (and (not spread) (< start -0.1))
+      (list (list) rng1)
+      (let ((end-pick (if (string=? name "switch")
+                        (coin-other params rng1 start)
+                        (list start rng1))))
+        (let ((end (car end-pick))
+              (rng2 (cadr end-pick)))
+          (let loop ((i 0) (acc (list)) (rg rng2) (hold start) (counts counts0))
+            (if (or (>= i n) (and (string=? name "single") (>= i 1)))
+              (list (reverse acc) rg counts)
+              (let* ((x (+ x0 (* step (exact->inexact i))))
+                     (y (coin-y name i n base))
+                     (planned (if spread
+                                -1.0
+                                (coin-plan-lane name hold end i n)))
+                     (open (coin-open-lanes hazards pace table x y name))
+                     (seen (coin-window-counts x))
+                     (want (coin-want weights (if seen seen counts) open planned)))
+                (if (>= want -0.1)
+                  (begin
+                    (coin-note! x want)
+                    (loop (+ i 1) (cons (coin-make x want y) acc) rg want (coin-bump counts want)))
+                  (let ((alt (coin-choose-lane params rg hazards pace table x y name)))
+                    (if (< (car alt) -0.1)
+                      (loop (+ i 1) acc (cadr alt) hold counts)
+                      (begin
+                        (coin-note! x (car alt))
+                        (loop (+ i 1)
+                              (cons (coin-make x (car alt) y) acc)
+                              (cadr alt)
+                              (car alt)
+                              (coin-bump counts (car alt)))))))))))))))
+
+(define (coin-one hazards pace span step cap params table rng group counts)
+  (let* ((head (car group))
+         (x0 (piece-x head))
+         (base (piece-y head))
+         (mover (coin-next hazards x0))
+         (hard (coin-forced mover x0 pace))
+         (name0 (if (> (string-length hard) 0) hard "line"))
+         (limit (coin-limit mover name0 x0 pace span))
+         (n (coin-fit x0 limit step cap))
+         (chosen (coin-choose mover x0 pace params rng n))
+         (made (coin-emit hazards pace table params (cadr chosen) (car chosen) x0 n step base counts)))
+    made))
+
+(define (coin-lay pieces pace span step cap params seed)
+  (if (or (not (pair? pieces)) (not (number? span)) (<= span 1.0))
+    pieces
+    (let* ((hazards (coin-drop pieces))
+           (gap (* step 1.7))
+           (groups (coin-cluster (coin-take pieces) gap))
+           (table (coin-reach-table hazards span pace))
+           (rng (make-random (if (and (number? seed) (> seed 0)) (floor seed) 1))))
+      (if (null? groups)
+        pieces
+        (let loop ((gs groups) (acc hazards) (rg rng) (counts (list 0 0 0)))
+          (if (null? gs)
+            acc
+            (let ((made (coin-one hazards pace span step cap params table rg (car gs) counts)))
+              (loop (cdr gs) (append acc (car made)) (cadr made) (car (cdr (cdr made)))))))))))
+
+(define (coin-near? pieces q)
+  (let ((x (piece-x q))
+        (lane (piece-lane q)))
+    (let loop ((ps pieces))
+      (if (null? ps)
+        #f
+        (let ((h (car ps)))
+          (if (and (coin-mover? (piece-k h))
+                   (or (< (piece-lane h) -0.5)
+                       (< lane -0.5)
+                       (< (coin-abs (- (piece-lane h) lane)) 0.1))
+                   (< (coin-abs (- (+ (piece-x h) (* (piece-w h) 0.5)) (+ x 0.21))) 1.35)
+                   (not (coin-body? pieces x lane (piece-y q) "line")))
+            #t
+            (loop (cdr ps))))))))
+
+(define (coin-touch-name q hazards)
+  (if (and (>= (piece-y q) 0.95) (coin-gap-at? hazards (piece-x q)))
+    "jump"
+    "line"))
+
+(define (coin-clear? pieces)
+  (let ((hazards (coin-drop pieces)))
+    (let loop ((ps (coin-take pieces)))
+      (if (null? ps)
+        #t
+        (let ((q (car ps)))
+          (if (coin-body? hazards (piece-x q) (piece-lane q) (piece-y q)
+                         (coin-touch-name q hazards))
+            #f
+            (loop (cdr ps))))))))
+
+(define (coin-reachable? pieces pace)
+  (let* ((hazards (coin-drop pieces))
+         (span (let loop ((ps pieces) (m 0.0))
+                 (if (null? ps)
+                   m
+                   (let ((e (+ (piece-x (car ps)) (piece-w (car ps)))))
+                     (loop (cdr ps) (if (> e m) e m))))))
+         (table (coin-reach-table hazards span (if (and (number? pace) (> pace 0.1)) pace 8.0)))
+         (speed (if (and (number? pace) (> pace 0.1)) pace 8.0)))
+    (let loop ((ps (coin-take pieces)))
+      (if (null? ps)
+        #t
+        (let* ((q (car ps))
+               (lane (piece-lane q))
+               (y (piece-y q))
+               (x (piece-x q)))
+          (if (and (>= lane -0.1) (<= lane 2.1)
+                   (>= y 0.40) (<= y 1.40)
+                   (coin-spot-ok? hazards speed table x lane y (coin-touch-name q hazards)))
+            (loop (cdr ps))
+            #f))))))
+
+(define (coin-share pieces)
+  (let loop ((ps (coin-take pieces)) (a 0) (b 0) (c 0) (z 0))
+    (if (null? ps)
+      (list a b c z)
+      (let ((lane (piece-lane (car ps))))
+        (cond
+          ((< (coin-abs (- lane 0.0)) 0.1) (loop (cdr ps) (+ a 1) b c z))
+          ((< (coin-abs (- lane 1.0)) 0.1) (loop (cdr ps) a (+ b 1) c z))
+          ((< (coin-abs (- lane 2.0)) 0.1) (loop (cdr ps) a b (+ c 1) z))
+          (else (loop (cdr ps) a b c (+ z 1))))))))
+
+(define (coin-used pieces)
+  (let ((row (coin-share pieces)))
+    (+ (if (> (car row) 0) 1 0)
+       (if (> (car (cdr row)) 0) 1 0)
+       (if (> (car (cdr (cdr row))) 0) 1 0))))
+
+(define (coin-sample-fit pieces)
+  (let* ((row (coin-share pieces))
+         (n (+ (car row) (car (cdr row)) (car (cdr (cdr row))) (car (cdr (cdr (cdr row))))))
+         (lanes (coin-used pieces))
+         (near (let loop ((ps (coin-take pieces)) (k 0))
+                 (if (null? ps)
+                   k
+                   (loop (cdr ps) (if (coin-near? pieces (car ps)) (+ k 1) k))))))
+    (if (<= n 0)
+      0.0
+      (+ 0.55
+         (* 0.30 (min 1.0 (/ (exact->inexact lanes) 3.0)))
+         (* 0.15 (min 1.0 (/ (exact->inexact near) (max 1.0 (* (exact->inexact n) 0.34)))))))))
+
+; pieces are the road the proposal would lay. engage is how the last
+; level felt: coins taken, lane changes, near-misses.
+(define (coin-consider state proposal pieces pace engage)
+  (let ((why (coin-static-why state proposal)))
+    (if (not (string=? why ""))
+      (hash "kind" "ROLLBACK" "why" why "state" state
+            "engage" engage "fit" 0.0)
+      (if (or (not (coin-clear? pieces)) (not (coin-reachable? pieces pace)))
+        (hash "kind" "ROLLBACK"
+              "why" (if (coin-clear? pieces) "reachable" "overlap")
+              "state" state "engage" engage "fit" 0.0)
+        (let ((fit (coin-sample-fit pieces)))
+          (if (< fit 0.45)
+            (hash "kind" "ROLLBACK" "why" "engage" "state" state
+                  "engage" engage "fit" fit)
+            (hash "kind" "KEEP" "why" "fair"
+                  "state" (coin-keep state (hash "moved" #t "why" "fair" "knob" (coin-get state "knob" 0)
+                                                 "params" proposal))
+                  "engage" (+ (* 0.55 fit) (* 0.45 (if (number? engage) engage 0.0)))
+                  "fit" fit)))))))
