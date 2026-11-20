@@ -483,6 +483,32 @@ def take_frames(buf):
         buf = buf[off + ln:]
     return texts, buf
 
+def ws_send(sock, opcode, payload):
+    mask = os.urandom(4)
+    header = bytearray([0x80 | opcode, 0x80 | len(payload)])
+    header += mask
+    header += bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+    sock.sendall(header)
+
+def release(sock):
+    # bye frees the core's one client. Keep reading so a large welcome
+    # cannot fill the socket and stall that bye.
+    try:
+        ws_send(sock, 1, b'{"op":"bye"}')
+    except OSError:
+        return
+    sock.settimeout(0.1)
+    end = time.time() + 1.0
+    while time.time() < end:
+        try:
+            chunk = sock.recv(65536)
+        except socket.timeout:
+            continue
+        except OSError:
+            break
+        if not chunk:
+            break
+
 while time.time() < deadline:
     if not client_alive():
         sys.exit(2)
@@ -526,6 +552,7 @@ while time.time() < deadline:
             texts, buf = take_frames(buf)
             for op, text in texts:
                 if op == 1 and (b'"op":"welcome"' in text or b'"op":"state"' in text):
+                    release(sock)
                     sys.exit(0)
     except OSError:
         pass

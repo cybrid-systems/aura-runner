@@ -128,6 +128,10 @@ echo "a 403 from the release API still reaches the container fallback" >&2
     echo "wrapper does not name the nightly image" >&2
     exit 1
   fi
+  if ! grep -q "AURA_RUNNER_BIND=0.0.0.0" "$cache403/aura/nightly/container/aura"; then
+    echo "wrapper does not publish the Aura port inside the container" >&2
+    exit 1
+  fi
   rm -rf "$cache403"
 )
 

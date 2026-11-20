@@ -287,6 +287,7 @@ exec docker run --rm \\
   -p "127.0.0.1:\${port}:\${port}" \\
   -v "\${work}:/work" -w /work \\
   -e AURA_SANDBOX -e AURA_RUNNER_PORT -e AURA_EVO_LOG -e AURA_HTTP_TIMEOUT \\
+  -e AURA_RUNNER_BIND=0.0.0.0 \\
   -e LLM_API_KEY -e LLM_BASE_URL -e LLM_MODEL -e LLM_TIMEOUT -e LUMEN_LLM \\
   "ghcr.io/cybrid-systems/aura:${slug}" \\
   "\$@"
