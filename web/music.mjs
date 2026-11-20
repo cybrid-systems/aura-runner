@@ -14,6 +14,28 @@ export const CHORDS = Object.freeze(["I", "ii", "iii", "IV", "V", "vi"]);
 export const OSCS = Object.freeze(["sine", "triangle", "square"]);
 export const MAX_VOICES = 8;
 
+// A missing localStorage key is null, and Number(null) is 0. That must not
+// become the opening level: a fresh profile stays audible after the gesture.
+export const DEFAULT_VOLUME = 0.8;
+export const CUE_BUS = 0.18;
+
+export function volumeFromStore(raw) {
+  if (typeof raw !== "string") return DEFAULT_VOLUME;
+  const text = raw.trim();
+  if (!text) return DEFAULT_VOLUME;
+  const n = Number(text);
+  if (!Number.isFinite(n) || n < 0 || n > 1) return DEFAULT_VOLUME;
+  return n;
+}
+
+// Cue-bus and music-bed gains once a gesture has started the context.
+// Mute, or an explicit saved zero, stays silent. Anything else is above it.
+export function audibleAfterGesture(stored, muted = false) {
+  const volume = volumeFromStore(stored);
+  if (muted || volume <= 0) return { volume, cue: 0, bed: 0, audible: false };
+  return { volume, cue: CUE_BUS * volume, bed: volume, audible: true };
+}
+
 export const LIMITS = Object.freeze({
   tempo: [76, 126],
   playTempo: [72, 156],

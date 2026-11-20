@@ -13,7 +13,7 @@
 // and schedules a few eighths ahead so a throttled tab does not burst.
 
 import {
-  HOME, MAX_VOICES,
+  CUE_BUS, DEFAULT_VOLUME, HOME, MAX_VOICES,
   acceptPhrase, atBar, check, chooseBed, chordRoot, createBook, effectFor,
   hzFor, layersFor, liftKey, offerKeep, offerRollback, rolesAt, stepTime, tempoFor,
 } from "./music.mjs";
@@ -44,7 +44,7 @@ const NOTE_GAIN = {
 export function createAudio() {
   let ctx = null;
   let muted = false;
-  let userVolume = 1;
+  let userVolume = DEFAULT_VOLUME;
   let master = null;
   let song = null;
   let bed = "wait";
@@ -120,7 +120,7 @@ export function createAudio() {
     if (!AC) return null;
     ctx = new AC();
     master = ctx.createGain();
-    master.gain.value = muted ? 0 : 0.18 * userVolume;
+    master.gain.value = muted ? 0 : CUE_BUS * userVolume;
     master.connect(ctx.destination);
     busFilter = ctx.createBiquadFilter();
     busFilter.type = "lowpass";
@@ -138,7 +138,7 @@ export function createAudio() {
 
   function applyGains() {
     const hear = muted ? 0 : userVolume;
-    if (master) master.gain.value = hear ? 0.18 * hear : 0;
+    if (master) master.gain.value = hear ? CUE_BUS * hear : 0;
     if (song) song.volume = hear ? SONG_VOL * hear : 0;
     if (bedGain && ctx) {
       const target = hear ? (bed === "file" ? 0.55 : 1) * hear : 0;

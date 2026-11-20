@@ -2,9 +2,9 @@
 // The page plays these phrases; this check never opens an audio device.
 import {
   HOME, LIMITS, MAX_VOICES,
-  acceptPhrase, atBar, check, chooseBed, createBook, effectFor, emit, evolve,
+  acceptPhrase, audibleAfterGesture, atBar, check, chooseBed, createBook, effectFor, emit, evolve,
   layersFor, liftKey, offerKeep, offerRollback, quantize, recoverTime, rolesAt,
-  stepTime, tempoFor,
+  stepTime, tempoFor, volumeFromStore,
 } from "../web/music.mjs";
 
 let failed = 0;
@@ -108,6 +108,16 @@ checkOk("layers-cap", layersFor(4, 20, 20) === 4 && layersFor(4, 20, 20, true) =
 checkOk("fallback-missing", chooseBed(204, true) === "synth" && chooseBed(404, true) === "synth" && chooseBed(0, false) === "synth");
 checkOk("fallback-file", chooseBed(200, true) === "file");
 checkOk("fallback-unplayable", chooseBed(200, false) === "synth");
+
+// localStorage.getItem returns null when the key was never written, and
+// Number(null) is 0. A fresh profile must still be audible after a gesture.
+const fresh = audibleAfterGesture(null, false);
+checkOk("fresh-audible", fresh.audible && fresh.volume === 0.8 && fresh.cue > 0.1 && fresh.bed === 0.8);
+checkOk("fresh-empty", audibleAfterGesture(undefined).audible && audibleAfterGesture("").volume === 0.8);
+checkOk("saved-level", volumeFromStore("0.4") === 0.4 && audibleAfterGesture("0.4").audible);
+checkOk("saved-zero", volumeFromStore("0") === 0 && !audibleAfterGesture("0").audible);
+checkOk("bad-volume", volumeFromStore("nope") === 0.8 && volumeFromStore("2") === 0.8 && volumeFromStore("-1") === 0.8);
+checkOk("muted-silent", !audibleAfterGesture(null, true).audible);
 
 const lifted = liftKey(home.phrase);
 checkOk("lift", lifted.key === "D" && check(emit(lifted)).ok && lifted.key !== home.phrase.key);
