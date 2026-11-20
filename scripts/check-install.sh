@@ -104,7 +104,7 @@ rm -rf "$sumdir"
 
 echo "unsupported platform names the release assets" >&2
 set +e
-plat_err="$(AURA_OS=darwin AURA_ARCH=arm64 install_aura "$work" 2>&1)"
+plat_err="$(AURA_OS=darwin AURA_ARCH=arm64 AURA_NO_DOCKER=1 install_aura "$work" 2>&1)"
 plat_rc=$?
 set -e
 if [[ "$plat_rc" -eq 0 ]]; then
@@ -118,6 +118,16 @@ if ! printf '%s\n' "$plat_err" | grep -q "darwin/arm64"; then
 fi
 if ! printf '%s\n' "$plat_err" | grep -q "AURA_BIN"; then
   echo "platform error did not mention AURA_BIN:" >&2
+  printf '%s\n' "$plat_err" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$plat_err" | grep -q "OrbStack"; then
+  echo "platform error did not tell a Mac what to install:" >&2
+  printf '%s\n' "$plat_err" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$plat_err" | grep -q "does not compile"; then
+  echo "platform error did not say compilation is skipped:" >&2
   printf '%s\n' "$plat_err" >&2
   exit 1
 fi

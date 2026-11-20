@@ -241,6 +241,59 @@ resolve_asset() {
   pick_asset_from_api "$os" "$arch"
 }
 
+docker_ready() {
+  [[ -z "${AURA_NO_DOCKER:-}" ]] || return 1
+  command -v docker >/dev/null 2>&1 || return 1
+  docker info >/dev/null 2>&1
+}
+
+# A Mac or Windows machine can run the prebuilt Linux image. Linux already
+# has a native asset, and a test that only pretends to be Darwin must not
+# pull an image.
+container_fallback_ok() {
+  case "$(uname -s)" in
+    Darwin|MINGW*|MSYS*|CYGWIN*|Windows_NT) ;;
+    *) return 1 ;;
+  esac
+  docker_ready
+}
+
+write_container_wrapper() {
+  local dest slug
+  slug="$(aura_version_slug)"
+  dest="$(aura_cache_root)/aura/$slug/container/aura"
+  mkdir -p "$(dirname "$dest")"
+  cat > "$dest" << EOF
+#!/bin/sh
+# Prebuilt Aura image. This OS has no native binary in the release.
+port=\${AURA_RUNNER_PORT:-8765}
+work=\${AURA_WORK:-\$PWD}
+exec docker run --rm \\
+  -p "127.0.0.1:\${port}:\${port}" \\
+  -v "\${work}:/work" -w /work \\
+  -e AURA_SANDBOX -e AURA_RUNNER_PORT -e AURA_EVO_LOG -e AURA_HTTP_TIMEOUT \\
+  -e LLM_API_KEY -e LLM_BASE_URL -e LLM_MODEL -e LLM_TIMEOUT -e LUMEN_LLM \\
+  "ghcr.io/cybrid-systems/aura:${slug}" \\
+  "\$@"
+EOF
+  chmod +x "$dest"
+  AURA_CONTAINER_BIN="$dest"
+}
+
+explain_no_native() {
+  local os="$1" arch="$2" tag="$3" chosen="$4"
+  echo "No prebuilt Aura for ${os}/${arch} in the ${tag} release." >&2
+  if [[ "$chosen" == NONE* && $(printf '%s\n' "$chosen" | wc -l) -gt 1 ]]; then
+    echo "Published assets:" >&2
+    printf '%s\n' "$chosen" | tail -n +2 | sed 's/^/  /' >&2
+  else
+    echo "This release publishes Linux x86_64 and Linux arm64." >&2
+  fi
+  echo "On a Mac, install OrbStack (https://orbstack.dev) or Docker Desktop, then run ./run.sh again." >&2
+  echo "When docker is available, ./run.sh runs the prebuilt image ghcr.io/cybrid-systems/aura:$(aura_version_slug)." >&2
+  echo "It does not compile Aura. You can also set AURA_BIN to a native binary." >&2
+}
+
 pick_asset_from_api() {
   local os="$1" arch="$2"
   local tag api body rc chosen slug base
@@ -307,14 +360,13 @@ PY
   }
   rm -f "$body"
   if [[ "$chosen" == NONE* || -z "$chosen" ]]; then
-    echo "No prebuilt Aura for ${os}/${arch} in the ${tag} release." >&2
-    if [[ "$chosen" == NONE* && $(printf '%s\n' "$chosen" | wc -l) -gt 1 ]]; then
-      echo "Published assets:" >&2
-      printf '%s\n' "$chosen" | tail -n +2 | sed 's/^/  /' >&2
-    else
-      echo "This release publishes Linux x86_64 and Linux arm64." >&2
+    if container_fallback_ok; then
+      echo "No native Aura build for ${os}/${arch}. Using the prebuilt Linux image." >&2
+      write_container_wrapper
+      printf '%s\n' "CONTAINER"
+      return 0
     fi
-    echo "Set AURA_BIN to a binary you already have." >&2
+    explain_no_native "$os" "$arch" "$tag" "$chosen"
     return 1
   fi
   chosen="$(printf '%s\n' "$chosen" | head -n 1)"
@@ -469,6 +521,19 @@ ensure_bundle() {
   fi
   name="$(head -n 1 "$asset_out")"
   rm -f "$asset_out"
+  if [[ "$name" == "CONTAINER" ]]; then
+    if [[ -z "${AURA_CONTAINER_BIN:-}" || ! -x "$AURA_CONTAINER_BIN" ]]; then
+      echo "Could not prepare the Aura docker wrapper." >&2
+      return 1
+    fi
+    echo "Aura image ghcr.io/cybrid-systems/aura:$(aura_version_slug)  docker" >&2
+    if ! verify_running_version "$AURA_CONTAINER_BIN"; then
+      return 1
+    fi
+    AURA_READY_FROM="docker"
+    printf '%s\n' "$AURA_CONTAINER_BIN"
+    return 0
+  fi
   if [[ -z "$name" || -z "${AURA_SHA_FILE:-}" || ! -f "$AURA_SHA_FILE" ]]; then
     echo "Could not choose an Aura asset for ${os}/${arch}." >&2
     return 1

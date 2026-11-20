@@ -60,6 +60,9 @@ let showStats = params.has("stats");
 const benchMode = params.has("bench");
 
 const gpuNote = document.getElementById("nogpu");
+const bootEl = document.getElementById("boot");
+const bootStep = document.getElementById("boot-step");
+const bootBar = document.getElementById("boot-bar");
 const renderer = createRenderer(canvas, {
   onStatus(ev) {
     if (!gpuNote) return;
@@ -1004,11 +1007,43 @@ function shareText() {
   return `${location.origin}${location.pathname}?seed=${seed}&cards=${ids}`;
 }
 
+function paintBoot(text) {
+  if (!bootEl || bootEl.hidden || !text) return;
+  const cut = text.indexOf(" ");
+  const pct = cut > 0 ? Number(text.slice(0, cut)) : NaN;
+  const label = cut > 0 ? text.slice(cut + 1).trim() : text.trim();
+  if (Number.isFinite(pct) && bootBar) bootBar.style.width = Math.min(96, pct) + "%";
+  if (label && bootStep) bootStep.textContent = label;
+}
+
+function pollBoot() {
+  if (!bootEl || bootEl.hidden) return;
+  fetch("/boot", { cache: "no-store" })
+    .then((r) => (r.status === 200 ? r.text() : ""))
+    .then((text) => paintBoot(text))
+    .catch(() => {})
+    .finally(() => {
+      if (bootEl && !bootEl.hidden) setTimeout(pollBoot, 150);
+    });
+}
+
+function hideBoot() {
+  if (!bootEl || bootEl.hidden) return;
+  if (bootBar) bootBar.style.width = "100%";
+  if (bootStep) bootStep.textContent = "可以跑了";
+  setTimeout(() => {
+    if (bootEl) bootEl.hidden = true;
+  }, 160);
+}
+
+pollBoot();
+
 function connect() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   ws = new WebSocket(`${proto}://${location.host}/ws`);
   ws.onopen = () => {
     connected = true;
+    paintBoot("70 正在铺路");
     if (booted) {
       // The local list has already been pruned. Ask the server for the
       // chunks it still has instead of inventing an empty road.
@@ -1039,6 +1074,7 @@ function connect() {
     const msg = JSON.parse(ev.data);
     if (freshRun && msg.op !== "welcome" && msg.op !== "resync") return;
     if (msg.op === "welcome") {
+      hideBoot();
       freshRun = false;
       resetLocal();
       booted = true;
@@ -1121,6 +1157,7 @@ function connect() {
   };
   ws.onclose = () => {
     connected = false;
+    if (bootEl && !bootEl.hidden && bootStep) bootStep.textContent = "还在启动";
     setTimeout(connect, 600);
   };
 }
