@@ -2,6 +2,7 @@
 // agree on the jump trace to the millimetre and on the pass/fail cases.
 import { readFileSync } from "node:fs";
 import { DT, bodyLane, makePlayer, mm, praiseClear, pressJump, pressLane, pressSlide, rulesOf, step } from "../web/sim.mjs";
+import { NEAR_POINTS, NICE_POINTS, OVERTAKE_POINTS, challengeFor, challengeMet, nearMiss, overtake, skimmed, trackOvertake } from "../web/score.mjs";
 
 const rules = rulesOf(32, 11.2, 5, 0.48, 0.12, 0.12);
 const lines = [];
@@ -125,10 +126,22 @@ function slidePop() {
   pressSlide(p);
   return p;
 }
-function popperFor(id, x0, span) {
-  if (span < 12) return null;
-  if (id > 0 && id % 5 === 0) return null;
-  const want = id === 0 ? 46 : 10 + ((id + 2) % 9);
+function pressureBand(n) {
+  if (typeof n !== "number") return 1;
+  if (n < 0.5) return 0;
+  if (n < 1.5) return 1;
+  if (n < 2.5) return 2;
+  if (n < 3.5) return 3;
+  return 4;
+}
+// Twin of popper-for. Pressure 1 is the shipped toss, including the
+// opening id at 62 m before the span clamps it.
+function popperFor(id, x0, span, pressure) {
+  const band = pressure === undefined ? 1 : pressureBand(pressure);
+  if (span < (band <= 0 ? 16 : 12)) return null;
+  if (id > 0 && ((band <= 2 && id % 5 === 0) || (band <= 0 && id % 4 === 0))) return null;
+  const base = id === 0 ? 62 : 10 + ((id + 2) % 9);
+  const want = band <= 0 ? base + 8 : band >= 3 ? base * 0.75 : base;
   const along = Math.min(want, span - 3);
   if (along < 6) return null;
   return { x: x0 + along, lane: id === 0 ? 1 : id % 3 };
@@ -189,6 +202,18 @@ const magStill = kindX(magOn, 3) === kindX(magOff, 3)
   && kindX(magOn, 10) === kindX(magOff, 10)
   && kindX(magOn, 2) === kindX(magOff, 2)
   && kindX(magOff, 5) === 2.2 ? 1 : 0;
+const richPieces = [[1, 0, 20, 0.45, 0], [5, 3, 0.42, 0.42, 0.4, 1, 40]];
+const richRunner = makePlayer(1);
+for (let i = 0; i < 80; i++) step(richRunner, richPieces, rules, DT);
+const richScore = richRunner[6].toFixed(1);
+const worthCoin = [[5, 2.2, 0.42, 0.42, 0.4, 0, 40]];
+const worthRules = rulesOf(32, 11.2, 5, 0.48, 0.12, 0.12);
+worthRules.worth = 25;
+worthRules.air = 0;
+worthRules.magnet = 2.4;
+step(makePlayer(1), worthCoin, worthRules, DT);
+const magWorth = worthCoin[0][6] === 40 ? 1 : 0;
+
 const held = magPack(2.4);
 const x1 = kindX(held, 5);
 const offRules = rulesOf(32, 11.2, 5, 0.48, 0.12, 0.12);
@@ -247,6 +272,8 @@ const got = [
   `mag-pull ${magPull}`,
   `mag-still ${magStill}`,
   `mag-off ${magStopped}`,
+  `rich ${richScore}`,
+  `mag-worth ${magWorth}`,
 ];
 // apex/air are analytic and already in the golden; compare the sim lines.
 const simGolden = golden.filter((l) => !l.startsWith("apex ") && !l.startsWith("air "));
@@ -328,6 +355,67 @@ if (!praiseClear(beside, blastQ) || !praiseClear(under, blastQ) || praiseClear(m
 }
 if (praiseClear(through, gatePiece) || !praiseClear(past, gatePiece) || praiseClear(dropped, gatePiece)) {
   console.error("gate prize must wait until the bar is behind a slide");
+  process.exit(1);
+}
+
+if (NEAR_POINTS >= NICE_POINTS || nearMiss(1, 0).points !== NEAR_POINTS || nearMiss(1, 10).text !== "Close! +15") {
+  console.error("near-miss bonus should sit under Nice");
+  process.exit(1);
+}
+if (OVERTAKE_POINTS <= NICE_POINTS || overtake(1, 0).points !== OVERTAKE_POINTS) {
+  console.error("overtake bonus should read above Nice");
+  process.exit(1);
+}
+const hurdle = [3, 4, 0.7, 0.55, 0, -1];
+if (!skimmed(4.7, 0.7, 1, hurdle) || skimmed(4.7, 0.2, 1, hurdle) || skimmed(8, 0.7, 1, hurdle)) {
+  console.error("near-miss window drifted from the spark");
+  process.exit(1);
+}
+const pot = [7, 4, 1.1, 1.2, 0, 1];
+if (!skimmed(5.1, 0, 0, pot) || skimmed(5.1, 0, 1, pot)) {
+  console.error("a block skim is the next lane");
+  process.exit(1);
+}
+let mark = trackOvertake(null, 2, 6);
+mark = trackOvertake(mark, 4, 6);
+if (mark.award || !mark.behind) {
+  console.error("still behind the rival");
+  process.exit(1);
+}
+mark = trackOvertake(mark, 6.5, 6);
+if (!mark.award || !mark.done) {
+  console.error("overtake should pay once when pulling ahead");
+  process.exit(1);
+}
+mark = trackOvertake(mark, 8, 6);
+if (mark.award) {
+  console.error("overtake is once per rival");
+  process.exit(1);
+}
+const ahead = trackOvertake(trackOvertake(null, 8, 6), 9, 6);
+if (ahead.award) {
+  console.error("starting ahead of a rival is not an overtake");
+  process.exit(1);
+}
+if (challengeFor(1).id !== "clean" || challengeFor(2).text !== "Reach ×3 combo" || challengeFor(3).id !== "overtake") {
+  console.error("challenge rotation");
+  process.exit(1);
+}
+if (!challengeMet("clean", { bumps: 0 }) || challengeMet("clean", { bumps: 1 })
+  || !challengeMet("combo", { combo: 3 }) || challengeMet("combo", { combo: 2 })
+  || !challengeMet("overtake", { overtakes: 1 }) || challengeMet("overtake", { overtakes: 0 })) {
+  console.error("challenge completion");
+  process.exit(1);
+}
+const early = popperFor(1, 0, 80, 4);
+const plainPop = popperFor(1, 0, 80, 1);
+const late = popperFor(1, 0, 80, 0);
+if (popperFor(5, 0, 40) || !popperFor(5, 0, 40, 4) || popperFor(4, 0, 40, 0) || popperFor(1, 0, 14, 0) || !popperFor(1, 0, 14, 1)) {
+  console.error("adaptive popper gating");
+  process.exit(1);
+}
+if (!early || !plainPop || !late || !(early.x < plainPop.x) || !(late.x > plainPop.x) || early.x < 6 || late.lane < 0 || late.lane > 2) {
+  console.error(`popper pressure ${JSON.stringify({ early, plainPop, late })}`);
   process.exit(1);
 }
 console.log(`sim matches aura golden (${got.length} lines)`);

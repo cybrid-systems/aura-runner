@@ -1,5 +1,5 @@
 import { DT, bodyLane, makePlayer, praiseClear, pressJump, pressLane, pressSlide, rulesOf, step } from "./sim.mjs";
-import { awardPickup, dropGrade, gradeLabel, lootWorth, praise } from "./score.mjs";
+import { awardPickup, challengeFor, challengeMet, dropGrade, gradeLabel, lootWorth, nearMiss, overtake, praise, skimmed, trackOvertake } from "./score.mjs";
 import { createRenderer } from "./render.mjs";
 import { createInput } from "./input.mjs";
 import { createAudio } from "./audio.mjs";
@@ -33,6 +33,7 @@ const modelBtn = document.getElementById("model");
 const markEl = document.getElementById("mark");
 const wardEl = document.getElementById("ward");
 const recordEl = document.getElementById("record");
+const challengeEl = document.getElementById("challenge");
 const againBtn = document.getElementById("again");
 
 const params = new URLSearchParams(location.search);
@@ -121,6 +122,13 @@ let gainText = "";
 let gainUntil = 0;
 let comboText = "";
 let feltSpeed = 8;
+let skillBank = 0;
+let levelMaxCombo = 0;
+let levelNear = 0;
+let levelOvertakes = 0;
+let levelBumps = 0;
+let challengeDone = false;
+let rewardUntil = 0;
 const nearSeen = new Set();
 const toastQ = [];
 let toastUntil = 0;
@@ -416,6 +424,15 @@ function resetLocal() {
   gainText = "";
   gainUntil = 0;
   comboText = "";
+  skillBank = 0;
+  levelMaxCombo = 0;
+  levelNear = 0;
+  levelOvertakes = 0;
+  levelBumps = 0;
+  challengeDone = false;
+  rewardUntil = 0;
+  document.documentElement.dataset.reward = "0";
+  if (wardEl) wardEl.classList.remove("boost");
   feltSpeed = rules.speed;
   comboEl.hidden = true;
   comboEl.classList.remove("hot");
@@ -464,12 +481,52 @@ function reconcile(st) {
   applyLevel(st);
 }
 
+function grantReward(ch) {
+  challengeDone = true;
+  record.crests = (record.crests | 0) + 1;
+  wardReady = true;
+  wardLeft = 0;
+  rewardUntil = performance.now() + 6500;
+  document.documentElement.dataset.reward = "1";
+  if (wardEl) wardEl.classList.add("boost");
+  showCue(ch.text + " · Shield bright");
+  showGain("Trail lit", true);
+  writeRecord();
+  paintRecord();
+}
+
+function maybeClearChallenge() {
+  if (challengeDone) return;
+  const ch = challengeFor(levelN);
+  if (ch.id === "clean") return;
+  if (!challengeMet(ch.id, { bumps: levelBumps, combo: levelMaxCombo, overtakes: levelOvertakes })) return;
+  grantReward(ch);
+  paintChallenge();
+}
+
+function onLevelChange(prev) {
+  const ch = challengeFor(prev);
+  if (levelBumps === 0) record.cleanRuns = (record.cleanRuns | 0) + 1;
+  if (levelMaxCombo > (record.bestCombo | 0)) record.bestCombo = levelMaxCombo;
+  if (!challengeDone && ch.id === "clean" && challengeMet("clean", { bumps: 0 })) grantReward(ch);
+  levelBumps = 0;
+  levelMaxCombo = 0;
+  levelNear = 0;
+  levelOvertakes = 0;
+  challengeDone = false;
+  writeRecord();
+  paintRecord();
+}
+
 function applyLevel(msg) {
+  const prev = levelN;
   if (typeof msg.level === "number") levelN = msg.level;
   if (typeof msg.goal === "number") levelGoal = msg.goal;
   if (typeof msg.level0 === "number") levelStart = msg.level0;
   if (typeof msg.pace === "number") formN = Math.max(0, Math.min(4, Math.round(msg.pace)));
+  if (typeof msg.level === "number" && levelN > prev && serverRun >= 0) onLevelChange(prev);
   noteCardGrants();
+  paintChallenge();
 }
 
 function clampInt(v, lo, hi, fallback) {
@@ -479,7 +536,10 @@ function clampInt(v, lo, hi, fallback) {
 }
 
 function blankRecord() {
-  return { level: 1, form: 0, points: 0, grade: 1, bank: 0, bestLevel: 1, bestPoints: 0 };
+  return {
+    level: 1, form: 0, points: 0, grade: 1, bank: 0, bestLevel: 1, bestPoints: 0,
+    bestCombo: 0, cleanRuns: 0, crests: 0,
+  };
 }
 
 function sanitizeRecord(raw) {
@@ -491,7 +551,10 @@ function sanitizeRecord(raw) {
   const bank = clampInt(raw.bank, 0, 99, 0);
   const bestLevel = Math.max(clampInt(raw.bestLevel, 1, 40, 1), level);
   const bestPoints = Math.max(clampInt(raw.bestPoints, 0, 500000, 0), points);
-  return { level, form, points, grade, bank, bestLevel, bestPoints };
+  const bestCombo = clampInt(raw.bestCombo, 0, 99, 0);
+  const cleanRuns = clampInt(raw.cleanRuns, 0, 9999, 0);
+  const crests = clampInt(raw.crests, 0, 9999, 0);
+  return { level, form, points, grade, bank, bestLevel, bestPoints, bestCombo, cleanRuns, crests };
 }
 
 function readRecord() {
@@ -527,17 +590,35 @@ function noteGear(prev, next) {
   if (prev < 3 && next >= 3) showCue("A circlet");
 }
 
+function recordLine(rec) {
+  let text = "Best L" + rec.bestLevel + " · " + rec.bestPoints;
+  if (rec.bestCombo > 1) text += " · ×" + rec.bestCombo;
+  if (rec.cleanRuns > 0) text += " · " + rec.cleanRuns + " clean";
+  if (rec.crests > 0) text += " · crest " + rec.crests;
+  return text;
+}
+
 function paintRecord() {
   if (!recordEl) return;
-  const show = record.bestLevel > 1 || record.bestPoints > 0;
+  const show = record.bestLevel > 1 || record.bestPoints > 0 || record.bestCombo > 1
+    || record.cleanRuns > 0 || record.crests > 0;
   recordEl.hidden = !show;
-  recordEl.textContent = show ? ("Best L" + record.bestLevel + " · " + record.bestPoints) : "";
+  recordEl.textContent = show ? recordLine(record) : "";
+}
+
+function paintChallenge() {
+  if (!challengeEl) return;
+  const ch = challengeFor(levelN);
+  challengeEl.hidden = false;
+  challengeEl.classList.toggle("done", challengeDone);
+  challengeEl.textContent = (challengeDone ? "Done · " : "Try · ") + ch.text;
 }
 
 function sameRecord(a, b) {
   return a.level === b.level && a.form === b.form && a.points === b.points
     && a.grade === b.grade && a.bank === b.bank
-    && a.bestLevel === b.bestLevel && a.bestPoints === b.bestPoints;
+    && a.bestLevel === b.bestLevel && a.bestPoints === b.bestPoints
+    && a.bestCombo === b.bestCombo && a.cleanRuns === b.cleanRuns && a.crests === b.crests;
 }
 
 function syncRecord() {
@@ -552,6 +633,9 @@ function syncRecord() {
     bank: clampInt(gradeBank, 0, 99, 0),
     bestLevel: Math.max(record.bestLevel, clampInt(levelN, 1, 40, 1)),
     bestPoints: Math.max(record.bestPoints, points),
+    bestCombo: Math.max(record.bestCombo | 0, levelMaxCombo | 0),
+    cleanRuns: record.cleanRuns | 0,
+    crests: record.crests | 0,
   };
   if (sameRecord(record, next)) return;
   record = next;
@@ -826,7 +910,17 @@ function connect() {
 
 function sendTick() {
   if (!connected || ws.readyState !== 1) return;
-  ws.send(JSON.stringify({ op: "tick", jump: jumpQ, slide: slideQ, lane: laneQ }));
+  ws.send(JSON.stringify({
+    op: "tick",
+    jump: jumpQ,
+    slide: slideQ,
+    lane: laneQ,
+    skill: Math.max(0, Math.floor(skillBank)),
+    combo: levelMaxCombo | 0,
+    near: levelNear | 0,
+    overtakes: levelOvertakes | 0,
+    level: levelN | 0,
+  }));
   jumpQ = 0;
   slideQ = 0;
   laneQ = 0;
@@ -900,6 +994,9 @@ function restart() {
       bank: 0,
       bestLevel: record.bestLevel,
       bestPoints: record.bestPoints,
+      bestCombo: record.bestCombo | 0,
+      cleanRuns: record.cleanRuns | 0,
+      crests: record.crests | 0,
     };
     writeRecord();
     paintRecord();
@@ -1037,10 +1134,14 @@ function frame(now) {
       if (ev === "coin") {
         audio.pickup(loot);
         spark = "coin";
-        const got = awardPickup(rules.worth, combo, comboUntil, now, grade, gradeBank);
+        const worth = takeCoinWorth(pieces) || rules.worth;
+        const got = awardPickup(worth, combo, comboUntil, now, grade, gradeBank);
         combo = got.combo;
         comboUntil = got.comboUntil;
         player[6] += got.extra;
+        skillBank += got.extra;
+        if (got.combo > levelMaxCombo) levelMaxCombo = got.combo;
+        if (got.combo > (record.bestCombo | 0)) record.bestCombo = got.combo;
         const rose = got.grade > grade;
         grade = got.grade;
         gradeBank = got.bank;
@@ -1049,15 +1150,9 @@ function frame(now) {
         if (rose) celebrateGrade();
       }
       if (!ward.held && ev !== "bump" && ev !== "oops" && scanPraise()) {
-        const got = praise(grade, gradeBank);
-        player[6] += got.points;
-        const rose = got.grade > grade;
-        grade = got.grade;
-        gradeBank = got.bank;
-        showGain(got.text, false);
+        paySkill(praise(grade, gradeBank), false);
         audio.nice();
         nearSpark = true;
-        if (rose) celebrateGrade();
       }
       if (ev === "spring") { audio.spring(); spark = "spring"; }
       if (ev === "bump" || ev === "oops") {
@@ -1066,6 +1161,7 @@ function frame(now) {
         showCue(ev === "oops" ? "Back on the path" : "Oops! Keep going");
         audio.near();
         if (ev === "bump") {
+          levelBumps += 1;
           grade = dropGrade(grade);
           gradeBank = 0;
           combo = 0;
@@ -1074,7 +1170,19 @@ function frame(now) {
       }
       if (wasY > 0.2 && player[1] <= 0.001 && player[5] > 0) audio.land();
       if (hearPoppers(pieces)) audio.pop();
-      if (scanNear(now)) { nearSpark = true; audio.near(); }
+      if (scanNear(now)) {
+        paySkill(nearMiss(grade, gradeBank), false);
+        levelNear += 1;
+        nearSpark = true;
+        audio.near();
+      }
+      const passes = scanOvertakes();
+      for (let pass = 0; pass < passes; pass++) {
+        paySkill(overtake(grade, gradeBank), false);
+        levelOvertakes += 1;
+        audio.nice();
+      }
+      maybeClearChallenge();
       player[5] = 1;
       acc -= DT;
       guard++;
@@ -1088,6 +1196,11 @@ function frame(now) {
     lastPump = now;
   }
   stumble = Math.max(0, stumble - dt * 1000);
+  if (rewardUntil && now > rewardUntil) {
+    rewardUntil = 0;
+    document.documentElement.dataset.reward = "0";
+    if (wardEl) wardEl.classList.remove("boost");
+  }
   if (!flashEl.hidden) {
     flashEl.hidden = true;
     flashEl.classList.remove("on");
@@ -1234,6 +1347,28 @@ function scanPraise() {
   return false;
 }
 
+function takeCoinWorth(list) {
+  let worth = 0;
+  for (let i = 0; i < list.length; i++) {
+    const q = list[i];
+    if (q[0] === 0 && q.paid > 0) {
+      worth = q.paid;
+      q.paid = 0;
+    }
+  }
+  return worth;
+}
+
+function paySkill(got, big) {
+  player[6] += got.points;
+  skillBank += got.points;
+  const rose = got.grade > grade;
+  grade = got.grade;
+  gradeBank = got.bank;
+  showGain(got.text, !!big);
+  if (rose) celebrateGrade();
+}
+
 function scanNear(nowMs) {
   const x = player[0];
   const y = player[1];
@@ -1242,21 +1377,29 @@ function scanNear(nowMs) {
     const q = pieces[i];
     const k = q[0];
     if (k !== 3 && k !== 7) continue;
-    const end = q[1] + q[2];
-    if (x < end - 0.05 || x > end + 0.35) continue;
     const key = q[1].toFixed(2) + ":" + k + ":" + (q[5] ?? -1);
     if (nearSeen.has(key)) continue;
-    const pl = q.length > 5 ? q[5] : -1;
-    const skimPot = k === 7 && pl >= 0 && Math.abs(pl - lane) === 1;
-    const skimHurdle = k === 3 && (pl < 0 || pl === lane) && y > q[3] && y < q[3] + 0.55;
-    if (skimPot || skimHurdle) {
-      nearSeen.add(key);
-      if (nearSeen.size > 80) nearSeen.clear();
-      void nowMs;
-      return true;
-    }
+    if (!skimmed(x, y, lane, q)) continue;
+    nearSeen.add(key);
+    if (nearSeen.size > 80) nearSeen.clear();
+    void nowMs;
+    return true;
   }
   return false;
+}
+
+function scanOvertakes() {
+  const x = player[0];
+  let n = 0;
+  for (let i = 0; i < pieces.length; i++) {
+    const q = pieces[i];
+    if (q[0] !== 10) continue;
+    const mid = q[1] + q[2] * 0.5;
+    const next = trackOvertake(q.chase, x, mid);
+    q.chase = next;
+    if (next.award && player[11] <= 0) n += 1;
+  }
+  return n;
 }
 
 function paintStats() {
@@ -1302,6 +1445,7 @@ if (againBtn) {
 }
 window.addEventListener("pagehide", () => syncRecord());
 paintRecord();
+paintChallenge();
 badgeEl.addEventListener("click", () => {
   const open = notesEl.hidden;
   notesEl.hidden = !open;
