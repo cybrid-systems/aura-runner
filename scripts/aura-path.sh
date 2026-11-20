@@ -145,6 +145,7 @@ fetch_to() {
     fi
     rm -f "$err"
   fi
+  AURA_FETCH_CODE="$code"
   if [[ "$rc" -eq 0 ]]; then
     return 0
   fi
@@ -226,7 +227,9 @@ resolve_asset() {
       printf '%s\n' "$name"
       return 0
     fi
-    if [[ "$rc" -ne 8 ]]; then
+    # A missing release asset is usually 404. GitHub also answers 403 for
+    # an asset that was never published, which is not a network failure.
+    if [[ "$rc" -ne 8 && "${AURA_FETCH_CODE:-}" != "403" && "${AURA_FETCH_CODE:-}" != "429" ]]; then
       rm -f "$tmp"
       network_error "$os" "$arch" "$(aura_cache_root)"
       return 1
@@ -308,6 +311,12 @@ pick_asset_from_api() {
     if [[ "$rc" -eq 8 ]]; then
       echo "Aura release '${tag}' was not found." >&2
       echo "AURA_VERSION can be nightly or a tag such as v0.2.7." >&2
+      return 1
+    fi
+    # The conventional asset names already failed. A 403 from the release
+    # API (common unauthenticated) must not hide the Mac instructions.
+    if [[ "$os" != "linux" && ( "${AURA_FETCH_CODE:-}" == "403" || "${AURA_FETCH_CODE:-}" == "429" ) ]]; then
+      explain_no_native "$os" "$arch" "$tag" "NONE"
       return 1
     fi
     network_error "$os" "$arch" "$(aura_cache_root)"
