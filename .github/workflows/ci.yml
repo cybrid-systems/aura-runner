@@ -31,6 +31,10 @@ jobs:
         run: |
           node --check web/sim.mjs
           node --check web/render.mjs
+          node --check web/quality.mjs
+          node --check web/lit.mjs
+          node --check web/post.mjs
+          node --check web/fallback.mjs
           node --check web/input.mjs
           node --check web/audio.mjs
           node --check web/main.mjs
@@ -42,6 +46,7 @@ jobs:
           node --check scripts/check-lanes.mjs
           node --check scripts/mock-llm-e2e.mjs
           node --check scripts/check-contrast.mjs
+          node --check scripts/check-quality.mjs
           node --check scripts/check-edsl.mjs
           node --check scripts/check-edsl-e2e.mjs
           node --check scripts/check-run.mjs
@@ -56,6 +61,8 @@ jobs:
         run: node scripts/check-lanes.mjs
       - name: Pink garden keeps obstacle contrast
         run: node scripts/check-contrast.mjs
+      - name: Quality tiers and sim step
+        run: node scripts/check-quality.mjs
       - name: Biome EDSL view gate
         run: node scripts/check-edsl.mjs
       - name: Multiplier, venues, and voice state

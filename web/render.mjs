@@ -1,4 +1,11 @@
 import { drawThing, growOf, animOf, showBox } from "./thing.mjs";
+import { DEPTH_FS, litFragment, litSky } from "./lit.mjs";
+import { createPost, probeFloat } from "./post.mjs";
+import {
+  DEFAULT_POLICY, bindContextLoss, contextPlan, createQuality, noteFbo,
+  noteReduced, noteRefresh, noteVisibility, observe, probeCaps, setMode,
+  softwareFromRenderer, tierProfile,
+} from "./quality.mjs";
 
 // Third-person WebGL2 view of the Lumen garden. One instanced draw of
 // unit cubes, shaded as beveled toys, spheres and seeds. The sim's
@@ -398,6 +405,29 @@ function lookAt(out, eye, at, up) {
   out[13] = -(y0 * eye[0] + y1 * eye[1] + y2 * eye[2]);
   out[14] = -(z0 * eye[0] + z1 * eye[1] + z2 * eye[2]);
   out[15] = 1;
+  return out;
+}
+
+function ortho(out, left, right, bottom, top, near, far) {
+  const lr = 1 / (left - right);
+  const bt = 1 / (bottom - top);
+  const nf = 1 / (near - far);
+  out[0] = -2 * lr; out[1] = 0; out[2] = 0; out[3] = 0;
+  out[4] = 0; out[5] = -2 * bt; out[6] = 0; out[7] = 0;
+  out[8] = 0; out[9] = 0; out[10] = 2 * nf; out[11] = 0;
+  out[12] = (left + right) * lr;
+  out[13] = (top + bottom) * bt;
+  out[14] = (far + near) * nf;
+  out[15] = 1;
+  return out;
+}
+
+function mulMat(out, a, b) {
+  for (let c = 0; c < 4; c++) {
+    for (let r = 0; r < 4; r++) {
+      out[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
+    }
+  }
   return out;
 }
 
@@ -1127,6 +1157,10 @@ void main() {
   o = vec4(softKnee(mix(col, uFog, fog)), cov);
 }`;
 
+export function meshSources() {
+  return [MESH_FS, MESH_FS_BOX, MESH_FS_BOX_PAT, MESH_FS_BALL];
+}
+
 export const SKY_KINDS = ["sun", "moon", "plane"];
 
 // Which sky bodies to draw, and how strong the shader disc is.
@@ -1163,65 +1197,26 @@ function sunAim(psi, fov, aspect, sunUv, pitch) {
   return [lx / h * 0.48, 0.78, lz / h * 0.48];
 }
 
-export function createRenderer(canvas) {
-  const gl = canvas.getContext("webgl2", {
+export function createRenderer(canvas, hooks) {
+  let gl;
+  try {
+    gl = canvas.getContext("webgl2", {
     alpha: false,
     antialias: true,
     depth: true,
     stencil: false,
     powerPreference: "high-performance",
   });
-  if (!gl) return null;
-  const sky = link(gl, SKY_VS, SKY_FS);
-  const mesh = link(gl, MESH_VS, MESH_FS);
-  const meshBox = link(gl, MESH_VS, MESH_FS_BOX);
-  const meshPat = link(gl, MESH_VS, MESH_FS_BOX_PAT);
-  const meshBall = link(gl, MESH_VS, MESH_FS_BALL);
-  const tri = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, tri);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
-  const cubeBuf = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, cubeBuf);
-  gl.bufferData(gl.ARRAY_BUFFER, cube(), gl.STATIC_DRAW);
-  const inst = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, inst);
-  gl.bufferData(gl.ARRAY_BUFFER, MAX * STRIDE * 4, gl.DYNAMIC_DRAW);
-  const data = new Float32Array(MAX * STRIDE);
-  const vao = gl.createVertexArray();
-  gl.bindVertexArray(vao);
-  gl.bindBuffer(gl.ARRAY_BUFFER, cubeBuf);
-  gl.enableVertexAttribArray(0);
-  gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 24, 0);
-  gl.enableVertexAttribArray(1);
-  gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 24, 12);
-  gl.bindBuffer(gl.ARRAY_BUFFER, inst);
-  for (let i = 0; i < 4; i++) {
-    gl.enableVertexAttribArray(2 + i);
-    gl.vertexAttribPointer(2 + i, 4, gl.FLOAT, false, STRIDE * 4, i * 16);
-    gl.vertexAttribDivisor(2 + i, 1);
+  } catch {
+    gl = null;
   }
-  gl.enable(gl.DEPTH_TEST);
-  gl.enable(gl.CULL_FACE);
+  if (!gl) return null;
+  let sky, mesh, meshBox, meshPat, meshBall, tri, cubeBuf, inst, vao, u, um, ub, up, uBall, castBuf;
+  const data = new Float32Array(MAX * STRIDE);
   const proj = new Float32Array(16);
   const view = new Float32Array(16);
-  const u = {
-    sky0: gl.getUniformLocation(sky, "uSky0"),
-    sky1: gl.getUniformLocation(sky, "uSky1"),
-    hill: gl.getUniformLocation(sky, "uHill"),
-    hill2: gl.getUniformLocation(sky, "uHill2"),
-    sunCol: gl.getUniformLocation(sky, "uSunCol"),
-    sun: gl.getUniformLocation(sky, "uSun"),
-    res: gl.getUniformLocation(sky, "uRes"),
-    time: gl.getUniformLocation(sky, "uTime"),
-    camZ: gl.getUniformLocation(sky, "uCamZ"),
-    yaw: gl.getUniformLocation(sky, "uYaw"),
-    fov: gl.getUniformLocation(sky, "uFov"),
-    sunAmt: gl.getUniformLocation(sky, "uSunAmt"),
-    rush: gl.getUniformLocation(sky, "uRush"),
-    stars: gl.getUniformLocation(sky, "uStars"),
-    nebula: gl.getUniformLocation(sky, "uNebula"),
-    flash: gl.getUniformLocation(sky, "uFlash"),
-  };
+  const CAST_MAX = 480;
+  const castData = new Float32Array(CAST_MAX * STRIDE);
   function meshLocs(prog) {
     return {
       proj: gl.getUniformLocation(prog, "uProj"),
@@ -1235,18 +1230,209 @@ export function createRenderer(canvas) {
       soil: gl.getUniformLocation(prog, "uSoil"),
       mtime: gl.getUniformLocation(prog, "uTime"),
       pat: gl.getUniformLocation(prog, "uPat"),
+      shadowMap: gl.getUniformLocation(prog, "uShadowMap"),
+      shadowMat: gl.getUniformLocation(prog, "uShadowMat"),
+      shadowOn: gl.getUniformLocation(prog, "uShadowOn"),
+      pcf: gl.getUniformLocation(prog, "uPcf"),
     };
   }
-  const um = meshLocs(mesh);
-  const ub = meshLocs(meshBox);
-  const up = meshLocs(meshPat);
-  const uBall = meshLocs(meshBall);
+  function bootGL() {
+    sky = link(gl, SKY_VS, SKY_FS);
+    mesh = link(gl, MESH_VS, MESH_FS);
+    meshBox = link(gl, MESH_VS, MESH_FS_BOX);
+    meshPat = link(gl, MESH_VS, MESH_FS_BOX_PAT);
+    meshBall = link(gl, MESH_VS, MESH_FS_BALL);
+    tri = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, tri);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+    cubeBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, cubeBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, cube(), gl.STATIC_DRAW);
+    inst = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, inst);
+    gl.bufferData(gl.ARRAY_BUFFER, MAX * STRIDE * 4, gl.DYNAMIC_DRAW);
+    castBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, castBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, CAST_MAX * STRIDE * 4, gl.DYNAMIC_DRAW);
+    vao = gl.createVertexArray();
+    gl.bindVertexArray(vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, cubeBuf);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 24, 0);
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 24, 12);
+    gl.bindBuffer(gl.ARRAY_BUFFER, inst);
+    for (let i = 0; i < 4; i++) {
+      gl.enableVertexAttribArray(2 + i);
+      gl.vertexAttribPointer(2 + i, 4, gl.FLOAT, false, STRIDE * 4, i * 16);
+      gl.vertexAttribDivisor(2 + i, 1);
+    }
+    gl.enable(gl.DEPTH_TEST);
+    gl.enable(gl.CULL_FACE);
+    gl.cullFace(gl.BACK);
+    u = skyLocs(sky);
+    um = meshLocs(mesh);
+    ub = meshLocs(meshBox);
+    up = meshLocs(meshPat);
+    uBall = meshLocs(meshBall);
+  }
   const gpuInfo = gl.getExtension("WEBGL_debug_renderer_info");
   const gpuName = gpuInfo
     ? `${gl.getParameter(gpuInfo.UNMASKED_VENDOR_WEBGL) || ""} ${gl.getParameter(gpuInfo.UNMASKED_RENDERER_WEBGL) || ""}`
     : "";
   let dprCap = /swiftshader|llvmpipe|softpipe|software/i.test(gpuName) ? 1 : 2;
   const msaa = gl.getParameter(gl.SAMPLES) || 0;
+  const maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE) || 0;
+  const software = softwareFromRenderer(gpuName);
+  let floatFb = false;
+  try { floatFb = probeFloat(gl); } catch { floatFb = false; }
+  const quality = createQuality(DEFAULT_POLICY, probeCaps({
+    webgl2: true,
+    maxTex,
+    software,
+    softwareKnown: !!gpuInfo,
+    floatFb,
+    fboOk: true,
+    gpu: gpuName,
+  }));
+  let lost = false;
+  let wantShadow = false;
+  let casting = false;
+  let usePost = false;
+  let wasPost = false;
+  let post = null;
+  let litSkyProg = null;
+  let litMesh = null;
+  let litBox = null;
+  let litPat = null;
+  let litBall = null;
+  let depthProg = null;
+  let uLitSky = null;
+  let ulm = null;
+  let ulb = null;
+  let ulp = null;
+  let ulBall = null;
+  let depthLoc = null;
+  let castN = 0;
+  const lightProj = new Float32Array(16);
+  const lightView = new Float32Array(16);
+  const shadowMat = new Float32Array(16);
+  let activeProfile = tierProfile("low", DEFAULT_POLICY, quality.caps);
+
+  function skyLocs(prog) {
+    return {
+      sky0: gl.getUniformLocation(prog, "uSky0"),
+      sky1: gl.getUniformLocation(prog, "uSky1"),
+      hill: gl.getUniformLocation(prog, "uHill"),
+      hill2: gl.getUniformLocation(prog, "uHill2"),
+      sunCol: gl.getUniformLocation(prog, "uSunCol"),
+      sun: gl.getUniformLocation(prog, "uSun"),
+      res: gl.getUniformLocation(prog, "uRes"),
+      time: gl.getUniformLocation(prog, "uTime"),
+      camZ: gl.getUniformLocation(prog, "uCamZ"),
+      yaw: gl.getUniformLocation(prog, "uYaw"),
+      fov: gl.getUniformLocation(prog, "uFov"),
+      sunAmt: gl.getUniformLocation(prog, "uSunAmt"),
+      rush: gl.getUniformLocation(prog, "uRush"),
+      stars: gl.getUniformLocation(prog, "uStars"),
+      nebula: gl.getUniformLocation(prog, "uNebula"),
+      flash: gl.getUniformLocation(prog, "uFlash"),
+    };
+  }
+  bootGL();
+
+  function dropLit() {
+    litSkyProg = litMesh = litBox = litPat = litBall = depthProg = null;
+    uLitSky = ulm = ulb = ulp = ulBall = depthLoc = null;
+    if (post) {
+      try { post.release(); } catch { /* context already gone */ }
+      post = null;
+    }
+  }
+
+  function ensureLit() {
+    if (litMesh && depthProg) return true;
+    try {
+      litSkyProg = link(gl, SKY_VS, litSky(SKY_FS));
+      litMesh = link(gl, MESH_VS, litFragment(MESH_FS));
+      litBox = link(gl, MESH_VS, litFragment(MESH_FS_BOX));
+      litPat = link(gl, MESH_VS, litFragment(MESH_FS_BOX_PAT));
+      litBall = link(gl, MESH_VS, litFragment(MESH_FS_BALL));
+      depthProg = link(gl, MESH_VS, DEPTH_FS);
+      uLitSky = skyLocs(litSkyProg);
+      ulm = meshLocs(litMesh);
+      ulb = meshLocs(litBox);
+      ulp = meshLocs(litPat);
+      ulBall = meshLocs(litBall);
+      depthLoc = {
+        proj: gl.getUniformLocation(depthProg, "uProj"),
+        view: gl.getUniformLocation(depthProg, "uView"),
+      };
+      return true;
+    } catch (err) {
+      dropLit();
+      console.error(err);
+      noteFbo(quality, false, performance.now());
+      if (hooks && hooks.onStatus) hooks.onStatus({ type: "fallback", message: "Extra picture passes are off." });
+      return false;
+    }
+  }
+
+  function ensurePasses(profile) {
+    if (!ensureLit()) return false;
+    if (!post) {
+      try { post = createPost(gl); }
+      catch {
+        post = null;
+        return false;
+      }
+    }
+    let ok = false;
+    try { ok = post.ensure(w, h, profile); }
+    catch { ok = false; }
+    if (!ok || post.failed()) {
+      noteFbo(quality, false, performance.now());
+      return false;
+    }
+    return true;
+  }
+
+  function tell(kind, extra) {
+    if (hooks && hooks.onStatus) hooks.onStatus(Object.assign({ type: kind }, extra || {}));
+  }
+
+  bindContextLoss(canvas, {
+    onLost() {
+      lost = true;
+      tell("lost", { message: "The picture was interrupted. Bringing it back…" });
+    },
+    rebuild() {
+      dropLit();
+      bootGL();
+      floatFb = false;
+      try { floatFb = probeFloat(gl); } catch { floatFb = false; }
+      quality.caps = probeCaps({
+        webgl2: true,
+        maxTex,
+        software,
+        softwareKnown: !!gpuInfo,
+        floatFb,
+        fboOk: true,
+        gpu: gpuName,
+      });
+      if (quality.mode === "auto") setMode(quality, "auto", performance.now());
+      else setMode(quality, quality.mode, performance.now());
+    },
+    onRestored() {
+      lost = false;
+      wasPost = false;
+      tell("restored");
+    },
+    onFailed(plan) {
+      lost = true;
+      tell("failed", { message: plan.message || contextPlan("restore-failed").message });
+    },
+  });
   let w = 1;
   let h = 1;
   let camS = 0;
@@ -1300,7 +1486,10 @@ export function createRenderer(canvas) {
   let dustStep = 0;
 
   function resize() {
-    const dpr = Math.min(dprCap, window.devicePixelRatio || 1);
+    const prof = tierProfile(quality.tier, quality.policy, quality.caps);
+    let cap = dprCap;
+    if (prof.dpr) cap = Math.min(cap, prof.dpr);
+    const dpr = Math.min(cap, window.devicePixelRatio || 1);
     w = Math.max(1, Math.floor(canvas.clientWidth * dpr));
     h = Math.max(1, Math.floor(canvas.clientHeight * dpr));
     if (canvas.width !== w || canvas.height !== h) {
@@ -1338,6 +1527,11 @@ export function createRenderer(canvas) {
     data[o + 4] = sx; data[o + 5] = sy; data[o + 6] = sz; data[o + 7] = rough;
     data[o + 8] = rgb[0]; data[o + 9] = rgb[1]; data[o + 10] = rgb[2]; data[o + 11] = emit;
     data[o + 12] = yaw; data[o + 13] = metal; data[o + 14] = sheen; data[o + 15] = kind;
+    if (casting && castN < CAST_MAX && !(kind > 1.5 && kind < 2.5)) {
+      const c = castN * STRIDE;
+      for (let k = 0; k < STRIDE; k++) castData[c + k] = data[o + k];
+      castN++;
+    }
     n++;
   }
 
@@ -1346,7 +1540,7 @@ export function createRenderer(canvas) {
   // slab tops out near y 0.08. Off the grass deck there is nothing to sit on.
   const DECK = 2.85;
   function contactShadow(x, z, yaw, height, radius) {
-    if (n >= MAX - 96) return;
+    if (wantShadow || n >= MAX - 96) return;
     const s = Math.max(0.16, radius) * 0.78 / (1 + Math.max(0, height) * 0.55);
     push(x, 0.09, z, s, 0.012, s, 0, [0.34, 0.28, 0.2], 0.95, 0, yaw, 0, 0, 2);
   }
@@ -1688,6 +1882,12 @@ export function createRenderer(canvas) {
   }
 
   function frame(st) {
+    const t0 = performance.now();
+    if (lost || (gl.isContextLost && gl.isContextLost())) {
+      lost = true;
+      return 0;
+    }
+    try {
     const arrived = dressPalette(palette(st.hue || 0, st.scene), st.biome, st.mood, st.spec);
     const px = st.lx || 0;
     const py = st.y || 0;
@@ -1790,40 +1990,71 @@ export function createRenderer(canvas) {
     perspective(proj, camFov, w / h, 0.08, 96);
     lookAt(view, eye, at, [0, 1, 0]);
 
-    gl.disable(gl.DEPTH_TEST);
-    gl.depthMask(false);
-    gl.useProgram(sky);
-    gl.uniform3fv(u.sky0, pal.sky0);
-    gl.uniform3fv(u.sky1, pal.sky1);
-    gl.uniform3fv(u.hill, pal.hill);
-    gl.uniform3fv(u.hill2, pal.hill2);
-    gl.uniform3fv(u.sunCol, pal.sun);
-    gl.uniform2f(u.sun, pal.sunUv[0], pal.sunUv[1]);
-    gl.uniform1f(u.time, st.time || 0);
-    gl.uniform1f(u.camZ, camS);
-    gl.uniform1f(u.yaw, psi);
-    gl.uniform1f(u.fov, camFov);
-    const skyShow = visibleSky(st.props, st.sunHide);
-    gl.uniform1f(u.sunAmt, skyShow.shader * (pal.disc == null ? 1 : pal.disc));
-    // The full-screen streak is a real-GPU extra. SwiftShader keeps the
-    // few road-edge quads below and skips this pass.
-    const softwareGL = /swiftshader|llvmpipe|softpipe|software/i.test(gpuName);
-    const rush = !reduced && speed >= 12 && !softwareGL ? 1 : 0;
-    gl.uniform1f(u.rush, rush);
-    gl.uniform1f(u.stars, pal.stars || 0);
-    gl.uniform3fv(u.nebula, pal.nebula || [0, 0, 0]);
-    gl.uniform1f(u.flash, worldFlash || 0);
-    gl.uniform2f(u.res, w, h);
-    gl.bindVertexArray(null);
-    gl.bindBuffer(gl.ARRAY_BUFFER, tri);
-    gl.enableVertexAttribArray(0);
-    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-    gl.depthMask(true);
-    gl.enable(gl.DEPTH_TEST);
-    gl.clear(gl.DEPTH_BUFFER_BIT);
+    activeProfile = tierProfile(quality.tier, quality.policy, quality.caps);
+    usePost = false;
+    wantShadow = false;
+    if (activeProfile.tier !== "low" && w > 2 && h > 2) {
+      if (ensurePasses(activeProfile)) {
+        usePost = true;
+        wantShadow = !!(activeProfile.shadow && post && post.shadowFb());
+      } else {
+        activeProfile = tierProfile(quality.tier, quality.policy, quality.caps);
+      }
+    }
+
+    function paintSky(prog, locs) {
+      gl.disable(gl.DEPTH_TEST);
+      gl.depthMask(false);
+      gl.disable(gl.BLEND);
+      gl.useProgram(prog);
+      gl.uniform3fv(locs.sky0, pal.sky0);
+      gl.uniform3fv(locs.sky1, pal.sky1);
+      gl.uniform3fv(locs.hill, pal.hill);
+      gl.uniform3fv(locs.hill2, pal.hill2);
+      gl.uniform3fv(locs.sunCol, pal.sun);
+      gl.uniform2f(locs.sun, pal.sunUv[0], pal.sunUv[1]);
+      gl.uniform1f(locs.time, st.time || 0);
+      gl.uniform1f(locs.camZ, camS);
+      gl.uniform1f(locs.yaw, psi);
+      gl.uniform1f(locs.fov, camFov);
+      const skyShow = visibleSky(st.props, st.sunHide);
+      gl.uniform1f(locs.sunAmt, skyShow.shader * (pal.disc == null ? 1 : pal.disc));
+      // The full-screen streak is a real-GPU extra. SwiftShader keeps the
+      // few road-edge quads below and skips this pass.
+      const softwareGL = /swiftshader|llvmpipe|softpipe|software/i.test(gpuName);
+      const rush = !reduced && speed >= 12 && !softwareGL ? 1 : 0;
+      gl.uniform1f(locs.rush, rush);
+      gl.uniform1f(locs.stars, pal.stars || 0);
+      gl.uniform3fv(locs.nebula, pal.nebula || [0, 0, 0]);
+      gl.uniform1f(locs.flash, worldFlash || 0);
+      gl.uniform2f(locs.res, w, h);
+      gl.bindVertexArray(null);
+      gl.bindBuffer(gl.ARRAY_BUFFER, tri);
+      gl.enableVertexAttribArray(0);
+      gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.depthMask(true);
+      gl.enable(gl.DEPTH_TEST);
+      gl.clear(gl.DEPTH_BUFFER_BIT);
+      return rush;
+    }
+    let rush = 0;
+    if (!usePost) {
+      if (wasPost) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.viewport(0, 0, w, h);
+        gl.colorMask(true, true, true, true);
+        gl.disable(gl.BLEND);
+        gl.disable(gl.POLYGON_OFFSET_FILL);
+        gl.cullFace(gl.BACK);
+        wasPost = false;
+      }
+      rush = paintSky(sky, u);
+    }
 
     n = 0;
+    castN = 0;
+    casting = false;
     spin = 0;
     const pieces = st.pieces;
     const z0 = pz - 8;
@@ -2635,15 +2866,23 @@ export function createRenderer(canvas) {
       const here = onRoad(zc, laneX(lane < 0 ? 1 : lane));
       const th = q.thing;
       if (k === 3 && th && th.role === "jump") {
+        casting = wantShadow;
         thingHurdle(q, th, zc, lane, sc);
+        casting = false;
       } else if (k === 4 && th && th.role === "slide") {
+        casting = wantShadow;
         thingGate(q, th, zc, sc);
+        casting = false;
       } else if (k === 5 && th && th.role === "pickup") {
         thingPickup(q, th, here, sc);
       } else if (k === 3) {
+        casting = wantShadow;
         drawHurdle(q, zc, lane, sc, glow);
+        casting = false;
       } else if (k === 4) {
+        casting = wantShadow;
         drawGate(q, zc, sc, glow);
+        casting = false;
       } else if (k === 5) {
         const bobc = reduced ? 0 : Math.sin(st.time * 4.6 - q[1] * 1.7) * 0.1;
         const ripple = reduced ? 1 : 1 + Math.sin(st.time * 4.6 - q[1] * 1.7) * 0.08;
@@ -2663,7 +2902,9 @@ export function createRenderer(canvas) {
         push(here.x, 0.06, here.z, Math.max(0.7, q[2]) * sc, 0.1, 0.72 * sc, 0, pal.spring, 0.35, 0.2, here.psi);
         push(here.x, 0.28 * sc, here.z, 0.32 * sc, 0.32 * sc, 0.32 * sc, 1, pal.spring, 0.3, 0.55, here.psi);
       } else if (k === 7) {
+        casting = wantShadow;
         drawBlock(q, zc, lane, sc, glow);
+        casting = false;
       } else if (k === 8) {
         paintLane(q, laneX(lane < 0 ? 1 : lane), [0.7, 0.9, 1]);
         const vis = q.length > 6 ? q[6] : 0;
@@ -2685,9 +2926,13 @@ export function createRenderer(canvas) {
           push(here.x, fy, here.z, 0.16 * sc, 0.08 * sc, 0.48 * sc, 0, [0.45, 0.72, 0.95], 0.28, 0.12, yaw);
         }
       } else if (k === 9) {
+        casting = wantShadow;
         drawPopper(q, here);
+        casting = false;
       } else if (k === 10) {
+        casting = wantShadow;
         drawRival(q, here);
+        casting = false;
       }
     }
 
@@ -2796,9 +3041,12 @@ export function createRenderer(canvas) {
     spin = feet.psi;
     const blinkOff = !!(st.blink && Math.floor((st.time || 0) * 8) % 2 === 0);
     if (alive) {
-      const shadow = spot(0, 0);
-      push(shadow.x, 0.02, shadow.z, sliding ? 0.95 : 0.62, 0.025, sliding ? 0.9 : 0.5, 0, [0.18, 0.12, 0.08], 1, 0);
+      if (!wantShadow) {
+        const shadow = spot(0, 0);
+        push(shadow.x, 0.02, shadow.z, sliding ? 0.95 : 0.62, 0.025, sliding ? 0.9 : 0.5, 0, [0.18, 0.12, 0.08], 1, 0);
+      }
       if (!blinkOff) {
+      casting = wantShadow;
       if ((st.g || 32) < 26) {
         const glow = [0.78, 0.92, 1];
         const bob = reduced ? 0 : Math.sin((st.time || 0) * 3) * 0.02;
@@ -2832,6 +3080,7 @@ export function createRenderer(canvas) {
         }
       }
       drawGear(spot, py, leanLat, sliding, st.time || 0, reduced, st.gear || 1, st.ward == null ? 1 : st.ward, pal, reduced ? 0 : stride, !dressed);
+      casting = false;
       const trailN = reduced ? 0 : Math.min(6, 3 + Math.floor(Math.max(0, speed - 5)));
       for (let t = 1; t <= trailN; t++) {
         const fade = 1 - t / (trailN + 1);
@@ -2949,6 +3198,47 @@ export function createRenderer(canvas) {
       return a;
     };
     const boxPat = splitKind(0, lo, 2.5);
+    if (usePost && wantShadow && castN > 0 && depthProg) {
+      const len = Math.hypot(aim[0], aim[1], aim[2]) || 1;
+      const dir = [aim[0] / len, aim[1] / len, aim[2] / len];
+      const tx = Math.round((rx + Math.sin(psi) * 7) * 2) / 2;
+      const tz = Math.round((rz + Math.cos(psi) * 7) * 2) / 2;
+      const target = [tx, 0.5, tz];
+      const eyeL = [target[0] + dir[0] * 18, target[1] + dir[1] * 18, target[2] + dir[2] * 18];
+      lookAt(lightView, eyeL, target, Math.abs(dir[1]) > 0.92 ? [0, 0, 1] : [0, 1, 0]);
+      ortho(lightProj, -12, 12, -12, 12, 0.4, 42);
+      mulMat(shadowMat, lightProj, lightView);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, post.shadowFb());
+      gl.viewport(0, 0, post.shadowSize(), post.shadowSize());
+      gl.colorMask(false, false, false, false);
+      gl.clear(gl.DEPTH_BUFFER_BIT);
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthMask(true);
+      gl.enable(gl.CULL_FACE);
+      gl.cullFace(gl.BACK);
+      gl.enable(gl.POLYGON_OFFSET_FILL);
+      gl.polygonOffset(1.6, 2.4);
+      gl.bindVertexArray(vao);
+      gl.bindBuffer(gl.ARRAY_BUFFER, castBuf);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, castData.subarray(0, castN * STRIDE));
+      for (let i = 0; i < 4; i++) {
+        gl.enableVertexAttribArray(2 + i);
+        gl.vertexAttribPointer(2 + i, 4, gl.FLOAT, false, STRIDE * 4, i * 16);
+        gl.vertexAttribDivisor(2 + i, 1);
+      }
+      gl.useProgram(depthProg);
+      gl.uniformMatrix4fv(depthLoc.proj, false, lightProj);
+      gl.uniformMatrix4fv(depthLoc.view, false, lightView);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 36, castN);
+      gl.disable(gl.POLYGON_OFFSET_FILL);
+      gl.colorMask(true, true, true, true);
+    }
+    if (usePost) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, post.sceneFb());
+      gl.viewport(0, 0, w, h);
+      gl.colorMask(true, true, true, true);
+      rush = paintSky(litSkyProg || sky, uLitSky || u);
+    }
     gl.bindVertexArray(vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, inst);
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, data.subarray(0, n * STRIDE));
@@ -2964,6 +3254,14 @@ export function createRenderer(canvas) {
       gl.uniform3fv(locs.skyAmb, pal.sky);
       gl.uniform3fv(locs.soil, pal.soil);
       gl.uniform1f(locs.mtime, st.time || 0);
+      if (locs.shadowOn) {
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, post && post.shadowTex());
+        gl.uniform1i(locs.shadowMap, 0);
+        gl.uniformMatrix4fv(locs.shadowMat, false, shadowMat);
+        gl.uniform1f(locs.shadowOn, wantShadow && castN > 0 ? 1 : 0);
+        gl.uniform1f(locs.pcf, activeProfile.pcf || 4);
+      }
     };
     const drawSpan = (prog, locs, first, count, coverage, pat) => {
       if (!count) return;
@@ -2977,18 +3275,75 @@ export function createRenderer(canvas) {
       else gl.disable(gl.SAMPLE_ALPHA_TO_COVERAGE);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 36, count);
     };
-    drawSpan(meshBox, ub, 0, boxPat, false, 0);
-    drawSpan(meshPat, up, boxPat, lo - boxPat, false, 0);
-    drawSpan(meshBall, uBall, lo, mid - lo, false, 0);
-    drawSpan(mesh, um, mid, n - mid, true, 0);
+    const boxProg = usePost && litBox ? litBox : meshBox;
+    const patProg = usePost && litPat ? litPat : meshPat;
+    const ballProg = usePost && litBall ? litBall : meshBall;
+    const marchProg = usePost && litMesh ? litMesh : mesh;
+    const boxLoc = usePost && ulb ? ulb : ub;
+    const patLoc = usePost && ulp ? ulp : up;
+    const ballLoc = usePost && ulBall ? ulBall : uBall;
+    const marchLoc = usePost && ulm ? ulm : um;
+    drawSpan(boxProg, boxLoc, 0, boxPat, false, 0);
+    drawSpan(patProg, patLoc, boxPat, lo - boxPat, false, 0);
+    drawSpan(ballProg, ballLoc, lo, mid - lo, false, 0);
+    drawSpan(marchProg, marchLoc, mid, n - mid, !usePost, 0);
     gl.disable(gl.SAMPLE_ALPHA_TO_COVERAGE);
+    if (usePost && post) {
+      post.present(w, h, activeProfile);
+      wasPost = true;
+    }
+    const work = performance.now() - t0;
+    const stamp = nowMs || performance.now();
+    if (st.visible === false) noteVisibility(quality, false, stamp);
+    else {
+      if (quality.hidden) noteVisibility(quality, true, stamp);
+      if (st.gapMs) noteRefresh(quality, st.gapMs);
+      observe(quality, { workMs: work, gapMs: st.gapMs || 0, now: stamp });
+    }
     canvas.dataset.instances = String(n);
     canvas.dataset.dust = String(dustN);
     canvas.dataset.rush = rush ? "1" : "0";
     canvas.dataset.biome = pal.biome || "garden";
     canvas.dataset.mood = pal.mood || "day";
+    canvas.dataset.tier = quality.tier;
+    canvas.dataset.quality = quality.mode;
+    canvas.dataset.shadow = usePost && wantShadow ? "1" : "0";
+    canvas.dataset.bloom = usePost ? "1" : "0";
+    canvas.dataset.hdr = usePost && activeProfile.hdr ? "1" : "0";
+    canvas.dataset.renderer = "webgl2";
     return n;
+    } catch (err) {
+      if (lost || (gl.isContextLost && gl.isContextLost())) {
+        lost = true;
+        tell("failed", { message: contextPlan("restore-failed").message });
+        return 0;
+      }
+      throw err;
+    }
   }
 
-  return { gl, resize, frame, noteFrameTime };
+  function qualitySnapshot() {
+    return {
+      mode: quality.mode,
+      tier: quality.tier,
+      refreshHz: quality.refreshHz,
+      ceiling: quality.caps.ceiling,
+      software: !!quality.caps.software,
+      floatFb: !!quality.caps.floatFb,
+      gpu: quality.caps.gpu || "",
+      renderer: "webgl2",
+      lost,
+    };
+  }
+
+  return {
+    gl,
+    resize,
+    frame,
+    noteFrameTime,
+    setQualityMode(mode) { setMode(quality, mode, performance.now()); },
+    setReduced(v) { noteReduced(quality, v, performance.now()); },
+    setVisible(v) { noteVisibility(quality, v, performance.now()); },
+    qualitySnapshot,
+  };
 }
