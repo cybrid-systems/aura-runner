@@ -8,6 +8,7 @@ import { createFallback } from "./fallback.mjs";
 import { readQualityMode, writeQualityMode } from "./quality.mjs";
 import { createInput } from "./input.mjs";
 import { createAudio } from "./audio.mjs";
+import { volumeFromStore } from "./music.mjs";
 import { installWish } from "./wish.mjs";
 import { validThing } from "./thing.mjs";
 import { installThingHud } from "./thinghud.mjs";
@@ -155,6 +156,8 @@ let latency = 0;
 let lastShown = "0";
 let spark = "";
 let nearSpark = false;
+let musicHit = false;
+let musicShield = false;
 let evoCue = "";
 let rejectSpark = false;
 let combo = 0;
@@ -511,6 +514,9 @@ function resetLocal() {
   rewardUntil = 0;
   hearts = heartsBlank();
   heartsShown = -1;
+  musicHit = false;
+  musicShield = false;
+  audio.resetTune();
   hurtUntil = 0;
   runOver = false;
   runBestCombo = 1;
@@ -1039,6 +1045,7 @@ function connect() {
       seed = msg.seed;
       applyRules(msg);
       applyVenue(msg);
+      if (msg.tune) audio.tuneHear(msg.tune);
       feltSpeed = rules.speed;
       if (typeof msg.points === "number" && msg.points >= 0) player[6] = msg.points;
       if (carry && typeof msg.level === "number" && msg.level === carry.level) {
@@ -1064,6 +1071,7 @@ function connect() {
     } else if (msg.op === "rules") {
       applyRules(msg);
       applyVenue(msg);
+      if (msg.tune) audio.tuneHear(msg.tune);
       window.__lumen = Object.assign(window.__lumen || {}, {
         motif: msg.motif || "",
         scene: msg.scene || "",
@@ -1092,6 +1100,10 @@ function connect() {
       }
       remember(msg);
       if (msg.arm === "cards") applyCardDecision(msg);
+      if (msg.arm === "tune") {
+        if (msg.kind === "KEEP") audio.tuneKeep(msg.tune);
+        else if (msg.kind === "ROLLBACK") audio.tuneRollback(msg.tune);
+      }
       if (msg.arm === "rule") endPrimerWait();
       if (window.__lumenOnDecision) window.__lumenOnDecision(msg);
       if (msg.kind === "KEEP" && (msg.arm === "motif" || msg.arm === "scene" || msg.arm === "pals")) audio.keep();
@@ -1432,6 +1444,7 @@ function frame(now) {
         showCue("Shield held");
         audio.ward();
         spark = "ward";
+        musicShield = true;
       } else if (!wasWard && wardReady) {
         showCue("Shield ready");
       }
@@ -1479,6 +1492,7 @@ function frame(now) {
         player[5] = 1;
         showCue(ev === "oops" ? "Back on the path" : "Oops! Keep going");
         audio.near();
+        musicHit = true;
         if (ev === "bump") {
           const next = heartsHit(hearts, false);
           const lost = next.heart;
@@ -1544,6 +1558,17 @@ function frame(now) {
   }
   lerpScene(dt);
   publishProbe();
+  audio.follow({
+    speed: rules.speed,
+    level: levelN,
+    reduced,
+    combo,
+    near: nearSpark,
+    hit: musicHit,
+    shield: musicShield,
+  });
+  musicHit = false;
+  musicShield = false;
   audio.music(reduced);
   markRivalMoments();
   paintHearts();
@@ -1983,6 +2008,17 @@ muteBtn.addEventListener("click", () => {
   audio.setMuted(next);
   muteBtn.setAttribute("aria-pressed", next ? "true" : "false");
 });
+const volumeEl = document.getElementById("volume");
+const openingVolume = volumeFromStore(localStorage.getItem("lumen-volume"));
+audio.setVolume(openingVolume);
+if (volumeEl) {
+  volumeEl.value = String(Math.round(openingVolume * 100));
+  volumeEl.addEventListener("input", () => {
+    const v = Number(volumeEl.value) / 100;
+    audio.setVolume(v);
+    localStorage.setItem("lumen-volume", String(v));
+  });
+}
 modelBtn.addEventListener("click", () => {
   if (!connected || !ws || ws.readyState !== 1 || providers.length < 2) return;
   const ix = providers.indexOf(provider);
