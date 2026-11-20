@@ -1,0 +1,85 @@
+; Biome EDSL gate. A fair spec is KEEP'd into the pool. A low-contrast
+; spec, an over-budget spec, and a broken shape are ROLLBACK. Offline
+; evolution returns a form that the same gate keeps.
+(require "std/evo-core" all:)
+(require "lib/edsl")
+
+(define (show k v)
+  (display k)
+  (display " ")
+  (display v)
+  (newline))
+
+(define (line name gate)
+  (display name)
+  (display " ")
+  (display (hash-ref gate "verdict" "?"))
+  (display " ")
+  (display (hash-ref gate "why" "?"))
+  (display " ")
+  (display (hash-ref gate "id" ""))
+  (if (string=? (hash-ref gate "verdict" "") "KEEP")
+    (begin
+      (display " ")
+      (display (hash-ref gate "label" ""))
+      (display " ")
+      (display (hash-ref gate "trial" "")))
+    #f)
+  (newline))
+
+(line "garden" (edsl-gate edsl-garden))
+(line "city" (edsl-gate edsl-city))
+(line "space" (edsl-gate edsl-space))
+(line "coast" (edsl-gate edsl-coast))
+(line "lava" (edsl-gate edsl-lava))
+(line "ice" (edsl-gate edsl-ice))
+(line "candy" (edsl-gate edsl-candy))
+(line "coral" (edsl-gate edsl-coral))
+(line "cyber" (edsl-gate edsl-cyber))
+
+(define dull
+  "(biome dull-road (label Dull-Road) (sky 0.55 0.72 0.95 0.86 0.91 0.98) (fog 0.78 0.86 0.94 0.22) (body sun) (road 0.50 0.50 0.50) (curb 0.40 0.40 0.40) (ground 0.52 0.50 0.48) (surface stone) (light 0.80) (mood 0.50) (particles none 0.10) (props (rock 0.20 1.00)) (recipe mix))")
+(define coinish
+  "(biome coin-road (label Coin-Road) (sky 0.55 0.72 0.95 0.86 0.91 0.98) (fog 0.78 0.86 0.94 0.22) (body sun) (road 0.99 0.84 0.33) (curb 0.40 0.32 0.22) (ground 0.22 0.48 0.28) (surface sand) (light 0.80) (mood 0.50) (particles none 0.10) (props (rock 0.20 1.00)) (recipe mix))")
+(define packed
+  "(biome packed-road (label Packed-Road) (sky 0.55 0.72 0.95 0.86 0.91 0.98) (fog 0.78 0.86 0.94 0.22) (body sun) (road 0.48 0.30 0.22) (curb 0.32 0.18 0.14) (ground 0.18 0.16 0.18) (surface lava) (light 0.72) (mood 0.50) (particles embers 0.40) (props (tower 0.55 1.20) (arch 0.55 1.20) (tree 0.55 1.20) (coral 0.55 1.20)) (recipe mix))")
+(define broken "(biome nope (sky 2 0 0 0 0 0))")
+(define dark
+  "(biome dark-sky (label Dark-Sky) (sky 0.01 0.01 0.02 0.20 0.20 0.24) (fog 0.20 0.20 0.24 0.10) (body moon) (road 0.48 0.30 0.22) (curb 0.32 0.18 0.14) (ground 0.18 0.16 0.18) (surface dust) (light 0.70) (mood 0.20) (particles none 0.10) (props (rock 0.20 1.00)) (recipe mix))")
+
+(line "dull" (edsl-gate dull))
+(line "coin" (edsl-gate coinish))
+(line "packed" (edsl-gate packed))
+(line "broken" (edsl-gate broken))
+(line "dark" (edsl-gate dark))
+
+(define pool (edsl-register (edsl-boot) edsl-lava))
+(show "pool-lava" (if (edsl-has? pool "lava-canyon") 1 0))
+(show "pool-garden" (if (edsl-has? pool "garden") 1 0))
+(define rejected (edsl-register pool dull))
+(show "pool-same" (if (= (edsl-len rejected) (edsl-len pool)) 1 0))
+(show "pool-no-dull" (if (edsl-has? rejected "dull-road") 1 0))
+
+(define evolved (edsl-evolve pool 4))
+(define eg (if (string? evolved) (edsl-gate evolved) (hash "verdict" "ROLLBACK" "why" "none" "id" "")))
+(show "evolve-keep" (if (string=? (hash-ref eg "verdict" "") "KEEP") 1 0))
+(show "evolve-new" (if (and (string=? (hash-ref eg "verdict" "") "KEEP")
+                            (not (edsl-builtin? (hash-ref eg "id" ""))))
+                     1 0))
+(show "evolve-id" (hash-ref eg "id" ""))
+
+(define again (edsl-evolve (edsl-boot) 9))
+(define ag (if (string? again) (edsl-gate again) (hash "verdict" "ROLLBACK" "id" "")))
+(show "evolve2-keep" (if (string=? (hash-ref ag "verdict" "") "KEEP") 1 0))
+(show "evolve2-diff" (if (and (string=? (hash-ref ag "verdict" "") "KEEP")
+                              (not (string=? (hash-ref ag "id" "") (hash-ref eg "id" ""))))
+                       1 0))
+
+(show "theme-volcano" (edsl-theme "去火山"))
+(show "theme-ice" (edsl-theme "极光冰原"))
+(show "theme-candy" (edsl-theme "糖果世界"))
+(show "theme-en" (edsl-theme "ice palace"))
+(show "theme-garden" (if (edsl-theme "花园") 1 0))
+(show "theme-cyber-word" (if (edsl-theme "cyber") 1 0))
+
+(void)

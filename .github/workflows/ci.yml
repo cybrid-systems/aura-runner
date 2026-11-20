@@ -42,6 +42,8 @@ jobs:
           node --check scripts/check-lanes.mjs
           node --check scripts/mock-llm-e2e.mjs
           node --check scripts/check-contrast.mjs
+          node --check scripts/check-edsl.mjs
+          node --check scripts/check-edsl-e2e.mjs
           node --check scripts/check-run.mjs
           node --check scripts/shot-biomes.mjs
           node --check web/runstate.mjs
@@ -54,6 +56,8 @@ jobs:
         run: node scripts/check-lanes.mjs
       - name: Pink garden keeps obstacle contrast
         run: node scripts/check-contrast.mjs
+      - name: Biome EDSL view gate
+        run: node scripts/check-edsl.mjs
       - name: Multiplier, venues, and voice state
         run: node scripts/check-run.mjs
       - name: Startup model probe
@@ -82,6 +86,8 @@ jobs:
         run: node scripts/smoke.mjs
       - name: Mock LLM rebind
         run: node scripts/mock-llm-e2e.mjs
+      - name: Biome EDSL gate and voice switch
+        run: node scripts/check-edsl-e2e.mjs
       - name: Rebind refusal falls back to set-code
         run: node scripts/check-setcode.mjs
       - name: Ten minute run with a hung model call
