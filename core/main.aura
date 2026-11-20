@@ -652,7 +652,8 @@
     (set! level-x1 (+ level-x0
                      (if (> level-n 1)
                        (adapt-span speed-now (player-score player) level-n)
-                       (level-span speed-now))))))
+                       (level-span speed-now)))))
+  (coin-open-level! level-x0 level-x1))
 
 ; A known-fair garden, painted at once. The rebind waits while a chat is up.
 (define (raise-banner! kind text gain)
@@ -1046,8 +1047,11 @@
   (let* ((margin (if (and (pair? rest) (number? (car rest)))
                    (exact->inexact (car rest))
                    9.0))
-         (placed (shift-onto (string-pickups pieces b span pressure-now (loot-worth loot-now)
-                                                   (coin-chunk-seed seed next-id b) coin-params) next-x))
+         (placed (begin
+                   (coin-set-origin! next-x)
+                   (coin-span! level-x1)
+                   (shift-onto (string-pickups pieces b span pressure-now (loot-worth loot-now)
+                                               (coin-chunk-seed seed next-id b) coin-params) next-x)))
          (id next-id)
          (x0 next-x)
          (x1 (+ next-x span))
@@ -1188,6 +1192,7 @@
   (set! level-coins 0)
   (set! level-swaps 0)
   (load-coins!)
+  (coin-reset-course!)
   (set! coin-params (coin-blank))
   (set! level-streak 0)
   (set! pressure-now 1)
