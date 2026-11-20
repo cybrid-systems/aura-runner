@@ -169,7 +169,17 @@ function attachSocket(ws) {
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://127.0.0.1");
   let rel = decodeURIComponent(url.pathname);
+  if (rel === "/favicon.ico" || rel === "/apple-touch-icon.png" || rel === "/apple-touch-icon-precomposed.png") {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
   if (rel === "/symphony.mp4") {
+    if (!fs.existsSync(musicFile)) {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
     sendBytes(req, res, musicFile, "video/mp4");
     return;
   }

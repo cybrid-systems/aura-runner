@@ -4,12 +4,13 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#f0b06a" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23f0a04b'/%3E%3C/svg%3E" />
   <title>Lumen Run</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <canvas id="view" tabindex="0"></canvas>
-  <p id="nogpu" hidden>This browser needs WebGL2 to draw the garden.</p>
+  <p id="nogpu" hidden>This browser has no WebGL2. The garden is drawn flat so the run can continue.</p>
   <p id="toast" hidden aria-live="polite"></p>
   <div id="flash" hidden></div>
   <div id="hud">
@@ -43,6 +44,15 @@
   </div>
   <button id="motion" type="button" aria-label="Reduce motion" aria-pressed="false">◎</button>
   <button id="mute" type="button" aria-label="Mute" aria-pressed="false">♪</button>
+  <div id="quality">
+    <button id="quality-btn" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="quality-menu">Auto</button>
+    <div id="quality-menu" hidden role="listbox" aria-label="Picture quality">
+      <button type="button" role="option" data-q="auto">Auto</button>
+      <button type="button" role="option" data-q="low">Low</button>
+      <button type="button" role="option" data-q="medium">Medium</button>
+      <button type="button" role="option" data-q="high">High</button>
+    </div>
+  </div>
   <p id="said" hidden aria-live="polite"><span class="trial-kicker" id="said-kicker"></span><span id="said-body"></span></p>
   <p id="mark" hidden><span class="trial-kicker" id="mark-kicker"></span><span id="mark-word"></span></p>
   <p id="thing-hud" hidden aria-live="polite"></p>

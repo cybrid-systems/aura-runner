@@ -148,14 +148,32 @@ try {
   io.send({ op: "bye" });
   sock.end();
 
+  const bridgeLog = [];
   bridge = spawn(process.execPath, ["bridge/server.mjs"], {
     cwd: root,
     env: { ...process.env, AURA_RUNNER_PORT: String(port), AURA_RUNNER_WEB: String(webPort) },
-    stdio: "ignore",
+    stdio: ["ignore", "pipe", "pipe"],
   });
-  await new Promise((r) => setTimeout(r, 250));
+  bridge.stdout.on("data", (c) => bridgeLog.push(c.toString()));
+  bridge.stderr.on("data", (c) => bridgeLog.push(c.toString()));
+  // A fixed 250 ms sleep lost the race on a loaded runner: nothing was
+  // listening yet, so the socket was refused. Wait until it accepts.
+  const wsDeadline = Date.now() + 4000;
+  let ws;
+  let refused;
+  while (!ws && Date.now() < wsDeadline) {
+    if (bridge.exitCode !== null) {
+      throw new Error("bridge exited " + bridge.exitCode + "\n" + bridgeLog.join(""));
+    }
+    try {
+      ws = await connect(webPort);
+    } catch (err) {
+      refused = err;
+      await new Promise((r) => setTimeout(r, 40));
+    }
+  }
+  if (!ws) throw new Error("bridge did not listen\n" + (refused && refused.message) + "\n" + bridgeLog.join(""));
   const key = crypto.randomBytes(16).toString("base64");
-  const ws = await connect(webPort);
   let incoming = Buffer.alloc(0);
   ws.on("data", (c) => { incoming = Buffer.concat([incoming, c]); });
   ws.write(

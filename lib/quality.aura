@@ -1,0 +1,29 @@
+; Quality budgets for the picture. Data only.
+; The page keeps this same form in web/quality.mjs (POLICY_TEXT).
+; The static server does not publish lib/, so the browser cannot read
+; this file. scripts/check-quality.mjs fails if the two copies drift.
+; This is not an evo:trial. A world, the runner, and a phrase still take
+; that gate. Choosing a tier does not KEEP or ROLLBACK anything.
+(quality lumen
+  (target-hz 60)
+  (window 90)
+  (min-samples 36)
+  (promote-windows 4)
+  (demote-windows 1)
+  (promote-p95 0.55)
+  (demote-p95 0.92)
+  (cooldown-ms 4500)
+  (promote-cooldown-ms 8000)
+  (repromote-ms 60000)
+  (gap-slack 1.5)
+  (start low)
+  (software-cap low)
+  (reduced-auto low)
+  (dpr-medium 2)
+  (dpr-high 2)
+  (shadow-medium 1024)
+  (shadow-high 2048)
+  (bloom-medium 0.18)
+  (bloom-high 0.26)
+  (pcf-medium 4)
+  (pcf-high 9))
