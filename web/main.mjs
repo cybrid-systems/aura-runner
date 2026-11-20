@@ -8,6 +8,7 @@ import { createFallback } from "./fallback.mjs";
 import { readQualityMode, writeQualityMode } from "./quality.mjs";
 import { createInput } from "./input.mjs";
 import { createAudio } from "./audio.mjs";
+import { volumeFromStore } from "./music.mjs";
 import { installWish } from "./wish.mjs";
 import { validThing } from "./thing.mjs";
 import { installThingHud } from "./thinghud.mjs";
@@ -59,6 +60,9 @@ let showStats = params.has("stats");
 const benchMode = params.has("bench");
 
 const gpuNote = document.getElementById("nogpu");
+const bootEl = document.getElementById("boot");
+const bootStep = document.getElementById("boot-step");
+const bootBar = document.getElementById("boot-bar");
 const renderer = createRenderer(canvas, {
   onStatus(ev) {
     if (!gpuNote) return;
@@ -155,6 +159,8 @@ let latency = 0;
 let lastShown = "0";
 let spark = "";
 let nearSpark = false;
+let musicHit = false;
+let musicShield = false;
 let evoCue = "";
 let rejectSpark = false;
 let combo = 0;
@@ -511,6 +517,9 @@ function resetLocal() {
   rewardUntil = 0;
   hearts = heartsBlank();
   heartsShown = -1;
+  musicHit = false;
+  musicShield = false;
+  audio.resetTune();
   hurtUntil = 0;
   runOver = false;
   runBestCombo = 1;
@@ -998,11 +1007,43 @@ function shareText() {
   return `${location.origin}${location.pathname}?seed=${seed}&cards=${ids}`;
 }
 
+function paintBoot(text) {
+  if (!bootEl || bootEl.hidden || !text) return;
+  const cut = text.indexOf(" ");
+  const pct = cut > 0 ? Number(text.slice(0, cut)) : NaN;
+  const label = cut > 0 ? text.slice(cut + 1).trim() : text.trim();
+  if (Number.isFinite(pct) && bootBar) bootBar.style.width = Math.min(96, pct) + "%";
+  if (label && bootStep) bootStep.textContent = label;
+}
+
+function pollBoot() {
+  if (!bootEl || bootEl.hidden) return;
+  fetch("/boot", { cache: "no-store" })
+    .then((r) => (r.status === 200 ? r.text() : ""))
+    .then((text) => paintBoot(text))
+    .catch(() => {})
+    .finally(() => {
+      if (bootEl && !bootEl.hidden) setTimeout(pollBoot, 150);
+    });
+}
+
+function hideBoot() {
+  if (!bootEl || bootEl.hidden) return;
+  if (bootBar) bootBar.style.width = "100%";
+  if (bootStep) bootStep.textContent = "可以跑了";
+  setTimeout(() => {
+    if (bootEl) bootEl.hidden = true;
+  }, 160);
+}
+
+pollBoot();
+
 function connect() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   ws = new WebSocket(`${proto}://${location.host}/ws`);
   ws.onopen = () => {
     connected = true;
+    paintBoot("70 正在铺路");
     if (booted) {
       // The local list has already been pruned. Ask the server for the
       // chunks it still has instead of inventing an empty road.
@@ -1033,12 +1074,14 @@ function connect() {
     const msg = JSON.parse(ev.data);
     if (freshRun && msg.op !== "welcome" && msg.op !== "resync") return;
     if (msg.op === "welcome") {
+      hideBoot();
       freshRun = false;
       resetLocal();
       booted = true;
       seed = msg.seed;
       applyRules(msg);
       applyVenue(msg);
+      if (msg.tune) audio.tuneHear(msg.tune);
       feltSpeed = rules.speed;
       if (typeof msg.points === "number" && msg.points >= 0) player[6] = msg.points;
       if (carry && typeof msg.level === "number" && msg.level === carry.level) {
@@ -1064,6 +1107,7 @@ function connect() {
     } else if (msg.op === "rules") {
       applyRules(msg);
       applyVenue(msg);
+      if (msg.tune) audio.tuneHear(msg.tune);
       window.__lumen = Object.assign(window.__lumen || {}, {
         motif: msg.motif || "",
         scene: msg.scene || "",
@@ -1092,6 +1136,10 @@ function connect() {
       }
       remember(msg);
       if (msg.arm === "cards") applyCardDecision(msg);
+      if (msg.arm === "tune") {
+        if (msg.kind === "KEEP") audio.tuneKeep(msg.tune);
+        else if (msg.kind === "ROLLBACK") audio.tuneRollback(msg.tune);
+      }
       if (msg.arm === "rule") endPrimerWait();
       if (window.__lumenOnDecision) window.__lumenOnDecision(msg);
       if (msg.kind === "KEEP" && (msg.arm === "motif" || msg.arm === "scene" || msg.arm === "pals")) audio.keep();
@@ -1109,6 +1157,7 @@ function connect() {
   };
   ws.onclose = () => {
     connected = false;
+    if (bootEl && !bootEl.hidden && bootStep) bootStep.textContent = "还在启动";
     setTimeout(connect, 600);
   };
 }
@@ -1158,6 +1207,18 @@ window.__lumenSetCombo = (n) => {
   combo = Math.max(0, n | 0);
   comboUntil = performance.now() + 8000;
   comboText = "×" + combo;
+};
+
+// One forced near-miss for a recording. side -1 or 1 picks the nudge
+// direction. The cue is consumed on the next drawn frame unless hold is set.
+window.__lumenForceNear = (opts) => {
+  const cue = opts || {};
+  window.__lumenForceNearCue = {
+    side: cue.side < 0 ? -1 : 1,
+    ahead: Number.isFinite(cue.ahead) ? cue.ahead : 1.4,
+    hold: !!cue.hold,
+  };
+  return window.__lumenForceNearCue;
 };
 
 // Headless Chrome pauses animation frames. A few calls of the live frame
@@ -1223,6 +1284,7 @@ window.__lumenTimeFrames = (n, sync) => {
     gpuP50: picture.gpuP50,
     gpuP95: picture.gpuP95,
     gpuN: picture.gpuN,
+    passes: picture.passes || {},
     gpuExt: picture.ext ? 1 : 0,
     fxaa: canvas.dataset.fxaa || "0",
     ao: canvas.dataset.ao || "0",
@@ -1419,6 +1481,7 @@ function frame(now) {
         showCue("Shield held");
         audio.ward();
         spark = "ward";
+        musicShield = true;
       } else if (!wasWard && wardReady) {
         showCue("Shield ready");
       }
@@ -1466,6 +1529,7 @@ function frame(now) {
         player[5] = 1;
         showCue(ev === "oops" ? "Back on the path" : "Oops! Keep going");
         audio.near();
+        musicHit = true;
         if (ev === "bump") {
           const next = heartsHit(hearts, false);
           const lost = next.heart;
@@ -1531,6 +1595,17 @@ function frame(now) {
   }
   lerpScene(dt);
   publishProbe();
+  audio.follow({
+    speed: rules.speed,
+    level: levelN,
+    reduced,
+    combo,
+    near: nearSpark,
+    hit: musicHit,
+    shield: musicShield,
+  });
+  musicHit = false;
+  musicShield = false;
   audio.music(reduced);
   markRivalMoments();
   paintHearts();
@@ -1544,7 +1619,9 @@ function frame(now) {
         gapMs: dt * 1000,
         visible: document.visibilityState !== "hidden",
         event: spark, alive: true, speed: rules.speed, g: rules.g,
-        near: nearSpark, reject: rejectSpark, evo: evoCue,
+        near: nearSpark || !!window.__lumenForceNearCue,
+        nearCue: window.__lumenForceNearCue || null,
+        reject: rejectSpark, evo: evoCue, combo,
         blink: now < hurtUntil ? 1 : 0,
         duel,
         scene: sceneView, stumble: stumble / 1500, pals, hero, bend, loot,
@@ -1565,6 +1642,7 @@ function frame(now) {
     }
     spark = "";
     nearSpark = false;
+    if (window.__lumenForceNearCue && !window.__lumenForceNearCue.hold) window.__lumenForceNearCue = null;
     rejectSpark = false;
     evoCue = "";
     duel = "";
@@ -1967,6 +2045,17 @@ muteBtn.addEventListener("click", () => {
   audio.setMuted(next);
   muteBtn.setAttribute("aria-pressed", next ? "true" : "false");
 });
+const volumeEl = document.getElementById("volume");
+const openingVolume = volumeFromStore(localStorage.getItem("lumen-volume"));
+audio.setVolume(openingVolume);
+if (volumeEl) {
+  volumeEl.value = String(Math.round(openingVolume * 100));
+  volumeEl.addEventListener("input", () => {
+    const v = Number(volumeEl.value) / 100;
+    audio.setVolume(v);
+    localStorage.setItem("lumen-volume", String(v));
+  });
+}
 modelBtn.addEventListener("click", () => {
   if (!connected || !ws || ws.readyState !== 1 || providers.length < 2) return;
   const ix = providers.indexOf(provider);

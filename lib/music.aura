@@ -1,0 +1,527 @@
+; Tune EDSL. One s-expression is a bar the page can play when the
+; recording is missing. A proposal is kept only after evo:trial
+; (music-gate). The same limits are checked again in web/music.mjs.
+;
+; (tune ID
+;   (key C|D|E|F|G|A|Bb major|minor|dorian|mixolydian|pentatonic)
+;   (tempo BPM)                         ; 76 to 126
+;   (chords I|ii|iii|IV|V|vi ...)       ; 2 to 4, consonant degrees only
+;   (motif DEGREE ...)                  ; 4 to 8 degrees, each 0 to 7
+;   (tone sine|triangle|square CUT ATK REL)
+;   (pad sine|triangle|square CUT ATK REL)
+;   (kick 8 bits) (snare 8 bits) (hat 8 bits)
+;   (swing AMOUNT)                      ; 0 to 0.14
+;   (layers N)                          ; 1 to 4
+;   (gain G))                           ; 0.05 to 0.18
+;
+; Square waves stay under a cutoff of 900. Drum hits stay sparse.
+; Playback may rise with speed and level, and that result stays
+; between 72 and 156.
+(require "std/string" all:)
+(require "std/evo-core" all:)
+(require "lib/sexp")
+
+(define music-keys (list "C" "D" "E" "F" "G" "A" "Bb"))
+(define music-modes (list "major" "minor" "dorian" "mixolydian" "pentatonic"))
+(define music-chords (list "I" "ii" "iii" "IV" "V" "vi"))
+(define music-oscs (list "sine" "triangle" "square"))
+(define music-heads (list "key" "tempo" "chords" "motif" "tone" "pad" "kick" "snare" "hat" "swing" "layers" "gain"))
+
+(define music-home
+  "(tune garden-day (key C major) (tempo 96) (chords I V vi IV) (motif 0 2 4 7 4 2 0 4) (tone triangle 880 0.02 0.22) (pad sine 620 0.04 0.30) (kick 1 0 0 0 1 0 0 0) (snare 0 0 1 0 0 0 1 0) (hat 1 0 1 0 1 0 1 0) (swing 0.06) (layers 2) (gain 0.12))")
+
+(define (music-int n)
+  (let ((s (number->string (floor (exact->inexact (if (number? n) n 0))))))
+    (if (string-suffix? s ".0")
+      (substring s 0 (- (string-length s) 2))
+      s)))
+
+(define (music-2 n)
+  (let ((q (floor (+ (* (exact->inexact n) 100.0) 0.5))))
+    (let ((whole (floor (/ q 100.0)))
+          (frac (modulo q 100.0)))
+      (string-append (music-int whole) "."
+                     (if (< frac 10.0) "0" "")
+                     (music-int frac)))))
+
+(define (music-abs x)
+  (if (< x 0.0) (- 0.0 x) x))
+
+(define (music-clamp n lo hi)
+  (max lo (min hi n)))
+
+(define (music-in? n lo hi)
+  (and (number? n) (>= n (- lo 0.001)) (<= n (+ hi 0.001))))
+
+(define (music-member? xs name)
+  (let loop ((ys xs))
+    (if (or (not (pair? ys)) (null? ys))
+      #f
+      (if (and (string? (car ys)) (string=? (car ys) name))
+        #t
+        (loop (cdr ys))))))
+
+(define (music-len xs)
+  (let loop ((ys xs) (n 0))
+    (if (or (not (pair? ys)) (null? ys))
+      n
+      (loop (cdr ys) (+ n 1)))))
+
+(define (music-nth xs i)
+  (let loop ((ys xs) (k i))
+    (if (or (not (pair? ys)) (null? ys))
+      #f
+      (if (<= k 0) (car ys) (loop (cdr ys) (- k 1))))))
+
+(define (music-index xs name)
+  (let loop ((ys xs) (i 0))
+    (if (or (not (pair? ys)) (null? ys))
+      0
+      (if (and (string? (car ys)) (string=? (car ys) name))
+        i
+        (loop (cdr ys) (+ i 1))))))
+
+(define (music-id? s)
+  (and (string? s)
+       (>= (string-length s) 2)
+       (<= (string-length s) 24)
+       (let ((n (string-length s)))
+         (let loop ((i 0) (ok #t))
+           (if (or (not ok) (>= i n))
+             ok
+             (let ((c (string-ref s i)))
+               (loop (+ i 1)
+                     (or (and (>= c 97) (<= c 122))
+                         (and (> i 0) (or (and (>= c 48) (<= c 57)) (= c 45)))))))))))
+
+(define (music-refuse why)
+  (hash "ok" #f "why" why "id" ""
+        "violations" (hash "harsh" 1.0 "fatigue" 1.0 "consonant" 1.0)))
+
+(define (music-clause form name)
+  (let loop ((xs (if (and (pair? form) (pair? (cdr form))) (cdr (cdr form)) (list))))
+    (if (or (not (pair? xs)) (null? xs))
+      #f
+      (let ((sp (car xs)))
+        (if (and (pair? sp) (string? (car sp)) (string=? (car sp) name))
+          sp
+          (loop (cdr xs)))))))
+
+(define (music-heads-ok? form)
+  (let loop ((xs (if (and (pair? form) (pair? (cdr form))) (cdr (cdr form)) (list)))
+             (seen (list)))
+    (if (or (not (pair? xs)) (null? xs))
+      #t
+      (let ((sp (car xs)))
+        (if (or (not (pair? sp)) (not (string? (car sp)))
+                (not (music-member? music-heads (car sp)))
+                (music-member? seen (car sp)))
+          #f
+          (loop (cdr xs) (cons (car sp) seen)))))))
+
+(define (music-have? form)
+  (let loop ((xs music-heads))
+    (if (or (not (pair? xs)) (null? xs))
+      #t
+      (if (music-clause form (car xs))
+        (loop (cdr xs))
+        #f))))
+
+(define (music-bit? n)
+  (or (< (music-abs n) 0.001) (< (music-abs (- n 1.0)) 0.001)))
+
+(define (music-bits sp)
+  (if (or (not (pair? sp)) (not (= (music-len sp) 9)))
+    #f
+    (let loop ((xs (cdr sp)) (acc (list)) (bad #f))
+      (if bad
+        #f
+        (if (or (not (pair? xs)) (null? xs))
+          (reverse acc)
+          (if (and (number? (car xs)) (music-bit? (car xs)))
+            (loop (cdr xs) (cons (if (>= (car xs) 0.5) 1.0 0.0) acc) #f)
+            (loop xs acc #t)))))))
+
+(define (music-degs sp)
+  (let ((n (if (pair? sp) (music-len (cdr sp)) 0)))
+    (if (or (< n 4) (> n 8))
+      #f
+      (let loop ((xs (cdr sp)) (acc (list)) (bad #f))
+        (if bad
+          #f
+          (if (or (not (pair? xs)) (null? xs))
+            (reverse acc)
+            (if (number? (car xs))
+              (loop (cdr xs) (cons (exact->inexact (floor (+ (car xs) 0.001))) acc) #f)
+              (loop xs acc #t))))))))
+
+(define (music-syms sp lo hi)
+  (let ((n (if (pair? sp) (music-len (cdr sp)) 0)))
+    (if (or (< n lo) (> n hi))
+      #f
+      (let loop ((xs (cdr sp)) (acc (list)) (bad #f))
+        (if bad
+          #f
+          (if (or (not (pair? xs)) (null? xs))
+            (reverse acc)
+            (if (string? (car xs))
+              (loop (cdr xs) (cons (car xs) acc) #f)
+              (loop xs acc #t))))))))
+
+(define (music-count xs)
+  (let loop ((ys xs) (n 0))
+    (if (or (not (pair? ys)) (null? ys))
+      n
+      (loop (cdr ys) (if (>= (car ys) 0.5) (+ n 1) n)))))
+
+(define (music-all-chords? xs)
+  (let loop ((ys xs))
+    (if (or (not (pair? ys)) (null? ys))
+      #t
+      (if (music-member? music-chords (car ys))
+        (loop (cdr ys))
+        #f))))
+
+(define (music-all-degs? xs)
+  (let loop ((ys xs))
+    (if (or (not (pair? ys)) (null? ys))
+      #t
+      (if (and (number? (car ys)) (>= (car ys) 0.0) (<= (car ys) 7.0))
+        (loop (cdr ys))
+        #f))))
+
+(define (music-tone-ok? typ cut atk rel clo chi)
+  (and (string? typ)
+       (music-member? music-oscs typ)
+       (music-in? cut clo chi)
+       (or (not (string=? typ "square")) (<= cut 900.0))
+       (music-in? atk 0.01 0.06)
+       (music-in? rel 0.12 0.40)))
+
+(define (music-check text)
+  (if (not (and (string? text) (> (string-length text) 0) (<= (string-length text) 700)))
+    (music-refuse "shape")
+    (let ((form (sexp-parse text)))
+      (if (or (not (pair? form)) (not (string? (car form))) (not (string=? (car form) "tune")))
+        (music-refuse "shape")
+        (let ((id (if (pair? (cdr form)) (car (cdr form)) #f)))
+          (if (not (music-id? id))
+            (music-refuse "id")
+            (if (or (not (music-heads-ok? form)) (not (music-have? form)))
+              (music-refuse "shape")
+              (let ((key (music-clause form "key"))
+                    (tempo (music-clause form "tempo"))
+                    (chords (music-syms (music-clause form "chords") 2 4))
+                    (motif (music-degs (music-clause form "motif")))
+                    (tone (music-clause form "tone"))
+                    (pad (music-clause form "pad"))
+                    (kick (music-bits (music-clause form "kick")))
+                    (snare (music-bits (music-clause form "snare")))
+                    (hat (music-bits (music-clause form "hat")))
+                    (swing (music-clause form "swing"))
+                    (layers (music-clause form "layers"))
+                    (gain (music-clause form "gain")))
+                (if (or (not (and (pair? key) (= (music-len key) 3) (string? (car (cdr key))) (string? (car (cdr (cdr key))))))
+                        (not (and (pair? tempo) (= (music-len tempo) 2) (number? (car (cdr tempo)))))
+                        (not chords) (not motif)
+                        (not (and (pair? tone) (= (music-len tone) 5)))
+                        (not (and (pair? pad) (= (music-len pad) 5)))
+                        (not kick) (not snare) (not hat)
+                        (not (and (pair? swing) (= (music-len swing) 2) (number? (car (cdr swing)))))
+                        (not (and (pair? layers) (= (music-len layers) 2) (number? (car (cdr layers)))))
+                        (not (and (pair? gain) (= (music-len gain) 2) (number? (car (cdr gain))))))
+                  (music-refuse "shape")
+                  (let ((kname (car (cdr key)))
+                        (mode (car (cdr (cdr key))))
+                        (bpm (exact->inexact (car (cdr tempo))))
+                        (tt (car (cdr tone)))
+                        (tc (exact->inexact (car (cdr (cdr tone)))))
+                        (ta (exact->inexact (car (cdr (cdr (cdr tone))))))
+                        (tr (exact->inexact (car (cdr (cdr (cdr (cdr tone)))))))
+                        (pt (car (cdr pad)))
+                        (pc (exact->inexact (car (cdr (cdr pad)))))
+                        (pa (exact->inexact (car (cdr (cdr (cdr pad))))))
+                        (pr (exact->inexact (car (cdr (cdr (cdr (cdr pad)))))))
+                        (sw (exact->inexact (car (cdr swing))))
+                        (ly (exact->inexact (car (cdr layers))))
+                        (gn (exact->inexact (car (cdr gain))))
+                        (kn (music-count kick))
+                        (sn (music-count snare))
+                        (hn (music-count hat)))
+                    (cond
+                      ((not (music-member? music-keys kname)) (music-refuse "key"))
+                      ((not (music-member? music-modes mode)) (music-refuse "mode"))
+                      ((not (music-in? bpm 76.0 126.0)) (music-refuse "tempo"))
+                      ((not (music-all-chords? chords)) (music-refuse "chords"))
+                      ((not (music-all-degs? motif)) (music-refuse "motif"))
+                      ((not (music-tone-ok? tt tc ta tr 400.0 1600.0)) (music-refuse "cutoff"))
+                      ((not (music-tone-ok? pt pc pa pr 280.0 1100.0)) (music-refuse "cutoff"))
+                      ((or (< kn 1) (> kn 3) (> sn 2) (> hn 5) (> (+ kn sn hn) 9)) (music-refuse "drums"))
+                      ((not (music-in? sw 0.0 0.14)) (music-refuse "swing"))
+                      ((or (not (music-in? ly 1.0 4.0))
+                           (> (music-abs (- ly (floor (+ ly 0.001)))) 0.01))
+                       (music-refuse "layers"))
+                      ((not (music-in? gn 0.05 0.18)) (music-refuse "gain"))
+                      (else
+                       (hash "ok" #t "why" "fair" "id" id "form" text
+                             "key" kname "mode" mode "tempo" bpm
+                             "chords" chords "motif" motif
+                             "tone" tt "cutoff" tc "attack" ta "release" tr
+                             "pad" pt "padcut" pc "padatk" pa "padrel" pr
+                             "kick" kick "snare" snare "hat" hat
+                             "swing" sw "layers" ly "gain" gn
+                             "violations" (hash "harsh" 0.0 "fatigue" 0.0 "consonant" 0.0))))))))))))))
+
+(define (music-viol why)
+  (cond
+    ((or (string=? why "key") (string=? why "mode") (string=? why "chords"))
+     (hash "harsh" 0.0 "fatigue" 0.0 "consonant" 1.0))
+    ((or (string=? why "drums") (string=? why "swing") (string=? why "layers") (string=? why "motif"))
+     (hash "harsh" 0.0 "fatigue" 1.0 "consonant" 0.0))
+    (else
+     (hash "harsh" 1.0 "fatigue" 0.0 "consonant" 0.0))))
+
+(define (music-gate text)
+  (let* ((found (if (string? text) (music-check text) (music-refuse "shape")))
+         (ok (and (hash? found) (hash-ref found "ok" #f)))
+         (why (if ok "fair" (hash-ref found "why" "shape")))
+         (viol (if ok
+                 (hash "harsh" 0.0 "fatigue" 0.0 "consonant" 0.0)
+                 (music-viol why)))
+         (cand (evo:candidate (if (string? text) text "")
+                              (hash "id" "tune" "target" "tune-form")))
+         (trial (evo:trial cand
+                           (hash "timeout-ms" 4000
+                                 "apply" (lambda (c) #t)
+                                 "evaluate"
+                                 (lambda (c)
+                                   (hash "status" "ok"
+                                         "objectives" (hash "fair" (if ok 1.0 0.0))
+                                         "constraints" viol
+                                         "behavior" (hash "band" 0.0)))))))
+    (let ((keep (and ok trial (evo:trial-ok? trial) (evo:feasible? trial))))
+      (hash "verdict" (if keep "KEEP" "ROLLBACK")
+            "why" (if keep "fair" why)
+            "id" (if ok (hash-ref found "id" "") "")
+            "form" (if (string? text) text "")
+            "trial" (if (and trial (evo:trial-ok? trial) (evo:feasible? trial)) "ok" "infeasible")))))
+
+(define (music-pub found)
+  (if (or (not (hash? found)) (not (hash-ref found "ok" #f)))
+    #f
+    (hash "id" (hash-ref found "id")
+          "key" (hash-ref found "key")
+          "mode" (hash-ref found "mode")
+          "tempo" (hash-ref found "tempo")
+          "chords" (hash-ref found "chords")
+          "motif" (hash-ref found "motif")
+          "tone" (hash-ref found "tone")
+          "cutoff" (hash-ref found "cutoff")
+          "attack" (hash-ref found "attack")
+          "release" (hash-ref found "release")
+          "pad" (hash-ref found "pad")
+          "padCut" (hash-ref found "padcut")
+          "padAtk" (hash-ref found "padatk")
+          "padRel" (hash-ref found "padrel")
+          "kick" (hash-ref found "kick")
+          "snare" (hash-ref found "snare")
+          "hat" (hash-ref found "hat")
+          "swing" (hash-ref found "swing")
+          "layers" (hash-ref found "layers")
+          "gain" (hash-ref found "gain"))))
+
+(define (music-join-syms xs)
+  (let loop ((ys xs) (acc ""))
+    (if (or (not (pair? ys)) (null? ys))
+      acc
+      (loop (cdr ys) (string-append acc " " (car ys))))))
+
+(define (music-join-nums xs)
+  (let loop ((ys xs) (acc ""))
+    (if (or (not (pair? ys)) (null? ys))
+      acc
+      (loop (cdr ys) (string-append acc " " (music-int (car ys)))))))
+
+(define (music-emit id key mode tempo chords motif tone cut atk rel pad pcut patk prel kick snare hat swing layers gain)
+  (string-append
+    "(tune " id
+    " (key " key " " mode ")"
+    " (tempo " (music-int tempo) ")"
+    " (chords" (music-join-syms chords) ")"
+    " (motif" (music-join-nums motif) ")"
+    " (tone " tone " " (music-int (floor (+ cut 0.5))) " " (music-2 atk) " " (music-2 rel) ")"
+    " (pad " pad " " (music-int (floor (+ pcut 0.5))) " " (music-2 patk) " " (music-2 prel) ")"
+    " (kick" (music-join-nums kick) ")"
+    " (snare" (music-join-nums snare) ")"
+    " (hat" (music-join-nums hat) ")"
+    " (swing " (music-2 swing) ")"
+    " (layers " (music-int layers) ")"
+    " (gain " (music-2 gain) "))"))
+
+(define (music-rotate xs k)
+  (if (or (not (pair? xs)) (null? xs) (<= k 0))
+    xs
+    (music-rotate (append (cdr xs) (list (car xs))) (- k 1))))
+
+(define (music-shift motif add)
+  (let loop ((ys motif) (acc (list)))
+    (if (or (not (pair? ys)) (null? ys))
+      (reverse acc)
+      (loop (cdr ys)
+            (cons (exact->inexact (modulo (+ (floor (+ (car ys) 0.001)) add) 8)) acc)))))
+
+(define (music-flip xs i)
+  (let loop ((ys xs) (k 0) (acc (list)))
+    (if (or (not (pair? ys)) (null? ys))
+      (reverse acc)
+      (loop (cdr ys) (+ k 1)
+            (cons (if (= k i)
+                    (if (>= (car ys) 0.5) 0.0 1.0)
+                    (car ys))
+                  acc)))))
+
+(define (music-emit-found found id key mode tempo chords motif tone cut atk rel pad pcut kick snare hat swing layers gain)
+  (music-emit id key mode tempo chords motif
+              tone cut atk rel
+              pad pcut (hash-ref found "padatk") (hash-ref found "padrel")
+              kick snare hat swing layers gain))
+
+(define (music-vary found id sid kind)
+  (let ((key (hash-ref found "key"))
+        (mode (hash-ref found "mode"))
+        (tempo (hash-ref found "tempo"))
+        (chords (hash-ref found "chords"))
+        (motif (hash-ref found "motif"))
+        (tone (hash-ref found "tone"))
+        (cut (hash-ref found "cutoff"))
+        (atk (hash-ref found "attack"))
+        (rel (hash-ref found "release"))
+        (pad (hash-ref found "pad"))
+        (pcut (hash-ref found "padcut"))
+        (kick (hash-ref found "kick"))
+        (snare (hash-ref found "snare"))
+        (hat (hash-ref found "hat"))
+        (swing (hash-ref found "swing"))
+        (layers (hash-ref found "layers"))
+        (gain (hash-ref found "gain")))
+    (cond
+      ((= kind 0)
+       (music-emit-found found id key mode
+                         (music-clamp (+ tempo (* (- (modulo sid 5) 2) 4.0)) 76.0 126.0)
+                         chords motif tone cut atk rel pad pcut kick snare hat swing layers gain))
+      ((= kind 1)
+       (let ((k (modulo sid (music-len chords))))
+         (music-emit-found found id key mode tempo
+                           (music-rotate chords (if (= k 0) 1 k))
+                           motif tone cut atk rel pad pcut kick snare hat swing layers gain)))
+      ((= kind 2)
+       (music-emit-found found id key mode tempo chords
+                         (music-shift motif (+ (modulo sid 3) 1))
+                         tone cut atk rel pad pcut kick snare hat swing layers gain))
+      ((= kind 3)
+       (music-emit-found found id key
+                         (music-nth music-modes (modulo (+ (music-index music-modes mode) 1) (music-len music-modes)))
+                         tempo chords motif tone cut atk rel pad pcut kick snare hat swing layers gain))
+      ((= kind 4)
+       (music-emit-found found id
+                         (music-nth music-keys (modulo (+ (music-index music-keys key) 1) (music-len music-keys)))
+                         mode tempo chords motif tone cut atk rel pad pcut kick snare hat swing layers gain))
+      ((= kind 5)
+       (let ((delta (- (modulo sid 3) 1)))
+         (music-emit-found found id key mode tempo chords motif tone cut atk rel pad pcut kick snare hat
+                           (music-clamp (+ swing (* delta 0.02)) 0.0 0.14)
+                           (music-clamp (+ layers delta) 1.0 4.0)
+                           (music-clamp (+ gain (* delta 0.01)) 0.05 0.18))))
+      ((= kind 6)
+       (let ((flipped (music-flip hat (modulo sid 8))))
+         (if (and (<= (music-count flipped) 5)
+                  (<= (+ (music-count kick) (music-count snare) (music-count flipped)) 9))
+           (music-emit-found found id key mode tempo chords motif tone cut atk rel pad pcut kick snare flipped swing layers gain)
+           (music-emit-found found id key mode tempo chords motif tone cut atk rel pad pcut kick snare hat
+                             (music-clamp (+ swing 0.02) 0.0 0.14) layers gain))))
+      (else
+       (let* ((nt (music-nth music-oscs (modulo (+ (music-index music-oscs tone) 1) (music-len music-oscs))))
+              (nc (music-clamp (+ cut (* (- (modulo sid 5) 2) 40.0)) 400.0 1600.0))
+              (nc2 (if (and (string=? nt "square") (> nc 900.0)) 900.0 nc))
+              (np (if (string=? pad "sine") "triangle" "sine")))
+         (music-emit id key mode tempo chords motif
+                     nt nc2
+                     (music-clamp (+ atk (* (- (modulo sid 3) 1) 0.01)) 0.01 0.06)
+                     (music-clamp (+ rel (* (- (modulo sid 3) 1) 0.02)) 0.12 0.40)
+                     np
+                     (music-clamp (+ pcut (* (- (modulo sid 5) 2) 30.0)) 280.0 1100.0)
+                     (hash-ref found "padatk")
+                     (hash-ref found "padrel")
+                     kick snare hat swing layers gain))))))
+
+(define (music-evolve form seed)
+  (let* ((found0 (if (string? form) (music-check form) (music-refuse "shape")))
+         (found (if (hash-ref found0 "ok" #f) found0 (music-check music-home)))
+         (sid (modulo (floor (exact->inexact (if (number? seed) seed 0))) 9000))
+         (kind (modulo sid 8))
+         (id (string-append "evo-" (music-int sid)))
+         (built (music-vary found id sid kind)))
+    (let ((chk (music-check built)))
+      (if (hash-ref chk "ok" #f) built music-home))))
+
+(define (music-book form)
+  (let ((f (if (and (string? form) (hash-ref (music-check form) "ok" #f)) form music-home)))
+    (hash "current" f "previous" f "pending" "")))
+
+(define (music-offer book form)
+  (let ((gate (music-gate form)))
+    (if (string=? (hash-ref gate "verdict" "") "KEEP")
+      (hash "verdict" "KEEP"
+            "book" (hash "current" (hash-ref book "current")
+                         "previous" (hash-ref book "previous")
+                         "pending" form))
+      (hash "verdict" "ROLLBACK" "book" book))))
+
+(define (music-bar book)
+  (let ((p (hash-ref book "pending" "")))
+    (if (and (string? p) (> (string-length p) 0))
+      (if (string=? p (hash-ref book "previous" ""))
+        (hash "current" p "previous" p "pending" "")
+        (hash "current" p
+              "previous" (hash-ref book "current")
+              "pending" ""))
+      book)))
+
+; A pending KEEP is dropped, so the bar never leaves the current phrase.
+; Otherwise the previous phrase is queued and the bar brings it back.
+(define (music-rollback book)
+  (let ((p (hash-ref book "pending" "")))
+    (if (and (string? p) (> (string-length p) 0))
+      (hash "current" (hash-ref book "current")
+            "previous" (hash-ref book "previous")
+            "pending" "")
+      (hash "current" (hash-ref book "current")
+            "previous" (hash-ref book "previous")
+            "pending" (hash-ref book "previous")))))
+
+(define (music-id-of form)
+  (let ((chk (music-check form)))
+    (if (hash-ref chk "ok" #f) (hash-ref chk "id" "") "")))
+
+; Speed 8 and level 1 leave the phrase near its own tempo. Faster runs
+; and later levels rise, and the result cannot leave 72..156.
+(define (music-tempo base speed level)
+  (let ((b (if (number? base) (exact->inexact base) 96.0))
+        (sp (if (number? speed) (exact->inexact speed) 8.0))
+        (lv (if (and (number? level) (>= level 1.0)) (exact->inexact level) 1.0)))
+    (music-clamp
+      (* b
+         (+ 0.92 (* (max 0.0 (- sp 6.0)) 0.035))
+         (+ 1.0 (* (- lv 1.0) 0.028)))
+      72.0 156.0)))
+
+(define (music-layers base speed level)
+  (let ((n0 (if (number? base) (floor (+ base 0.001)) 2.0))
+        (sp (if (number? speed) speed 8.0))
+        (lv (if (number? level) level 1.0)))
+    (music-clamp
+      (+ n0
+         (if (>= lv 3.0) 1.0 0.0)
+         (if (>= lv 7.0) 1.0 0.0)
+         (if (>= sp 11.0) 1.0 0.0))
+      1.0 4.0)))
