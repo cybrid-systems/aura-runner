@@ -87,7 +87,7 @@ export function shakeOffset(amp, time) {
 // pixels. Wider jumps reprint a lamp post as a stack of copies. The
 // finish pass reads a pre-blurred image whose footprint is wider, so
 // neighbours overlap into one streak.
-export const BLUR_TAP_PX = 24;
+export const BLUR_TAP_PX = 8;
 
 // Pixel step of one speed-blur sample. distUv is the distance from the
 // hero in UV. The cap is what keeps 12–18 m/s a smear instead of ghosts.
