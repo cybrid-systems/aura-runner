@@ -287,4 +287,22 @@
 (display (bit (string=? (voice-line "drop-pals" "all" "fair" "zh") "朋友们回家了")))
 (newline)
 
+(show-intent "hero-fox" "变成狐狸")
+(show-intent "hero-car" "变成小车")
+(show-intent "hero-en" "become fox")
+(show-intent "hero-keep" "变成守护者")
+
+(define become (voice-intent "变成狐狸"))
+(define fox-form (hero-src (hash-ref become "name")))
+(define fox-ok (check-pals fox-form))
+(display "hero-form ")
+(display (bit (and become
+                   (string=? (hash-ref become "act") "hero")
+                   (hash-ref fox-ok "ok" #f)
+                   (string=? (hash-ref (hash-ref fox-ok "hero") "plan") "fox"))))
+(newline)
+(display "hero-line ")
+(display (bit (string=? (voice-line "hero" "fox" "fair" "zh") "换成这个样子了")))
+(newline)
+
 (void)

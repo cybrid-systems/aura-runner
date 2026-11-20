@@ -88,3 +88,9 @@ drop-pals drop-pals all 0
 drop-two drop-pal kitten+car 0
 both-line 1
 pals-line 1
+hero-fox hero fox 0
+hero-car hero car 0
+hero-en hero fox 0
+hero-keep hero keeper 0
+hero-form 1
+hero-line 1

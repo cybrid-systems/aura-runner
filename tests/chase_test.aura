@@ -125,5 +125,36 @@
 (expect "audit-op" (string=? (hash-ref row "op" "") "decision"))
 (expect "audit-arm" (string=? (hash-ref row "arm" "") "chaser"))
 (expect "audit-kind" (string=? (hash-ref row "kind" "") "ROLLBACK"))
+(expect "audit-look" (near? (hash-ref row "look" 0) -1))
+
+(expect "fraction" (near? CHASE-FRACTION 0.45))
+(expect "half" (near? RIVAL-HALF 0.28))
+(expect "shown-level" (= (chase-shown blank 1) 1))
+(expect "shown-set" (= (chase-shown (hash "look" 0) 1) 0))
+
+(define first (chase-step blank 4 0 0 8.0))
+(expect "first-knob" (string=? (hash-ref first "why" "") "speed"))
+(define at-look (climb blank 4 8.0 3))
+(define look-step (chase-step at-look 4 0 0 8.0))
+(expect "knob-look" (string=? (hash-ref look-step "why" "") "look"))
+(define looked (chase-keep at-look look-step))
+(define look-n (hash-ref looked "look" -1))
+(expect "look-slot" (and (>= look-n 0) (< look-n 3) (not (near? look-n -1))))
+(expect "undo-look" (near? (hash-ref (chase-undo looked) "look" 9)
+                           (hash-ref at-look "look" 8)))
+
+(define just (chase-consider blank
+               (hash "speed" 2.1 "cool" 0.42 "at" 0.42 "commit" 7.5 "look" 1)
+               rules8))
+(expect "look-keep" (and (string=? (hash-ref just "kind" "") "KEEP")
+                         (near? (hash-ref (hash-ref just "state" blank) "look" -1) 1)
+                         (near? (hash-ref (hash-ref just "state" blank) "speed" 0) 2.1)))
+
+(define both (chase-consider blank
+               (hash "speed" 2.25 "cool" 0.42 "at" 0.42 "commit" 7.5 "look" 1)
+               rules8))
+(expect "look-one" (and (string=? (hash-ref both "kind" "") "ROLLBACK")
+                        (string=? (hash-ref both "why" "") "step")
+                        (chase-same? (hash-ref both "state" blank) blank)))
 
 (void)
