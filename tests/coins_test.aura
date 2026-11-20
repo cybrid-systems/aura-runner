@@ -1,6 +1,7 @@
 ; Coins spread across the three lanes. The same seed lays the same
 ; road. A weight that collapses onto one lane does not stay.
 (require "lib/gen")
+(require "lib/coins")
 (require "lib/phys")
 (require "lib/voice")
 

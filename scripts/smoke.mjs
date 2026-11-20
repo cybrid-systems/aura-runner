@@ -6,10 +6,8 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-// The core compiles before it prints PORT. A loaded box used to finish in
-// about 8 s. The coin layout compiles with the core, so leave room past
-// half a minute before calling the start dead.
-const AURA_START_MS = Number(process.env.AURA_START_MS || 90000);
+// The core compiles before it prints PORT; that takes about 8 s on a loaded box.
+const AURA_START_MS = Number(process.env.AURA_START_MS || 30000);
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const aura = process.env.AURA_BIN || "aura";

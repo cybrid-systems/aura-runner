@@ -2,9 +2,19 @@
 ; fairness gate a proposal has to pass before it can be rebound in.
 (require "lib/phys")
 (require "lib/sexp")
-(require "lib/coins")
 (require "std/string" all:)
 (require "std/random" all:)
+
+; The coin layout is compiled the first time a chunk asks for it, not
+; while the core is still coming up. A top-level require would be
+; compiled before the port is printed.
+(define coins-ready #f)
+(define (load-coins!)
+  (if coins-ready
+    #t
+    (begin
+      (require "lib/coins")
+      (set! coins-ready #t))))
 
 (define (cons-all items acc)
   (if (null? items)
@@ -1155,6 +1165,8 @@
 (define (string-pickups pieces band span . rest)
   (if (or (not (pair? pieces)) (not (number? span)) (<= span 1.0))
     pieces
+    (begin
+      (load-coins!)
     (let* ((b (if (and (number? band) (>= band 0) (<= band 4)) band 0))
            (pressure (if (and (pair? rest) (number? (car rest))) (pressure-band (car rest)) 1))
            (base (if (and (pair? rest) (pair? (cdr rest)) (number? (car (cdr rest)))
@@ -1174,11 +1186,12 @@
       (if (null? (take-coins pieces))
         pieces
         (stamp-coins (coin-lay pieces pace span step cap params seed)
-                     base pressure)))))
+                     base pressure))))))
 
 ; A few seeded stretches, the same way a level lays its coins. The
 ; trial reads this road; it does not run the live player.
 (define (coin-sample seed params pace)
+  (load-coins!)
   (let ((speed (if (and (number? pace) (> pace 0.1)) pace 8.0))
         (use (if (hash? params) params (coin-blank))))
     (let loop ((band 0) (x 0.0) (acc (list)))
