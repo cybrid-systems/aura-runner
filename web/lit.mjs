@@ -86,6 +86,67 @@ export function litSky(src) {
   return out;
 }
 
+const HIGH_FNS = `
+vec3 highShade(vec3 col, vec3 fogCol, float fog, float dist) {
+  vec3 haze = mix(fogCol, uHaze, clamp(uAerial, 0.0, 1.0) * 0.7);
+  float aerial = min(fog * (1.0 + uAerial * 0.55), 0.34 + uAerial * 0.18);
+  vec3 lit = mix(col, haze, clamp(aerial, 0.0, 0.62));
+  float gray = dot(lit, vec3(0.299, 0.587, 0.114));
+  float far = clamp(dist * 0.0075, 0.0, 1.0) * uAerial;
+  return mix(lit, vec3(gray), far * 0.3);
+}
+float highGloss(float rough, float kind, vec3 halfE, vec3 local) {
+  if (uGloss < 0.01) return 0.0;
+  if (halfE.y < 0.12 && halfE.x > 0.7 && rough > 0.4 && rough < 0.72 && kind < 0.5 && abs(local.x) < 0.4) return uGloss;
+  if (rough < 0.22 && kind < 0.5) return uGloss * 0.8;
+  return 0.0;
+}
+`;
+
+const HIGH_OUT = `vec3 hiCol = highShade(col, uFog, fog, dist);
+  float hiG = highGloss(vRough, vKind, vHalf, vL);
+  if (hiG > 0.04 && vHalf.y < 0.12) {
+    hiCol *= vec3(0.86, 0.91, 0.98);
+    float glide = sin(vW.x * 1.7 + vW.z * 0.4 - uTime * 1.35);
+    hiCol += vec3(0.7, 0.82, 0.95) * smoothstep(0.78, 0.98, glide) * hiG * 0.16;
+  }
+  o = vec4(hiCol, hiG);`;
+
+// High-only lighting. Medium keeps litFragment. Gloss lives in alpha
+// so a later pass can reflect the road without a second geometry draw.
+export function highFragment(src) {
+  let out = litFragment(src);
+  if (!out.includes("uniform float uPcf;")) throw new Error("high shader pcf missing");
+  out = out.replace(
+    "uniform float uPcf;\n",
+    "uniform float uPcf;\nuniform float uPenumbra;\nuniform float uAerial;\nuniform float uGloss;\nuniform vec3 uHaze;\n",
+  );
+  out = out.replace(
+    "vec2 texel = 1.0 / vec2(textureSize(uShadowMap, 0));\n",
+    `vec2 texel = 1.0 / vec2(textureSize(uShadowMap, 0));
+  if (uPenumbra > 0.5) {
+    float blocker = texture(uShadowMap, p.xy).r;
+    float pen = clamp((p.z - blocker) * uPenumbra, 0.0, 2.8);
+    texel *= 1.0 + pen;
+  }
+`,
+  );
+  out = out.replace("void main() {", HIGH_FNS + "void main() {");
+  out = out.replaceAll("o = vec4(mix(col, uFog, fog), 1.0);", HIGH_OUT);
+  out = out.replaceAll("o = vec4(mix(col, uFog, fog), cov);", HIGH_OUT);
+  out = out.replace(
+    "o = vec4(mix(shade, uFog, fog * 0.7), 1.0);",
+    "o = vec4(mix(shade, uFog, fog * 0.7), 0.0);",
+  );
+  return out;
+}
+
+export function highSky(src) {
+  const lit = litSky(src);
+  if (!lit.includes("o = vec4(max(c, vec3(0.0)), 1.0);")) throw new Error("high sky anchor missing");
+  return lit.replace("o = vec4(max(c, vec3(0.0)), 1.0);", "o = vec4(max(c, vec3(0.0)), 0.0);");
+}
+
 export function litAnchorsOk(sources) {
   if (!sources || !sources.length) return false;
   for (const src of sources) {
