@@ -34,6 +34,7 @@ jobs:
           node --check web/quality.mjs
           node --check web/lit.mjs
           node --check web/post.mjs
+          node --check web/feel.mjs
           node --check web/fallback.mjs
           node --check web/input.mjs
           node --check web/audio.mjs
@@ -51,6 +52,7 @@ jobs:
           node --check scripts/check-edsl-e2e.mjs
           node --check scripts/check-run.mjs
           node --check scripts/shot-biomes.mjs
+          node --check scripts/shot-tiers.mjs
           node --check web/runstate.mjs
           node --check scripts/check-setcode.mjs
           node --check scripts/check-play.mjs

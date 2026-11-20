@@ -32,7 +32,33 @@ export const POLICY_TEXT = `(quality lumen
   (bloom-medium 0.18)
   (bloom-high 0.26)
   (pcf-medium 4)
-  (pcf-high 9))`;
+  (pcf-high 9)
+  (fov-medium 0.045)
+  (fov-high 0.07)
+  (shake-medium 0.04)
+  (shake-high 0.06)
+  (exposure-medium 1)
+  (exposure-high 1.02)
+  (grade-medium 0.4)
+  (grade-high 0.58)
+  (fxaa-medium 1)
+  (fxaa-high 1)
+  (blur-medium 0)
+  (blur-high 0.34)
+  (shaft-medium 0)
+  (shaft-high 0.22)
+  (ssao-medium 0)
+  (ssao-high 0.8)
+  (sky-medium 0.55)
+  (sky-high 1)
+  (trail-medium 4)
+  (trail-high 7)
+  (dust-medium 18)
+  (dust-high 28)
+  (spark-medium 42)
+  (spark-high 56)
+  (keep-pulse 0.62)
+  (rollback-cue 0.34))`;
 
 const POLICY_KEYS = {
   "target-hz": "targetHz",
@@ -57,6 +83,32 @@ const POLICY_KEYS = {
   "bloom-high": "bloomHigh",
   "pcf-medium": "pcfMedium",
   "pcf-high": "pcfHigh",
+  "fov-medium": "fovMedium",
+  "fov-high": "fovHigh",
+  "shake-medium": "shakeMedium",
+  "shake-high": "shakeHigh",
+  "exposure-medium": "exposureMedium",
+  "exposure-high": "exposureHigh",
+  "grade-medium": "gradeMedium",
+  "grade-high": "gradeHigh",
+  "fxaa-medium": "fxaaMedium",
+  "fxaa-high": "fxaaHigh",
+  "blur-medium": "blurMedium",
+  "blur-high": "blurHigh",
+  "shaft-medium": "shaftMedium",
+  "shaft-high": "shaftHigh",
+  "ssao-medium": "ssaoMedium",
+  "ssao-high": "ssaoHigh",
+  "sky-medium": "skyMedium",
+  "sky-high": "skyHigh",
+  "trail-medium": "trailMedium",
+  "trail-high": "trailHigh",
+  "dust-medium": "dustMedium",
+  "dust-high": "dustHigh",
+  "spark-medium": "sparkMedium",
+  "spark-high": "sparkHigh",
+  "keep-pulse": "keepPulse",
+  "rollback-cue": "rollbackCue",
 };
 
 function tokenize(text) {
@@ -445,6 +497,9 @@ export function tierProfile(tier, policy, caps) {
     return {
       tier: "low", shadow: false, bloom: false, hdr: false, dpr: 0,
       pcf: 0, shadowSize: 0, bloomAmt: 0, chain: "none",
+      fovKick: 0, shake: 0, exposure: 1, grade: 0, fxaa: false,
+      blur: 0, shaft: 0, ssao: 0, sky: 0, trail: 0, dust: 12, spark: 36,
+      keep: 0, back: 0,
     };
   }
   const high = tier === "high";
@@ -461,6 +516,20 @@ export function tierProfile(tier, policy, caps) {
     shadowSize,
     bloomAmt: high ? use.bloomHigh : use.bloomMedium,
     chain: high ? "half" : "quarter",
+    fovKick: high ? use.fovHigh : use.fovMedium,
+    shake: high ? use.shakeHigh : use.shakeMedium,
+    exposure: high ? use.exposureHigh : use.exposureMedium,
+    grade: high ? use.gradeHigh : use.gradeMedium,
+    fxaa: (high ? use.fxaaHigh : use.fxaaMedium) >= 1,
+    blur: high ? use.blurHigh : use.blurMedium,
+    shaft: high ? use.shaftHigh : use.shaftMedium,
+    ssao: high ? use.ssaoHigh : use.ssaoMedium,
+    sky: high ? use.skyHigh : use.skyMedium,
+    trail: high ? use.trailHigh : use.trailMedium,
+    dust: high ? use.dustHigh : use.dustMedium,
+    spark: high ? use.sparkHigh : use.sparkMedium,
+    keep: use.keepPulse,
+    back: use.rollbackCue,
   };
 }
 
