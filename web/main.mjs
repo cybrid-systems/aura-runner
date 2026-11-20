@@ -4,6 +4,8 @@ import { clampMult } from "./runstate.mjs";
 import { COMBO_HEART, HEART_IFRAME, HEARTS_MAX, heartsBlank, heartsHit, heartsRecover, heartsTick } from "./hearts.mjs";
 import { raceGate, raceRead } from "./race.mjs";
 import { acceptSpec, createRenderer } from "./render.mjs";
+import { createFallback } from "./fallback.mjs";
+import { readQualityMode, writeQualityMode } from "./quality.mjs";
 import { createInput } from "./input.mjs";
 import { createAudio } from "./audio.mjs";
 import { installWish } from "./wish.mjs";
@@ -56,11 +58,27 @@ let reduced = localStorage.getItem("lumen-motion") === "reduce" || (localStorage
 let showStats = params.has("stats");
 const benchMode = params.has("bench");
 
-const renderer = createRenderer(canvas);
+const gpuNote = document.getElementById("nogpu");
+const renderer = createRenderer(canvas, {
+  onStatus(ev) {
+    if (!gpuNote) return;
+    if (ev.type === "restored") {
+      gpuNote.hidden = true;
+      return;
+    }
+    if (ev.type === "lost" || ev.type === "failed" || ev.type === "fallback") {
+      gpuNote.hidden = false;
+      gpuNote.textContent = ev.message || "The picture was interrupted. Bringing it back…";
+    }
+  },
+}) || createFallback(canvas);
 const input = createInput(canvas);
 const audio = createAudio();
-if (!renderer) {
-  document.getElementById("nogpu").hidden = false;
+if (!renderer || renderer.kind === "canvas2d") {
+  if (gpuNote) {
+    gpuNote.hidden = false;
+    gpuNote.textContent = "This browser has no WebGL2. The garden is drawn flat so the run can continue.";
+  }
 }
 
 const player = makePlayer(1.2);
@@ -1116,6 +1134,12 @@ function pumpNet(now) {
 }
 
 window.__lumenPump = () => pumpNet(performance.now());
+window.__lumenQuality = () => (renderer && renderer.qualitySnapshot ? renderer.qualitySnapshot() : null);
+window.__lumenSetQuality = (mode) => {
+  if (renderer && renderer.setQualityMode) renderer.setQualityMode(mode);
+  paintQuality();
+  return window.__lumenQuality();
+};
 window.__lumenSetCombo = (n) => {
   combo = Math.max(0, n | 0);
   comboUntil = performance.now() + 8000;
@@ -1480,6 +1504,8 @@ function frame(now) {
       renderer.frame({
         x: player[0], y: player[1], vy: player[2], lx: player[10],
         slide: player[3], hue, time: now / 1000, now, reduced, pieces,
+        gapMs: dt * 1000,
+        visible: document.visibilityState !== "hidden",
         event: spark, alive: true, speed: rules.speed, g: rules.g,
         near: nearSpark, reject: rejectSpark,
         blink: now < hurtUntil ? 1 : 0,
@@ -1573,6 +1599,7 @@ function frame(now) {
   syncRecord();
   paintMeter();
   if (showStats && frameN % 20 === 0) paintStats();
+  if (frameN % 30 === 0) paintQuality();
   if (benchMode && frameN === 180) finishBench();
 }
 
@@ -1859,7 +1886,44 @@ motionBtn.addEventListener("click", () => {
   reduced = !reduced;
   localStorage.setItem("lumen-motion", reduced ? "reduce" : "full");
   motionBtn.setAttribute("aria-pressed", reduced ? "true" : "false");
+  if (renderer && renderer.setReduced) renderer.setReduced(reduced);
 });
+const qualityBtn = document.getElementById("quality-btn");
+const qualityMenu = document.getElementById("quality-menu");
+const QUALITY_NAMES = { auto: "Auto", low: "Low", medium: "Medium", high: "High" };
+const qualityParam = (params.get("quality") || "").toLowerCase();
+let qualityMode = QUALITY_NAMES[qualityParam] ? qualityParam : readQualityMode(localStorage);
+function paintQuality() {
+  if (!qualityBtn || !renderer || !renderer.qualitySnapshot) return;
+  const snap = renderer.qualitySnapshot();
+  const label = QUALITY_NAMES[snap.mode] || "Auto";
+  qualityBtn.textContent = snap.mode === "auto" ? label + " · " + (QUALITY_NAMES[snap.tier] || "Low") : label;
+  qualityBtn.setAttribute("aria-pressed", snap.mode === "auto" ? "false" : "true");
+}
+if (renderer && renderer.setQualityMode) renderer.setQualityMode(qualityMode);
+if (renderer && renderer.setReduced) renderer.setReduced(reduced);
+if (renderer && renderer.setVisible) renderer.setVisible(document.visibilityState !== "hidden");
+paintQuality();
+document.addEventListener("visibilitychange", () => {
+  if (renderer && renderer.setVisible) renderer.setVisible(document.visibilityState !== "hidden");
+});
+if (qualityBtn && qualityMenu) {
+  qualityBtn.addEventListener("click", () => {
+    const open = qualityMenu.hidden;
+    qualityMenu.hidden = !open;
+    qualityBtn.setAttribute("aria-expanded", open ? "true" : "false");
+  });
+  qualityMenu.addEventListener("click", (e) => {
+    const mode = e.target && e.target.dataset ? e.target.dataset.q : "";
+    if (!QUALITY_NAMES[mode]) return;
+    qualityMode = mode;
+    writeQualityMode(localStorage, mode);
+    if (renderer && renderer.setQualityMode) renderer.setQualityMode(mode);
+    qualityMenu.hidden = true;
+    qualityBtn.setAttribute("aria-expanded", "false");
+    paintQuality();
+  });
+}
 muteBtn.addEventListener("click", () => {
   const next = !audio.muted;
   audio.setMuted(next);

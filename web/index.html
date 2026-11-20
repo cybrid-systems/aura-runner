@@ -9,7 +9,7 @@
 </head>
 <body>
   <canvas id="view" tabindex="0"></canvas>
-  <p id="nogpu" hidden>This browser needs WebGL2 to draw the garden.</p>
+  <p id="nogpu" hidden>This browser has no WebGL2. The garden is drawn flat so the run can continue.</p>
   <p id="toast" hidden aria-live="polite"></p>
   <div id="flash" hidden></div>
   <div id="hud">
@@ -43,6 +43,15 @@
   </div>
   <button id="motion" type="button" aria-label="Reduce motion" aria-pressed="false">◎</button>
   <button id="mute" type="button" aria-label="Mute" aria-pressed="false">♪</button>
+  <div id="quality">
+    <button id="quality-btn" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="quality-menu">Auto</button>
+    <div id="quality-menu" hidden role="listbox" aria-label="Picture quality">
+      <button type="button" role="option" data-q="auto">Auto</button>
+      <button type="button" role="option" data-q="low">Low</button>
+      <button type="button" role="option" data-q="medium">Medium</button>
+      <button type="button" role="option" data-q="high">High</button>
+    </div>
+  </div>
   <p id="said" hidden aria-live="polite"><span class="trial-kicker" id="said-kicker"></span><span id="said-body"></span></p>
   <p id="mark" hidden><span class="trial-kicker" id="mark-kicker"></span><span id="mark-word"></span></p>
   <p id="thing-hud" hidden aria-live="polite"></p>
