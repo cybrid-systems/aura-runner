@@ -15,6 +15,7 @@
 (require "lib/wish")
 (require "lib/voice")
 (require "lib/biome")
+(require "lib/edsl")
 (require "lib/thing")
 (require "lib/chase")
 (require "lib/hearts")
@@ -30,6 +31,9 @@
 
 (define PALS-SYS
   "You change one friendly companion in a children's 3D endless runner called Lumen Run. No markdown. Restyle a friend who is already here by keeping the same name, or add one new gentle friend. Form: (pal KIND NAME R G B MOTION). KIND is kitten, car, van, racer, taxi, wagon, bunny, bird, butterfly, frog, duck, puppy, fox, turtle, bee, or a new gentle word of 3 to 12 letters. NAME is 2 to 12 letters. R G B are 0.25 to 1 and the colour stays bright. MOTION is hop, pace, float, follow, side, near, cheer, or pace-ahead. near, cheer, and pace-ahead only change where the friend is drawn, never the hit. No violence, fear, weapons, or scary words. Always restyle the runner in that same answer with (hero KIND R G B), alone or as one clause inside (pals ...). Pick a KIND different from the runner's current look. KIND is keeper, kitten, car, van, racer, taxi, wagon, bunny, bird, butterfly, frog, duck, puppy, fox, turtle, or bee. keeper is the light-keeper. R G B stay bright, from 0.25 to 1. A hero clause changes the runner only and does not add a friend. First write one short bright English sentence with no parentheses, then the s-expression. That sentence is what the child reads. Example: (pal bird lark 0.95 0.86 0.35 float)")
+
+(define BIOME-SYS
+  "You paint one city for a children's 3D runner called Lumen Run. No markdown. First write one short bright sentence with no parentheses, then one s-expression and nothing after it. Form: (biome ID (sky R G B) (sky1 R G B) (fog R G B A) (sun R G B) (path R G B) (curb R G B) (ground R G B) (hill R G B) (hill2 R G B) (water R G B) (build R G B) (roof R G B) (mote R G B) (light L) (mood MOOD) (style STYLE) (part PART) (props PROP)). ID is visit-china, visit-us, visit-europe, visit-asia, or visit-world. Every channel is 0 to 1. Fog A is 0 to 0.30. Light is 0.74 to 1. MOOD is day, night, sunset, or neon. STYLE is palace, neon, deco, stone, pastel, brick, bay, wall, mist, or canal. PART is lantern, petal, mist, neon, dust, sakura, or none. Each PROP is pagoda, palace-gate, pearl-tower, spire, bridge-tower, eiffel-tower, clock-tower, colonnade, bamboo, palm, stone-bridge, battlement, willow, cypress, or sakura. Use one, two, or three props. The road stays light enough to read the hurdles. No violence, fear, or scary words.")
 
 (define opening-feel (feel-for 0))
 (define g-now (feel-g opening-feel))
@@ -435,7 +439,7 @@
 ; Tick-local. True from the ask until that reply is taken. A worker's
 ; set! does not cross fibers, so this flag is the one the tick can trust.
 (define (llm-posting?)
-  (or motif-busy scene-busy pals-busy))
+  (or motif-busy scene-busy pals-busy biome-busy))
 (define llm-kind "motif")
 (define motif-next 2500.0)
 (define scene-next 5000.0)
@@ -532,6 +536,17 @@
 (define biome-now "garden")
 (define mood-now "day")
 (define biome-pin #f)
+(define edsl-now #f)
+(define biome-hold "")
+(define biome-token 0)
+(define biome-accept -1)
+(define biome-busy #f)
+(define biome-working #f)
+(define biome-late #f)
+(define biome-asked-at 0.0)
+(define biome-req #f)
+(define biome-res #f)
+(define biome-wait #f)
 (define banner-id 0)
 (define banner-kind "")
 (define banner-text "")
@@ -654,6 +669,8 @@
     (set! goal-lock #f)
     (set! biome-pin #f)
     (set! biome-now (hash-ref cross "biome" (biome-for-level level-n)))
+    (set! edsl-now #f)
+    (set! biome-hold "")
     (set! chal-coins 0)
     (set! chal-done #f)
     (set! run-mult (hash-ref cross "mult" run-mult))
@@ -972,6 +989,10 @@
   (set! biome-now "garden")
   (set! mood-now "day")
   (set! biome-pin #f)
+  (set! edsl-now #f)
+  (set! biome-hold "")
+  (set! biome-busy #f)
+  (set! biome-accept -1)
   (set! banner-id 0)
   (set! banner-kind "")
   (set! banner-text "")
@@ -1066,6 +1087,7 @@
         "props" props "sun-hide" sun-hide "shown" shown
         "level" level-n "goal" level-x1 "level0" level-x0
         "mult" run-mult "biome" biome-now "mood" mood-now
+        "edsl" (edsl-public edsl-now)
         "banner-id" banner-id "banner-kind" banner-kind
         "banner" banner-text "banner-gain" banner-gain))
 
@@ -1094,6 +1116,7 @@
         "deck" deck-ids
         "props" props "sun-hide" sun-hide "shown" shown
         "mult" run-mult "biome" biome-now "mood" mood-now
+        "edsl" (edsl-public edsl-now)
         "banner-id" banner-id "banner-kind" banner-kind
         "banner" banner-text "banner-gain" banner-gain))
 
@@ -1160,6 +1183,7 @@
         "stall" (if stall-waiting #t #f)
         "props" props "sun-hide" sun-hide "shown" shown
         "mult" run-mult "biome" biome-now "mood" mood-now
+        "edsl" (edsl-public edsl-now)
         "banner-id" banner-id "banner-kind" banner-kind
         "banner" banner-text "banner-gain" banner-gain))
 
@@ -2378,7 +2402,7 @@
       (if (and (number? n) (> n 0)) (exact->inexact n) 10000.0))))
 
 (define (sync-llm-busy!)
-  (set! llm-busy (or motif-busy scene-busy pals-busy)))
+  (set! llm-busy (or motif-busy scene-busy pals-busy biome-busy)))
 
 (define (expire-one! busy asked accept-now arm cue)
   (if (and busy (> asked 0.0) (> (- (monotonic-ms) asked) (watchdog-ms)))
@@ -2397,6 +2421,13 @@
     #f)
   (if (expire-one! pals-busy pals-asked-at pals-accept "pals" "The friends waited")
     (begin (set! pals-accept -1) (set! pals-busy #f))
+    #f)
+  ; A late city reply keeps the painted fallback. It does not roll the run back.
+  (if (and biome-busy (> biome-asked-at 0.0) (> (- (monotonic-ms) biome-asked-at) (watchdog-ms)))
+    (begin
+      (set! biome-accept -1)
+      (set! biome-busy #f)
+      (set! biome-late #t))
     #f)
   (sync-llm-busy!))
 
@@ -2494,6 +2525,85 @@
         (send c (rules-msg))
         (set! rules-dirty #f)))))
 
+(define (biome-user name)
+  (let ((spec (edsl-fallback name)))
+    (string-append
+      "Paint " (if (string? name) name "a city")
+      ". Start from this fair city and make it feel like that place. "
+      (if spec (edsl-form spec) ""))))
+
+; The spoken city is already on screen. A model reply replaces the paint
+; only after evo:trial, and only if the runner is still in that city.
+(define (consider-biome! text name)
+  (let ((form (edsl-cut text)))
+    (if (or (not form) (not (string=? name biome-hold)))
+      #f
+      (let ((found #f))
+        (let* ((cand (evo:candidate form (hash "id" (string-append "b" (int-str next-id))
+                                               "target" "biome-form")))
+               (trial (open-trial cand
+                                  (hash "timeout-ms" 4000
+                                        "apply" (lambda (c) #t)
+                                        "evaluate"
+                                        (lambda (c)
+                                          (set! found (edsl-check form))
+                                          (hash "status" "ok"
+                                                "objectives"
+                                                (hash "fair" (if (and found (hash-ref found "ok")) 1.0 0.0))
+                                                "constraints"
+                                                (if (and found (hash? (hash-ref found "violations")))
+                                                  (hash-ref found "violations")
+                                                  (hash "reachable" 1.0))
+                                                "behavior" (hash "band" (exact->inexact band))))))))
+          (if (trial-busy? trial)
+            (begin (set! biome-wait (list form name)) #f)
+            (if (and found (hash-ref found "ok" #f)
+                     trial (evo:trial-ok? trial) (evo:feasible? trial)
+                     (string=? name biome-hold))
+              (let ((spec (edsl-named (hash-set found "id" (hash-ref (edsl-fallback name) "id" "visit-world")) name)))
+                (set! edsl-now spec)
+                (set! biome-now (hash-ref spec "id" biome-now))
+                (set! biome-pin #t)
+                (set! mood-now (hash-ref spec "mood" mood-now))
+                (set! rule-rev (+ rule-rev 1))
+                (set! rules-dirty #t)
+                (raise-banner! "venue"
+                               (string-append (edsl-say spec wish-locale) " · ×" (biome-int run-mult))
+                               0)
+                (note! "KEEP" "fair" "voice" (edsl-say spec wish-locale) (hash-ref spec "id" "")))
+              #f)))))))
+
+(define (ask-biome! name)
+  (set! biome-hold (if (string? name) name ""))
+  (if (or (not llm-on) (not biome-req) biome-busy biome-working)
+    #f
+    (let ((tok (+ biome-token 1)))
+      (set! biome-token tok)
+      (set! biome-accept tok)
+      (set! biome-asked-at (exact->inexact (monotonic-ms)))
+      (set! biome-busy #t)
+      (set! biome-late #f)
+      (channel:send biome-req (list tok (biome-user name)))
+      (sync-llm-busy!))))
+
+(define (take-biome! c msg)
+  (let ((tok (hash-ref msg "token" -1)))
+    (set! biome-busy #f)
+    (if (not (accept-reply! tok biome-accept))
+      #f
+      (let ((ans (hash-ref msg "ans" #f)))
+        (set! biome-accept -1)
+        (if (and (hash? ans) (hash-ref ans "ok"))
+          (let ((raw (hash-ref ans "content" "")))
+            (let ((text (if (string? raw) raw "")))
+              (if (banned? text)
+                #f
+                (consider-biome! text biome-hold))))
+          #f)
+        (sync-llm-busy!)
+        (send c (rules-msg))
+        (set! rules-dirty #f)))))
+
 ; Send on the caller. The worker is the only receiver, and we do not
 ; enqueue a second job while it is still inside llm:chat, so this does
 ; not block the tick and does not allocate a closure per ask.
@@ -2567,6 +2677,11 @@
              (say (car (cdr wait-pals))))
          (set! wait-pals #f)
          (consider-pals! form say)))
+      ((pair? biome-wait)
+       (let ((form (car biome-wait))
+             (name (car (cdr biome-wait))))
+         (set! biome-wait #f)
+         (consider-biome! form name)))
       (else #f))))
 
 (define (wish-note! kind why)
@@ -3194,14 +3309,22 @@
                   (voice-line act name "missing" wish-locale))
            (consider-pals! (hero-src kind)
                            (voice-line act name "fair" wish-locale)))))
-      ((or (string=? act "biome") (string=? act "biome-next") (string=? act "mood"))
+      ((or (string=? act "biome") (string=? act "biome-next")
+           (string=? act "biome-tour") (string=? act "biome-ask") (string=? act "mood"))
        (let* ((mood? (string=? act "mood"))
+              (asked (if (string=? act "biome-ask") (edsl-fallback name) #f))
+              (toured (if (string=? act "biome-tour") (edsl-get (edsl-next name biome-now)) #f))
+              (known (if (and (string=? act "biome") (edsl-id? name)) (edsl-get name) #f))
               (next (cond
                       (mood? (mood-known name))
                       ((string=? act "biome-next") (biome-next biome-now))
+                      (asked (hash-ref asked "id" biome-now))
+                      (toured (hash-ref toured "id" biome-now))
+                      (known name)
                       (else (biome-known name))))
+              (spec (cond (asked asked) (toured toured) (known known) (else #f)))
               (cur (if mood? mood-now biome-now))
-              (same (string=? next cur)))
+              (same (and (string=? next cur) (not asked))))
          (if same
            (begin
              (raise-banner! (if mood? "mood" "venue")
@@ -3213,11 +3336,24 @@
                (set! mood-now next)
                (begin
                  (set! biome-now next)
-                 (set! biome-pin #t)))
+                 (set! biome-pin #t)
+                 (set! edsl-now spec)
+                 (if (hash? spec)
+                   (set! mood-now (hash-ref spec "mood" mood-now))
+                   #f)
+                 (if asked
+                   (ask-biome! name)
+                   (begin (set! biome-hold "") (set! biome-accept -1)))))
              (raise-banner! (if mood? "mood" "venue")
-                            (venue-line next run-mult wish-locale) 0)
+                            (if (hash? spec)
+                              (string-append (edsl-say spec wish-locale) " · ×" (biome-int run-mult))
+                              (venue-line next run-mult wish-locale))
+                            0)
              (note! "KEEP" "fair" "voice"
-                    (voice-line act next "fair" wish-locale) next)))))
+                    (if (hash? spec)
+                      (edsl-say spec wish-locale)
+                      (voice-line act next "fair" wish-locale))
+                    next)))))
       ((string=? act "drop-thing")
        (let ((got (shown-drop shown name)))
          (if (not (hash-ref got "ok" #f))
@@ -3310,11 +3446,11 @@
           (if (<= k 0)
             #t
             (begin (try (fiber:yield) (catch (e) #f)) (spin (- k 1)))))
-        (if (or scene-busy motif-busy pals-busy
-                scene-working motif-working pals-working)
+        (if (or scene-busy motif-busy pals-busy biome-busy
+                scene-working motif-working pals-working biome-working)
           (try (fiber:yield) (catch (e) #f))
           #f))
-      (if (or scene-busy motif-busy pals-busy) (expire-llm!) #f)
+      (if (or scene-busy motif-busy pals-busy biome-busy) (expire-llm!) #f)
       ; wish-wait still owes one reply. Read it so the late token can
       ; clear the wait. An idle arm is not polled; that retains a frame.
       (if (or (and scene-busy (not stall-waiting))
@@ -3329,6 +3465,12 @@
       (if (or pals-busy (and wish-wait (string=? wish-kind "pals")))
         (let ((pals-msg (reply-hash (channel:try-recv pals-res))))
           (if (hash? pals-msg) (take-pals! c pals-msg) #f))
+        #f)
+      (if (or biome-busy biome-late)
+        (let ((biome-msg (reply-hash (channel:try-recv biome-res))))
+          (if (hash? biome-msg)
+            (begin (set! biome-late #f) (take-biome! c biome-msg))
+            #f))
         #f)
       (sync-llm-busy!)
       ; The take above may be the moment the slot freed. Score the waiting
@@ -3414,9 +3556,14 @@
                                          (hash-ref row "mult")
                                          lv)))
             (let ((b (hash-ref row "biome" #f)))
-              (if (biome-name? b)
-                (begin (set! biome-now b) (set! biome-pin #t))
-                (set! biome-now (biome-for-level lv))))
+              (if (place-name? b)
+                (begin
+                  (set! biome-now b)
+                  (set! biome-pin #t)
+                  (set! edsl-now (edsl-get b)))
+                (begin
+                  (set! biome-now (biome-for-level lv))
+                  (set! edsl-now #f))))
             (let ((m (hash-ref row "mood" #f)))
               (if (mood-name? m) (set! mood-now m) #f))
             (set! chal-coins 0)
@@ -3453,6 +3600,9 @@
         "deck" deck-ids "g-lock" g-lock "g-held" g-held "speed-lock" speed-lock
         "seed" seed "level" level-n "form" form "pace" pace "band" band
         "mult" run-mult "biome" biome-now "mood" mood-now "pin" biome-pin
+        "edsl" (if (and (hash? edsl-now) (string? (hash-ref edsl-now "src" #f)))
+                 (hash-ref edsl-now "src")
+                 "")
         "chal-coins" chal-coins "chal-done" chal-done
         "banner-id" banner-id "banner-kind" banner-kind
         "banner-text" banner-text "banner-gain" banner-gain
@@ -3502,7 +3652,12 @@
   (set! seed (hash-ref saved "seed"))
   (set! level-n (hash-ref saved "level"))
   (set! run-mult (mult-clamp (hash-ref saved "mult" 1)))
-  (set! biome-now (biome-known (hash-ref saved "biome" "garden")))
+  (set! biome-now (place-known (hash-ref saved "biome" "garden")))
+  (let ((src (hash-ref saved "edsl" "")))
+    (if (and (string? src) (> (string-length src) 0))
+      (let ((found (edsl-check src)))
+        (set! edsl-now (if (and (hash? found) (hash-ref found "ok" #f)) found (edsl-get biome-now))))
+      (set! edsl-now (edsl-get biome-now))))
   (set! mood-now (mood-known (hash-ref saved "mood" "day")))
   (set! biome-pin (equal? (hash-ref saved "pin" #f) #t))
   (set! chal-coins (if (number? (hash-ref saved "chal-coins" 0)) (floor (hash-ref saved "chal-coins" 0)) 0))
@@ -3648,7 +3803,8 @@
                         "knob" 0
                         "prev" #f))
       (set! chase-recent (list))
-      (set! biome-now (biome-known (hash-ref snap "biome" "garden")))
+      (set! biome-now (place-known (hash-ref snap "biome" "garden")))
+      (set! edsl-now (edsl-get biome-now))
       (set! mood-now (mood-known (hash-ref snap "mood" "day")))
       (set! biome-pin #f)
       (and (scene-install! (hash-ref snap "scene" ""))
@@ -3729,8 +3885,15 @@
 (define (take-hello-venue! msg)
   (let ((b (hash-ref msg "venue" #f))
         (m (hash-ref msg "mood" #f)))
-    (if (biome-name? b)
-      (begin (set! biome-now b) (set! biome-pin #t))
+    (if (place-name? b)
+      (begin
+        (set! biome-now b)
+        (set! biome-pin #t)
+        (set! edsl-now (edsl-get b))
+        (set! biome-hold "")
+        (if (and (hash? edsl-now) (not (mood-name? m)))
+          (set! mood-now (hash-ref edsl-now "mood" "day"))
+          #f))
       #f)
     (if (mood-name? m)
       (set! mood-now m)
@@ -4128,10 +4291,13 @@
         (set! scene-res (channel:create 2))
         (set! pals-req (channel:create 2))
         (set! pals-res (channel:create 2))
+        (set! biome-req (channel:create 2))
+        (set! biome-res (channel:create 2))
         (set! thing-res (channel:create 16))
         (fiber:spawn (lambda () (llm-worker motif-req motif-res SYS "motif")))
         (fiber:spawn (lambda () (llm-worker scene-req scene-res SCENE-SYS "scene")))
-        (fiber:spawn (lambda () (llm-worker pals-req pals-res PALS-SYS "pals"))))
+        (fiber:spawn (lambda () (llm-worker pals-req pals-res PALS-SYS "pals")))
+        (fiber:spawn (lambda () (llm-worker biome-req biome-res BIOME-SYS "biome"))))
       #f)))
 
 ; One worker per phrase kind. A scene call stuck inside llm:chat does not
@@ -4203,6 +4369,7 @@
         (cond
           ((string=? kind "scene") (set! scene-working #t))
           ((string=? kind "pals") (set! pals-working #t))
+          ((string=? kind "biome") (set! biome-working #t))
           (else (set! motif-working #t)))
         (if (and stall-scene?
                  (= scene-stalled 0)
@@ -4218,6 +4385,7 @@
         (cond
           ((string=? kind "scene") (set! scene-working #f))
           ((string=? kind "pals") (set! pals-working #f))
+          ((string=? kind "biome") (set! biome-working #f))
           (else (set! motif-working #f)))
         (loop)))))
 

@@ -1,4 +1,5 @@
 import { drawThing, growOf, animOf, showBox } from "./thing.mjs";
+import { DECOR_CAP, landmarkParts, specFor } from "./edsl.mjs";
 
 // Third-person WebGL2 view of the Lumen garden. One instanced draw of
 // unit cubes, shaded as beveled toys, spheres and seeds. The sim's
@@ -94,8 +95,44 @@ function knownName(name, list, fallback) {
 // Garden in daylight is the palette above, unchanged. Other venues replace
 // sky, ground, and road colours. Hurdles, gates, coins, and pots stay put
 // so every biome keeps the same readable obstacles.
-export function dressPalette(base, biome, mood) {
-  const name = knownName(biome, BIOME_NAMES, "garden");
+function applyCitySpec(pal, spec) {
+  const skyLuma = spec.sky[0] * 0.25 + spec.sky[1] * 0.5 + spec.sky[2] * 0.25;
+  pal.biome = spec.id || pal.biome;
+  pal.sky = spec.sky.slice();
+  pal.sky0 = spec.sky.slice();
+  pal.sky1 = spec.sky1.slice();
+  pal.fog = spec.fog.slice();
+  pal.fogAmt = spec.fogAmt;
+  pal.sun = spec.sun.slice();
+  pal.path = spec.path.slice();
+  pal.grass = spec.ground.slice();
+  pal.grassL = mix3(spec.ground, [1, 1, 1], 0.16);
+  pal.grassR = mix3(spec.ground, [0.08, 0.08, 0.06], 0.18);
+  pal.hill = spec.hill.slice();
+  pal.hill2 = spec.hill2.slice();
+  pal.water = spec.water.slice();
+  pal.soil = spec.curb.slice();
+  pal.hedge = spec.roof.slice();
+  pal.build = spec.build.slice();
+  pal.roof = spec.roof.slice();
+  pal.curb = spec.curb.slice();
+  pal.mote = spec.mote.slice();
+  pal.leaf = mix3(spec.ground, [0.2, 0.55, 0.28], 0.45);
+  pal.leaf2 = mix3(spec.ground, [0.55, 0.8, 0.4], 0.35);
+  pal.trunk = [0.42, 0.3, 0.18];
+  pal.flower = spec.mote.slice();
+  pal.flower2 = spec.roof.slice();
+  pal.lightAmt = Math.max(0.74, spec.light);
+  pal.stars = skyLuma < 0.35 ? 0.75 : 0;
+  pal.nebula = spec.sky1.slice();
+  pal.disc = pal.stars > 0 ? 0.45 : 1;
+  pal.edsl = spec;
+}
+
+export function dressPalette(base, biome, mood, specOverride) {
+  const looked = specOverride && typeof specOverride === "object" ? specOverride : specFor(biome);
+  const spec = looked && looked.sky ? looked : null;
+  const name = spec ? (spec.id || biome) : knownName(biome, BIOME_NAMES, "garden");
   const tone = knownName(mood, MOOD_NAMES, "day");
   const pal = Object.assign({}, base, {
     biome: name,
@@ -104,8 +141,10 @@ export function dressPalette(base, biome, mood) {
     nebula: [0, 0, 0],
     disc: 1,
     sunUv: base.sunUv.slice(),
+    edsl: null,
   });
-  if (name === "city") {
+  if (spec) applyCitySpec(pal, spec);
+  else if (name === "city") {
     pal.sky0 = [0.42, 0.52, 0.82];
     pal.sky1 = [0.98, 0.58, 0.34];
     pal.sky = [0.55, 0.48, 0.72];
@@ -176,7 +215,8 @@ export function dressPalette(base, biome, mood) {
     pal.sun = [1, 0.9, 0.62];
     pal.lightAmt = Math.max(0.78, pal.lightAmt);
   }
-  if (name === "garden" && tone === "day") return pal;
+  const native = spec && spec.mood ? spec.mood : "";
+  if ((!spec && name === "garden" && tone === "day") || (spec && tone === native)) return pal;
   if (tone === "night") {
     pal.sky0 = mix3(pal.sky0, [0.06, 0.08, 0.16], 0.72);
     pal.sky1 = mix3(pal.sky1, [0.14, 0.16, 0.28], 0.62);
@@ -212,6 +252,14 @@ export function dressPalette(base, biome, mood) {
     pal.lightAmt = Math.max(0.88, pal.lightAmt);
     pal.flower = [0.2, 0.95, 0.9];
     pal.flower2 = [1, 0.35, 0.75];
+  } else if (spec && tone === "day") {
+    pal.sky0 = mix3(pal.sky0, [0.64, 0.78, 0.95], 0.42);
+    pal.sky1 = mix3(pal.sky1, [0.95, 0.78, 0.55], 0.35);
+    pal.fog = mix3(pal.fog, [0.85, 0.9, 0.95], 0.3);
+    pal.sun = [1, 0.92, 0.7];
+    pal.lightAmt = Math.max(0.8, pal.lightAmt);
+    pal.stars = Math.min(pal.stars || 0, 0.15);
+    pal.disc = 1;
   }
   return pal;
 }
@@ -1732,7 +1780,7 @@ export function createRenderer(canvas) {
           }
         }
       }
-      if (gardenLook) {
+      if (!pal.edsl && gardenLook) {
       if (dist < 36 && ((z / 2) | 0) % 2 === 0) {
         const hv = laneHash(z * 0.19 + 4.2);
         const hedgeH = 0.30 + hv * 0.22;
@@ -1771,7 +1819,7 @@ export function createRenderer(canvas) {
           push(extra.x, stem2 + 0.08, extra.z, 0.16, 0.16, 0.16, 1, pal.flower2, 0.3, 0.4, extra.psi);
         }
       }
-      } else if (dist < 40 && n < MAX - 80) {
+      } else if (!pal.edsl && dist < 40 && n < MAX - 80) {
         const step8 = ((z / 2) | 0) % 4 === 0;
         const step4 = ((z / 2) | 0) % 2 === 0;
         if (pal.biome === "city") {
@@ -1844,9 +1892,97 @@ export function createRenderer(canvas) {
         }
       }
     }
+    if (pal.edsl && n < MAX - 80) {
+      const spec = pal.edsl;
+      const props = spec.props || [];
+      function stamp(at, kind, scale) {
+        const parts = landmarkParts(kind, spec);
+        const c = Math.cos(at.psi);
+        const s = Math.sin(at.psi);
+        for (let i = 0; i < parts.length; i++) {
+          if (n >= MAX - 4) return;
+          const p = parts[i];
+          const dx = p.dx * scale;
+          const dz = p.dz * scale;
+          push(at.x + c * dx + s * dz, p.dy * scale, at.z - s * dx + c * dz,
+            p.sx * scale, p.sy * scale, p.sz * scale, p.shape || 0, p.rgb, p.rough, p.emit || 0, at.psi);
+        }
+      }
+      if (props[0]) {
+        const along = Math.floor(pz / 22) * 22 + 12;
+        stamp(onRoad(along, 6.6), props[0], 1.7);
+      }
+      if (props[1]) {
+        const origin = Math.floor((pz - 6) / 16) * 16;
+        let drawn = 0;
+        for (let i = 0; i < 5 && drawn < DECOR_CAP.secondary; i++) {
+          const along = origin + i * 16;
+          if (along < pz - 6 || along > pz + 40) continue;
+          stamp(onRoad(along, -5.2), props[1], 0.88);
+          drawn += 1;
+        }
+      }
+      if (props[2]) {
+        const origin = Math.floor(pz / 26) * 26;
+        let drawn = 0;
+        for (let i = 0; i < 3 && drawn < DECOR_CAP.third; i++) {
+          const along = origin + 10 + i * 26;
+          if (along < pz - 4 || along > pz + 38) continue;
+          stamp(onRoad(along, 6.6), props[2], 0.8);
+          drawn += 1;
+        }
+      }
+      for (let i = 0; i < DECOR_CAP.buildings; i++) {
+        const side = i % 2 ? 1 : -1;
+        const along = pz - 2 + Math.floor(i / 2) * 11;
+        const at = onRoad(along, side * (4.7 + (laneHash(along + side) * 0.4)));
+        const h = 1.7 + laneHash(along * 0.37 + side) * 2.6;
+        const bw = 0.9 + laneHash(along * 0.17) * 0.55;
+        const body = mix3(pal.build, pal.roof, laneHash(along * 0.53) * 0.35);
+        const style = spec.style;
+        if (style === "wall") {
+          push(at.x, 0.7, at.z, 2.2, 1.4, 0.42, 0, body, 0.55, 0.03, at.psi, 0, 0, 6);
+          for (let m = 0; m < 3; m++) {
+            const bit = onRoad(along + (m - 1) * 0.55, side * 4.7);
+            push(bit.x, 1.55, bit.z, 0.28, 0.32, 0.4, 0, pal.roof, 0.5, 0.04, bit.psi);
+          }
+        } else if (style === "stone" || style === "mist") {
+          push(at.x, h * 0.5, at.z, bw, h, bw * 0.72, 0, body, 0.5, 0.03, at.psi, 0, 0, 6);
+          push(at.x, h + 0.08, at.z, bw * 1.15, 0.14, bw * 0.9, 0, pal.roof, 0.45, 0.04, at.psi);
+        } else if (style === "deco") {
+          push(at.x, h * 0.42, at.z, bw, h * 0.84, bw * 0.7, 0, body, 0.42, 0.05, at.psi, 0, 0, 6);
+          push(at.x, h * 0.9, at.z, bw * 0.62, h * 0.28, bw * 0.5, 0, pal.roof, 0.35, 0.2, at.psi);
+          push(at.x, h + 0.2, at.z, 0.08, 0.45, 0.08, 0, pal.roof, 0.3, 0.55, at.psi);
+        } else {
+          push(at.x, h * 0.5, at.z, bw, h, bw * 0.72, 0, body, 0.48, style === "neon" || style === "bay" ? 0.12 : 0.04, at.psi, 0, 0, 6);
+          const band = onRoad(along, side * 4.7);
+          push(band.x, h * 0.62, band.z, bw * 1.02, 0.12, bw * 0.2, 0, pal.roof, 0.25, style === "neon" || style === "bay" ? 0.85 : 0.2, band.psi);
+          if (style !== "pastel") {
+            push(at.x, 1.15, at.z, 0.1, 0.16, 0.1, 1, pal.mote, 0.2, 0.8, at.psi);
+          }
+        }
+      }
+      for (let i = 0; i < 8; i++) {
+        const along = pz - 2 + i * 5.2;
+        const dash = onRoad(along, 0);
+        push(dash.x, 0.07, dash.z, 0.1, 0.02, 0.55, 0, [0.96, 0.9, 0.62], 0.3, 0.35, dash.psi);
+        const side = i % 2 ? 1 : -1;
+        const curb = onRoad(along, side * 2.55);
+        push(curb.x, 0.08, curb.z, 0.14, 0.06, 1.4, 0, pal.curb, 0.55, 0.02, curb.psi);
+      }
+      if (spec.style === "canal") {
+        for (let i = 0; i < 4; i++) {
+          for (const side of [-1, 1]) {
+            const at = onRoad(pz + i * 10, side * 3.55);
+            push(at.x, 0.03, at.z, 1.5, 0.02, 6.2, 0, pal.water, 0.12, 0.28, at.psi);
+          }
+        }
+      }
+    }
     if (!(pal.biome === "garden" && pal.mood === "day") && n < MAX - 12) {
       const motes = reduced ? 3 : 6;
-      const moteRgb = pal.biome === "space" ? [0.7, 0.9, 1]
+      const moteRgb = pal.edsl ? pal.mote
+        : pal.biome === "space" ? [0.7, 0.9, 1]
         : pal.biome === "city" ? [1, 0.72, 0.38]
         : pal.biome === "coast" ? [0.75, 0.95, 1]
         : [1, 0.88, 0.55];

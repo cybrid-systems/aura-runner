@@ -7,6 +7,7 @@
 (require "lib/phys")
 (require "lib/thing")
 (require "lib/biome")
+(require "lib/edsl")
 
 (define voice-speeds (list 8.0 10.0 12.0 13.0 14.0))
 
@@ -232,7 +233,8 @@
     (let* ((low (string-downcase text))
            (props (voice-prop-names text low))
            (pals (voice-pal-names text low))
-           (drop (voice-remove? text low)))
+           (drop (voice-remove? text low))
+           (place (if drop #f (edsl-hear text low))))
       (cond
         ((and drop (pair? props))
          (voice-row "drop-prop" (voice-join props) 0 "拿下去了" "That one went away"))
@@ -287,6 +289,7 @@
                         ((> d 0) "The finish is farther")
                         ((< d 0) "The finish is closer")
                         (else "The finish is just ahead")))))
+        (place place)
         ((and (not (voice-venue-soft? text low)) (voice-next-venue? text low))
          (voice-row "biome-next" "next" 1 "换了一个场景" "A new place"))
         ((and (not (voice-venue-soft? text low))
@@ -362,8 +365,16 @@
        (if zh "终点就在前面" "The finish is just ahead"))
       ((and (string=? act "biome") (string=? why "same"))
        (if zh "已经是这个场景了" "That place is already here"))
+      ((string=? act "biome-ask")
+       (let ((spec (edsl-fallback name)))
+         (if spec (edsl-say spec (if zh "zh" "en")) (if zh "到了一座城" "A city is here"))))
+      ((string=? act "biome-tour")
+       (if zh "换了一座城市" "Another city"))
       ((string=? act "biome")
-       (biome-say name (if zh "zh" "en")))
+       (let ((spec (edsl-get name)))
+         (if spec
+           (edsl-say spec (if zh "zh" "en"))
+           (biome-say name (if zh "zh" "en")))))
       ((string=? act "biome-next")
        (if zh "换了一个场景" "A new place"))
       ((and (string=? act "mood") (string=? why "same"))

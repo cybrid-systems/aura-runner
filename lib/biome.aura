@@ -1,7 +1,9 @@
 ; Venues and the score multiplier. The picture follows these names.
 ; A level gate does not put the multiplier back to one, and it does not
 ; touch the combo the page is holding. Hit boxes stay in lib/phys.aura.
+; World cities live in lib/edsl. The level cycle stays these four.
 (require "std/string" all:)
+(require "lib/edsl")
 
 (define biome-names (list "garden" "city" "space" "coast"))
 (define mood-names (list "day" "night" "sunset" "neon"))
@@ -24,6 +26,14 @@
 
 (define (biome-name? s)
   (and (string? s) (biome-member? biome-names s)))
+
+(define place-names (append biome-names edsl-ids))
+
+(define (place-name? s)
+  (and (string? s) (biome-member? place-names s)))
+
+(define (place-known s)
+  (if (place-name? s) s "garden"))
 
 (define (mood-name? s)
   (and (string? s) (biome-member? mood-names s)))
@@ -64,13 +74,16 @@
   (list-ref biome-names (modulo (+ (biome-index name) 1) 4)))
 
 (define (biome-title name lang)
-  (let ((zh (string=? lang "zh"))
-        (b (biome-known name)))
-    (cond
-      ((string=? b "city") (if zh "城市" "City"))
-      ((string=? b "space") (if zh "太空" "Space"))
-      ((string=? b "coast") (if zh "海边" "Coast"))
-      (else (if zh "花园" "Garden")))))
+  (let ((city (edsl-title name lang)))
+    (if (and (string? city) (> (string-length city) 0))
+      city
+      (let ((zh (string=? lang "zh"))
+            (b (biome-known name)))
+        (cond
+          ((string=? b "city") (if zh "城市" "City"))
+          ((string=? b "space") (if zh "太空" "Space"))
+          ((string=? b "coast") (if zh "海边" "Coast"))
+          (else (if zh "花园" "Garden")))))))
 
 (define (mood-title name lang)
   (let ((zh (string=? lang "zh"))
