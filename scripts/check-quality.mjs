@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { DT, makePlayer, rulesOf, step } from "../web/sim.mjs";
 import { highFragment, highSky, litAnchorsOk, litFragment, litSky, LIGHT_LINE } from "../web/lit.mjs";
 import { invertMat, meshSources } from "../web/render.mjs";
-import { blurAmount, fovKick, glossFor, heroShape, laneEase, sceneGrade, shakeOffset, sunScreen, whooshNudge } from "../web/feel.mjs";
+import { BLUR_TAP_PX, blurAmount, blurTapPx, fovKick, glossFor, heroShape, laneEase, sceneGrade, shakeOffset, sunScreen, whooshNudge } from "../web/feel.mjs";
 import {
   DEFAULT_POLICY,
   POLICY_TEXT,
@@ -111,6 +111,10 @@ assert(Math.abs(lat - 1.8) < 0.08, "lane ease arrives, " + lat);
 assert(shakeOffset(0, 1).every((v) => v === 0), "no shake without an amplitude");
 const kick = shakeOffset(0.04, 0.2);
 assert(kick.some((v) => Math.abs(v) > 0) && kick.every((v) => Math.abs(v) <= 0.04), "shake stays inside its budget");
+assert(blurTapPx(0.45, 0.88, 2560) === BLUR_TAP_PX, "a fast edge stays inside the tap cap");
+assert(blurTapPx(0.45, 0.88, 1280) <= BLUR_TAP_PX, "1280-wide taps cannot reprint an edge");
+const blur12px = blurTapPx(0.25, blurAmount(12, 0.88), 1280);
+assert(blur12px > 0 && blur12px <= BLUR_TAP_PX, "12 m/s still steps, inside the cap, " + blur12px);
 assert(blurAmount(8, 0.88) === 0 && blurAmount(9, 0.88) === 0, "blur stays quiet through 9 m/s");
 const blur12 = blurAmount(12, 0.88);
 assert(blur12 > 0.2 && blur12 < 0.28, "12 m/s is already a readable streak, " + blur12);
@@ -439,6 +443,9 @@ const postText = readFileSync(new URL("../web/post.mjs", import.meta.url), "utf8
 assert(postText.includes("KHR_parallel_shader_compile"), "post can compile without stalling the frame");
 assert(postText.includes("FINISH_FS") && !postText.slice(postText.indexOf("const FINISH_FS"), postText.indexOf("const COMPOSITE_HIGH_FS")).includes("uHero"), "medium finish does not mask a hero");
 assert(postText.includes("uHero"), "high finish keeps the hero sharp");
+assert(postText.includes("uSoft") && postText.includes("24.0 / span"), "speed blur samples a prefilter inside 24px");
+const pageText = readFileSync(new URL("../web/main.mjs", import.meta.url), "utf8");
+assert(pageText.includes("window.__lumenForceNear"), "a recording can force one near miss");
 assert(renderSrc.includes("softwareFromRenderer(gpuName)") && renderSrc.includes("quality.mode === \"low\""), "a forced low tier does not warm high shaders");
 assert(clampTier("high", "medium") === "medium", "clamp");
 

@@ -83,6 +83,22 @@ export function shakeOffset(amp, time) {
   ];
 }
 
+// One radial sample must not jump further than this many framebuffer
+// pixels. Wider jumps reprint a lamp post as a stack of copies. The
+// finish pass reads a pre-blurred image whose footprint is wider, so
+// neighbours overlap into one streak.
+export const BLUR_TAP_PX = 24;
+
+// Pixel step of one speed-blur sample. distUv is the distance from the
+// hero in UV. The cap is what keeps 12–18 m/s a smear instead of ghosts.
+export function blurTapPx(distUv, blur, width) {
+  const b = blur > 0 ? blur : 0;
+  const w = width > 0 ? width : 0;
+  const dir = Math.abs(Number(distUv) || 0) * b * 0.085;
+  const step = dir * 0.45 * w;
+  return Math.min(BLUR_TAP_PX, step);
+}
+
 // Radial blur weight. Quiet through 9 m/s so the opening stays sharp.
 // The curve is already a quarter of the budget at 12 m/s and full at 18,
 // which is the range that should read as speed. The hero is masked in

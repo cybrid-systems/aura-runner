@@ -214,6 +214,7 @@ const COMPOSITE_HIGH_FS = COMPOSITE_FS
 const FINISH_HIGH_FS = `#version 300 es
 precision highp float;
 uniform sampler2D uTex;
+uniform sampler2D uSoft;
 uniform sampler2D uDepth;
 uniform vec2 uRes;
 uniform float uFxaa;
@@ -251,13 +252,20 @@ void main() {
     float z = texture(uDepth, vUv).r;
     float nearZ = 1.0 - smoothstep(0.97, 0.995, z);
     float sharp = clamp(max(body, nearZ * 0.9), 0.0, 1.0);
-    vec2 dir = (vUv - hero) * uBlur * 0.085;
-    vec3 acc = c * 0.26;
-    acc += texture(uTex, vUv + dir * 0.7).rgb * 0.22;
-    acc += texture(uTex, vUv + dir * 1.5).rgb * 0.18;
-    acc += texture(uTex, vUv + dir * 2.5).rgb * 0.14;
-    acc += texture(uTex, vUv + dir * 3.6).rgb * 0.12;
-    acc += texture(uTex, vUv - dir * 0.45).rgb * 0.08;
+    // Same reach as before, then clamped to 24 framebuffer pixels so the
+    // pre-blurred taps overlap. A sharp tap 40px away reprints the edge.
+    vec2 step = (vUv - hero) * uBlur * 0.085 * 0.45;
+    float span = length(step * uRes);
+    if (span > 24.0) step *= 24.0 / span;
+    vec3 acc = c * 0.46;
+    acc += texture(uSoft, vUv + step).rgb * 0.12;
+    acc += texture(uSoft, vUv + step * 2.0).rgb * 0.10;
+    acc += texture(uSoft, vUv + step * 3.0).rgb * 0.08;
+    acc += texture(uSoft, vUv + step * 4.0).rgb * 0.07;
+    acc += texture(uSoft, vUv + step * 5.0).rgb * 0.06;
+    acc += texture(uSoft, vUv + step * 6.0).rgb * 0.05;
+    acc += texture(uSoft, vUv + step * 7.0).rgb * 0.03;
+    acc += texture(uSoft, vUv + step * 8.0).rgb * 0.03;
     c = mix(acc, c, sharp);
   }
   o = vec4(c, 1.0);
@@ -615,6 +623,8 @@ export function createPost(gl, compiler) {
   let aoBuf = null;
   let flat = null;
   let reflBuf = null;
+  let tiny = null;
+  let primed = false;
   let aoLive = false;
   let reflectOn = false;
   let depthDenied = false;
@@ -630,7 +640,9 @@ export function createPost(gl, compiler) {
     dropTarget(gl, aoBuf);
     dropTarget(gl, flat);
     dropTarget(gl, reflBuf);
-    scene = shadow = halfA = halfB = quartA = quartB = aoBuf = flat = reflBuf = null;
+    dropTarget(gl, tiny);
+    scene = shadow = halfA = halfB = quartA = quartB = aoBuf = flat = reflBuf = tiny = null;
+    primed = false;
     aoLive = false;
   }
 
@@ -797,6 +809,7 @@ export function createPost(gl, compiler) {
         fxaa: gl.getUniformLocation(finishHigh, "uFxaa"),
         blur: gl.getUniformLocation(finishHigh, "uBlur"),
         hero: gl.getUniformLocation(finishHigh, "uHero"),
+        soft: gl.getUniformLocation(finishHigh, "uSoft"),
       };
       locR = {
         scene: gl.getUniformLocation(reflectProg, "uScene"),
@@ -812,6 +825,51 @@ export function createPost(gl, compiler) {
       console.error(err);
       return false;
     }
+  }
+
+  // Draw the High programs once at 4×4, including the blur branch, so the
+  // first restart is not the first time the driver builds those pipelines.
+  function primeHigh() {
+    if (primed) return;
+    if (!ensureHighShaders()) return;
+    if (!tiny || !tiny.ok) {
+      try { tiny = target(gl, 4, 4, false, false); } catch { tiny = null; }
+    }
+    if (!tiny || !tiny.ok) return;
+    const prev = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, tiny.fb);
+    gl.viewport(0, 0, tiny.w, tiny.h);
+    gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.BLEND);
+    gl.colorMask(true, true, true, true);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, empty);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, empty);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, empty);
+    gl.useProgram(finishHigh);
+    gl.uniform1i(locF.tex, 0);
+    gl.uniform1i(locF.depth, 1);
+    gl.uniform1i(locF.soft, 2);
+    gl.uniform2f(locF.res, 4, 4);
+    gl.uniform1f(locF.fxaa, 1);
+    gl.uniform1f(locF.blur, 1);
+    gl.uniform2f(locF.hero, 0.5, 0.42);
+    gl.bindVertexArray(vao);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    const id = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+    gl.useProgram(reflectProg);
+    gl.uniform1i(locR.scene, 0);
+    gl.uniform1i(locR.depth, 1);
+    gl.uniformMatrix4fv(locR.invProj, false, id);
+    gl.uniformMatrix4fv(locR.proj, false, id);
+    gl.uniform3f(locR.sky, 0.6, 0.7, 0.9);
+    gl.uniform1f(locR.amt, 0.4);
+    gl.uniform1f(locR.time, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, prev);
+    primed = true;
   }
 
   function present(viewW, viewH, profile, look) {
@@ -863,6 +921,7 @@ export function createPost(gl, compiler) {
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
     const highPic = !!(profile && profile.tier === "high" && ensureHighShaders());
+    if (highPic) primeHigh();
     reflectOn = false;
     if (highPic && tone.reflect > 0 && reflBuf && scene.depthTex && tone.invProj && tone.proj) {
       if (tone.span) tone.span("reflect");
@@ -938,6 +997,16 @@ export function createPost(gl, compiler) {
     }
     gl.bindVertexArray(vao);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+    let softTex = null;
+    if (highPic && tone.blur > 0.001 && dest && flat && quartA && quartB) {
+      // Wide prefilter. The last passes cover about 48px, wider than the
+      // 24px finish step, so the tail is one streak.
+      blurPass(flat, 2 / flat.w, 0, quartA);
+      blurPass(quartA, 0, 2 / quartA.h, quartB);
+      blurPass(quartB, 4 / quartB.w, 0, quartA);
+      blurPass(quartA, 0, 4 / quartA.h, quartB);
+      softTex = quartB.tex;
+    }
     if (dest) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, viewW, viewH);
@@ -949,9 +1018,12 @@ export function createPost(gl, compiler) {
         gl.activeTexture(gl.TEXTURE1);
         gl.bindTexture(gl.TEXTURE_2D, scene.depthTex || empty);
         gl.uniform1i(locF.depth, 1);
+        gl.activeTexture(gl.TEXTURE2);
+        gl.bindTexture(gl.TEXTURE_2D, softTex || flat.tex);
+        gl.uniform1i(locF.soft, 2);
         gl.uniform2f(locF.res, flat.w, flat.h);
         gl.uniform1f(locF.fxaa, profile && profile.fxaa ? 1 : 0);
-        gl.uniform1f(locF.blur, tone.blur > 0 ? tone.blur : 0);
+        gl.uniform1f(locF.blur, softTex ? (tone.blur > 0 ? tone.blur : 0) : 0);
         const hero = tone.hero || [0.5, 0.42];
         gl.uniform2f(locF.hero, hero[0], hero[1]);
       } else {
