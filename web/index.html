@@ -12,20 +12,26 @@
   <p id="nogpu" hidden>This browser needs WebGL2 to draw the garden.</p>
   <p id="toast" hidden aria-live="polite"></p>
   <div id="flash" hidden></div>
-  <p id="kicker">points</p>
-  <div id="score" aria-hidden="true">0</div>
-  <p id="mult" aria-hidden="true">×1</p>
+  <div id="hud">
+    <p id="kicker">points</p>
+    <div id="score-row">
+      <div id="score" aria-hidden="true">0</div>
+      <p id="mult" aria-hidden="true">×1</p>
+    </div>
+    <p id="grade" aria-hidden="true">Sprout ★☆☆☆☆</p>
+    <div id="meter" aria-hidden="true"><span id="meter-fill"></span></div>
+    <p id="pace" aria-hidden="true">Level 1 · Speed 8</p>
+    <div id="track-row">
+      <div id="goal" aria-hidden="true"><span id="goal-fill"></span></div>
+      <p id="ward" aria-hidden="true">Shield</p>
+    </div>
+    <p id="combo" hidden aria-hidden="true"></p>
+    <p id="record" hidden aria-hidden="true"></p>
+    <p id="challenge" hidden></p>
+  </div>
   <p id="evo" hidden aria-live="polite"></p>
-  <p id="grade" aria-hidden="true">Sprout ★☆☆☆☆</p>
-  <div id="meter" aria-hidden="true"><span id="meter-fill"></span></div>
-  <p id="pace" aria-hidden="true">Level 1 · Speed 8</p>
-  <div id="goal" aria-hidden="true"><span id="goal-fill"></span></div>
-  <p id="ward" aria-hidden="true">Shield</p>
   <p id="hearts" aria-live="polite" aria-label="3 hearts"></p>
   <p id="race" hidden></p>
-  <p id="record" hidden aria-hidden="true"></p>
-  <p id="challenge" hidden></p>
-  <p id="combo" hidden aria-hidden="true"></p>
   <p id="gain" hidden aria-hidden="true"></p>
   <button id="badge" type="button" aria-expanded="false" aria-controls="notes">
     <span class="badge-kicker">world</span>
@@ -37,8 +43,8 @@
   </div>
   <button id="motion" type="button" aria-label="Reduce motion" aria-pressed="false">◎</button>
   <button id="mute" type="button" aria-label="Mute" aria-pressed="false">♪</button>
-  <p id="said" hidden aria-live="polite"></p>
-  <p id="mark" hidden></p>
+  <p id="said" hidden aria-live="polite"><span class="trial-kicker" id="said-kicker"></span><span id="said-body"></span></p>
+  <p id="mark" hidden><span class="trial-kicker" id="mark-kicker"></span><span id="mark-word"></span></p>
   <p id="thing-hud" hidden aria-live="polite"></p>
   <button id="again" type="button" aria-keyshortcuts="R">Restart</button>
   <button id="model" type="button" hidden>DeepSeek</button>

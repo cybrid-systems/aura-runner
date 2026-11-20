@@ -160,3 +160,9 @@
     (if (biome-name? place) (biome-title place lang) (mood-title place lang))
     " · ×"
     (biome-int mult)))
+
+; Every world switch uses the same line the Biome EDSL already shows.
+; Mood changes keep venue-line. The title stays English, matching
+; "A new world: Beijing" and the other kept specs.
+(define (world-banner place)
+  (string-append "A new world: " (biome-title place "en")))
