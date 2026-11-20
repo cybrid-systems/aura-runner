@@ -348,6 +348,15 @@ function snapshot(state, extra) {
   };
 }
 
+// Chrome's performance.now is quantised to 0.1 ms without isolation, so a
+// sub-quantum render is reported as 0. That is free headroom, not a miss.
+// Non-finite and negative readings are dropped. A multi-hundred-ms reading
+// is a real stall and keeps its ratio.
+export function frameWork(workMs, budget) {
+  if (!(budget > 0) || !Number.isFinite(workMs) || workMs < 0) return null;
+  return workMs / budget;
+}
+
 // One sample is one drawn frame. Promotion needs several quiet windows.
 // A p95 of real dropped refreshes demotes on the next window. The tier
 // that was just left stays blocked for repromoteMs, so a miss does not
@@ -370,10 +379,15 @@ export function observe(state, sample) {
   }
   const budget = frameBudget(state.policy, state.refreshHz);
   const limit = gapLimit(state.policy, state.refreshHz);
-  const workRatio = workMs > 0 && workMs < 250 ? workMs / budget : 1;
-  const gapOver = gapMs > 0 && gapMs < 250 && gapMs >= limit;
+  const load = frameWork(workMs, budget);
+  const gapOk = Number.isFinite(gapMs) && gapMs > 0 && gapMs < 250;
+  if (load == null && !gapOk) return snapshot(state);
+  const gapOver = gapOk && gapMs >= limit;
+  // Invalid work does not invent headroom. A real 0 ms reading does.
+  const workRatio = load == null ? (gapOver ? gapMs / budget : null) : load;
+  if (workRatio == null) return snapshot(state);
   const missRatio = Math.max(workRatio, gapOver ? gapMs / budget : 0);
-  state.samples.push({ work: workRatio, miss: missRatio, gap: gapMs || 0 });
+  state.samples.push({ work: workRatio, miss: missRatio, gap: gapOk ? gapMs : 0 });
   if (state.samples.length > state.policy.window) state.samples.shift();
   state.pending++;
   if (state.pending < state.policy.minSamples || state.samples.length < state.policy.minSamples) {
