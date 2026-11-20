@@ -34,7 +34,7 @@ Hold Space and speak, then let go. The game receives the words, not the sound. A
 
 A bright wish still changes the picture at once: a pink, blue, gold, or violet sky, flowers, a star, a gate, or a small friend. Any other bright line picks a garden, and steps to another one when that garden is already on screen. A gloomy line is turned away and the picture stays. The road keeps its hurdles, gates, and blocks.
 
-One friend keeps up after the opening lesson. It changes its speed, how often it switches lanes, or where it appears, one small step at a time, and only after a short trial still gets through. A miss puts the previous step back. The opening lesson has none of that friend. Its three looks are a fox, a bird, and a beetle.
+One friend keeps up after the opening lesson. It changes its speed, how often it switches lanes, or where it appears, one small step at a time, and only after a short trial still gets through. A miss puts the previous step back. The opening lesson has none of that friend. Its three looks are a fox, a bird, and a beetle. A small line shows 1st or 2nd and the gap in metres. Whoever reaches the level gate first is counted, and that result is what the friend trains or eases from. The hit stays the same width.
 
 The same badge opens the world line. Each change that stayed, and each one that was turned away, is a short line. A kept line can be run again from a safe start on that seed. A line that was turned away shows why, and does not become the road. The list stays on this browser.
 
@@ -70,7 +70,7 @@ The model is asked for an obstacle phrase, a garden phrase, and one friend. Each
 
 The browser predicts the runner from the latest rule snapshot, so a slow server tick never changes how a jump feels. Lanes ease in with a cap on acceleration. A jump builds speed for a short takeoff, then gravity takes over. The road heading accumulates, and the sun and the hills turn with it, so a new bend continues from where you are. A stumble or a "Back on the path" does not swing that view back to the opening, and the drawn path glides across a gap instead of popping. Aura remains the authority for the course. The score and a stumble follow the picture, so a late tick does not call a miss the runner did not touch.
 
-Hitting a hurdle, a gate, or a pot does not end the run. The runner slows for a moment, loses a few points, and keeps going. A gap sets them back on the path at the same pace, without a white flash. The hole is the water on that lane. A pot or a toy counts when the body meets it. Old chunks behind the runner are dropped so a long run does not keep the whole trail.
+The run starts with three hearts. A ready shield takes the first solid hit and keeps the heart. An unshielded hit costs one heart, slows the runner for a moment, and blinks for a little over a second so one cluster cannot take another. The combo drops and a zero-bump try is missed. Coins already collected stay. Clearing a level without a bump, or reaching a ×5 combo, gives one heart back. At zero hearts the run settles: the score, the level, the best multiplier, and the head-to-head with the rival. Play Again, or Space or Enter, starts clean. A gap still sets them back on the path at the same pace, without spending a heart or a white flash. The hole is the water on that lane. A pot or a toy counts when the body meets it. Old chunks behind the runner are dropped so a long run does not keep the whole trail.
 
 | What you see | Where |
 | --- | --- |

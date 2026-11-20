@@ -2066,11 +2066,30 @@ export function createRenderer(canvas) {
       const at = (ahead, y) => [here.x + toX * ahead, y, here.z + toZ * ahead];
       paintLane(q, lat, [1, 0.38, 0.22], 22);
       contactShadow(here.x, here.z, here.psi, 0, 0.4);
+      const tint = rivalTint(plan);
+      push(here.x, 0.11, here.z, 0.86, 0.035, 0.86, 2, tint, 0.25, reduced ? 0.2 : 0.42, face);
+      if (!reduced) {
+        for (let i = 1; i <= 3; i++) {
+          const bead = at(-0.38 * i, 0.48 + Math.sin((st.time || 0) * 7 + i) * 0.06);
+          const s = 0.18 - i * 0.035;
+          push(bead[0], bead[1], bead[2], s, s, s, 1, tint, 0.18, 0.45 + (3 - i) * 0.12, face);
+        }
+      }
       spin = face;
-      drawBody(plan, here.x, 0, here.z, rivalTint(plan), st.time || 0, reduced);
+      const bob = reduced ? 0 : Math.sin((st.time || 0) * 8) * 0.04;
+      drawBody(plan, here.x, bob, here.z, tint, st.time || 0, reduced);
       spin = 0;
-      const mark = at(0.1, 1.05);
+      const mark = at(0.1, 1.05 + bob);
       push(mark[0], mark[1], mark[2], 0.16, 0.08, 0.08, 0, [0.9, 0.18, 0.14], 0.3, 0.55, face);
+      if (q.flare) {
+        const kind = q.flare;
+        q.flare = "";
+        const sparkAt = at(0.05, 0.85);
+        const rgb = kind === "coin" ? [1, 0.86, 0.35]
+          : kind === "clear" ? [0.55, 0.92, 1]
+          : [1, 0.45, 0.22];
+        burst(sparkAt[0], sparkAt[1], sparkAt[2], rgb, 8, 0.07, kind === "coin" ? 3 : 0, face);
+      }
     }
 
     // The level ends at this arc. Two posts and a ribbon, only while
@@ -2341,6 +2360,11 @@ export function createRenderer(canvas) {
     }
     if (st.event === "spring") burst(rx, py + 0.4, rz, pal.spring, 8, 0.08, 0, heading);
     if (st.near) burst(rx + ax.tx * 0.4, py + 0.7, rz + ax.tz * 0.4, pal.sun, 6, 0.02, 0, heading);
+    if (st.duel === "pass" || st.duel === "ahead") {
+      const passed = st.duel === "pass";
+      burst(rx + ax.tx * (passed ? 1.1 : -0.4), py + 0.8, rz + ax.tz * (passed ? 1.1 : -0.4),
+        passed ? [1, 0.84, 0.35] : [1, 0.45, 0.38], 10, 0.08, passed ? 3 : 2, heading);
+    }
     if (land > 0.85) burst(rx, 0.15, rz, pal.path, 4, 0.01, 0, heading);
     if (st.reject) burst(rx + ax.tx * 2, 1.6, rz + ax.tz * 2, pal.flower, 10, 0.06, 0, heading);
     if (!reduced && alive && py <= 0.06) {
@@ -2372,9 +2396,11 @@ export function createRenderer(canvas) {
     const heroPlan = hero.plan || "keeper";
     const dressed = !drawsKeeper(hero);
     spin = feet.psi;
+    const blinkOff = !!(st.blink && Math.floor((st.time || 0) * 8) % 2 === 0);
     if (alive) {
       const shadow = spot(0, 0);
       push(shadow.x, 0.02, shadow.z, sliding ? 0.95 : 0.62, 0.025, sliding ? 0.9 : 0.5, 0, [0.18, 0.12, 0.08], 1, 0);
+      if (!blinkOff) {
       if ((st.g || 32) < 26) {
         const glow = [0.78, 0.92, 1];
         const bob = reduced ? 0 : Math.sin((st.time || 0) * 3) * 0.02;
@@ -2414,6 +2440,7 @@ export function createRenderer(canvas) {
         const s = 0.12 * fade;
         const puff = spot(-0.45 - t * (0.28 + speed * 0.02), lean * 0.1 * t);
         push(puff.x, 0.35 + fade * 0.15, puff.z, s, s, s, 2, pal.cape, 0.15, 0.35 + fade * 0.5);
+      }
       }
     } else if (!alive) {
       const rest = 0.22 + (reduced ? 0 : Math.sin(st.time * 2) * 0.03);

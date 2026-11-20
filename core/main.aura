@@ -17,6 +17,8 @@
 (require "lib/biome")
 (require "lib/thing")
 (require "lib/chase")
+(require "lib/hearts")
+(require "lib/race")
 (require "lib/world")
 (require "lib/primer")
 
@@ -543,8 +545,12 @@
 (define shown (list))
 (define rival-for 0)
 ; The ward is not a player field. Fairness and the 15-field list stay put.
+; Hearts and a settled run sit beside it, for the same reason.
 (define ward-ready #t)
 (define ward-left 0.0)
+(define run-hearts 3)
+(define run-defeats 0)
+(define run-over #f)
 
 (define (pace-wanted)
   form)
@@ -587,7 +593,9 @@
         "overtakes" level-overtakes
         "near" level-near
         "streak" level-streak
-        "locked" (if speed-lock #t #f)))
+        "locked" (if speed-lock #t #f)
+        "hearts" run-hearts
+        "defeats" run-defeats))
 
 (define (level-clear-line combo near overs)
   (if (and (<= combo 0) (<= near 0) (<= overs 0))
@@ -596,14 +604,34 @@
                    " · close " (int-str near)
                    " · pass " (int-str overs))))
 
+; Centre of the rival nearest the runner, or #f when this level has none.
+(define (nearest-rival-x)
+  (let ((px (player-x player)))
+    (let loop ((ps world) (best #f) (dist 1000000.0))
+      (if (null? ps)
+        best
+        (let ((q (car ps)))
+          (if (= (piece-k q) 10.0)
+            (let ((mid (+ (piece-x q) (* (piece-w q) 0.5))))
+              (let ((g (- mid px)))
+                (let ((d (if (< g 0.0) (- 0.0 g) g)))
+                  (if (< d dist)
+                    (loop (cdr ps) mid d)
+                    (loop (cdr ps) best dist)))))
+            (loop (cdr ps) best dist)))))))
+
 ; bonus is a challenge step that landed on this same tick. The gate
 ; still adds its own step. The page's pickup combo is not this counter.
+; Who reached the gate first is folded into the same banner.
 (define (finish-level! bonus)
   (let* ((played form)
          (bumps level-bumps)
          (combo level-combo)
          (near level-near)
          (overs level-overtakes)
+         (gate level-x1)
+         (rx (nearest-rival-x))
+         (race (if (number? rx) (race-gate (player-x player) rx gate) ""))
          (cross (gate-cross level-n played bumps (player-score player) run-mult combo (skill-now)))
          (act (hash-ref cross "act" "scene"))
          (scene-i (hash-ref cross "scene" -1))
@@ -612,6 +640,11 @@
     (set! pressure-now (hash-ref cross "pressure" pressure-now))
     (set! level-streak (hash-ref cross "streak" 0))
     (set! chase-recent (chase-remember chase-recent bumps))
+    ; A clean gate spends one remembered defeat, so a rough run eases
+    ; and then climbs back instead of staying soft forever.
+    (if (<= bumps 0)
+      (set! run-defeats (max 0 (- run-defeats 1)))
+      #f)
     (set! form (hash-ref cross "form" played))
     (set! level-n (hash-ref cross "level" (+ level-n 1)))
     (set! level-bumps 0)
@@ -626,20 +659,23 @@
     (set! run-mult (hash-ref cross "mult" run-mult))
     (advance-pace!)
     (begin-level!)
-    (raise-banner! "evo"
-                   (evo-line level-n biome-now run-mult gain
-                             (hash-ref cross "what" "rival") wish-locale)
-                   gain)
-    (let ((say (adapt-line act wish-locale)))
-      (if (and (number? scene-i) (>= scene-i 0))
-        (if (paint-env! scene-i say)
-          #f
-          (note! "KEEP" act "run" say "level"))
-        (if (or (string=? act "harder") (string=? act "dense"))
-          (note! "KEEP" act "run" say "level")
-          #f)))
-    (note! "KEEP" "level" "run" (level-clear-line combo near overs) "level")
-    (queue-chase! played bumps (chase-sum chase-recent) speed-now)
+    (let* ((preview (chase-step chase played bumps (chase-sum chase-recent) speed-now race))
+           (mood (hash-ref preview "mood" "hold"))
+           (line (evo-line level-n biome-now run-mult gain
+                           (hash-ref cross "what" "rival") wish-locale)))
+      (raise-banner! "evo" (string-append line (race-aside race mood)) gain)
+      (let ((say (adapt-line act wish-locale)))
+        (if (and (number? scene-i) (>= scene-i 0))
+          (if (paint-env! scene-i say)
+            #f
+            (note! "KEEP" act "run" say "level"))
+          (if (or (string=? act "harder") (string=? act "dense"))
+            (note! "KEEP" act "run" say "level")
+            #f)))
+      (note! "KEEP" "level" "run"
+             (gate-line (level-clear-line combo near overs) race mood)
+             "level"))
+    (queue-chase! played bumps (chase-sum chase-recent) speed-now race)
     (roster-evolve! "Level clear")))
 
 ; Three coins in one level step the multiplier once. A gate does not
@@ -947,6 +983,8 @@
   (set! chase-plan #f)
   (set! ward-ready #t)
   (set! ward-left 0.0)
+  (set! run-hearts 3)
+  (set! run-over #f)
   (set! pick-streak 0)
   (set! pick-at -1.0)
   (set! sparked 0)
@@ -1089,6 +1127,9 @@
         "seed" seed
         "event" ev
         "grace" (player-grace player)
+        "hearts" run-hearts
+        "over" (if run-over #t #f)
+        "defeats" run-defeats
         "pressure" pressure-now
         "combo" level-combo
         "near" level-near
@@ -1242,7 +1283,26 @@
     ((string=? next "ok") cur)
     (else next)))
 
+(define (begin-over!)
+  (if run-over
+    #f
+    (begin
+      (set! run-over #t)
+      (set! run-defeats (min 4 (+ run-defeats 1)))
+      (note! "KEEP" "over" "run" "Run over"))))
+
+(define (note-hearts! msg)
+  (let ((h (hash-ref msg "hearts" #f)))
+    (if (number? h)
+      (begin
+        (set! run-hearts (max 0 (min 3 (floor (+ h 0.001)))))
+        (if (<= run-hearts 0) (begin-over!) #f))
+      #f)))
+
 (define (pump! dt-ms)
+  ; A settled run stays where it is: no score, no camera, no new gate.
+  (if run-over
+    "over"
   ; A test can advance a whole second per message. A live tick stays at
   ; a tenth of a second so one slow frame cannot skip the road.
   (let ((cap (if (> (tick-force-ms) 0.0) 3.0 0.1))
@@ -1253,7 +1313,7 @@
         ev
         (begin
           (set! acc (- acc PHYS-DT))
-          (loop (+ n 1) (keep-event ev (one-step!))))))))
+          (loop (+ n 1) (keep-event ev (one-step!)))))))))
 
 (define (tick-force-ms)
   (if (>= tick-force 0.0)
@@ -1938,9 +1998,10 @@
 ; The numbers on the note are the live set: the kept step, or the set
 ; a failed trial left in place. The ask is what puts the sentence on
 ; the line. The mark is only the corner word.
-(define (chase-note! kind why mood)
+(define (chase-note! kind why mood . rest)
+  (let ((race (if (and (pair? rest) (string? (car rest))) (car rest) "")))
   (let ((row (note! kind why "chaser"
-                    (chase-line kind mood)
+                    (chase-line kind mood race)
                     "chaser"
                     "A friend is keeping up")))
     (if (hash? row)
@@ -1951,15 +2012,17 @@
         (hash-put! row "commit" (chase-get chase "commit" 7.5))
         (hash-put! row "look" (chase-get chase "look" -1)))
       #f)
-    row))
+    row)))
 
 ; A step that the numbers already forbid does not take a slice. A legal
 ; step walks the proving road twelve frames at a time, under the rules
 ; the run is using now, including a kept deck.
-(define (queue-chase! played bumps recent pace-now)
+; The race word is who led the gate. Empty keeps the old mood.
+(define (queue-chase! played bumps recent pace-now . rest)
+  (let ((race (if (and (pair? rest) (string? (car rest))) (car rest) "")))
   (if (> chase-phase 0)
     #f
-    (let ((step (chase-step chase played bumps recent pace-now)))
+    (let ((step (chase-step chase played bumps recent pace-now race)))
       (if (not (hash-ref step "moved" #f))
         #f
         (let ((params (hash-ref step "params" chase)))
@@ -1973,12 +2036,13 @@
                 (set! chase-sim chase-road)
                 (set! chase-body (make-player 0.4))
                 (set! chase-i 0)
-                (set! chase-phase 1)))))))))
+                (set! chase-phase 1))))))))))
 
 (define (seal-chase! cleared?)
   (let* ((plan chase-plan)
          (params (if (hash? plan) (hash-ref plan "params" chase) chase))
          (mood (if (hash? plan) (hash-ref plan "mood" "hold") "hold"))
+         (race (if (hash? plan) (hash-ref plan "race" "") ""))
          (step-why (if (hash? plan) (hash-ref plan "why" "hold") "hold"))
          (rules (if (hash? chase-rules) chase-rules (rules-hash)))
          (pace-now (pace-of rules))
@@ -2008,10 +2072,10 @@
         (begin
           (if (or (not fair)
                   (not trial) (not (evo:trial-ok? trial)) (not (evo:feasible? trial)))
-            (chase-note! "ROLLBACK" (if (string=? why "") "trial" why) mood)
+            (chase-note! "ROLLBACK" (if (string=? why "") "trial" why) mood race)
             (begin
               (set! chase (chase-keep chase plan))
-              (chase-note! "KEEP" step-why mood)))
+              (chase-note! "KEEP" step-why mood race)))
           (release-slot!)
           #t)))))
 
@@ -3399,7 +3463,8 @@
         "chase-plan" chase-plan "card-spec" card-spec "hold-form" hold-form
         "dream-form" dream-form
         "via" publish-via "rev" rule-rev "dirty" rules-dirty
-        "pressure" pressure-now "streak" level-streak "skill-seen" skill-seen))
+        "pressure" pressure-now "streak" level-streak "skill-seen" skill-seen
+        "hearts" run-hearts "defeats" run-defeats "over" run-over))
 
 (define (restore-run! saved)
   (set! g-now (hash-ref saved "g"))
@@ -3465,6 +3530,9 @@
   (set! rules-dirty (hash-ref saved "dirty"))
   (set! pressure-now (let ((n (hash-ref saved "pressure" 1))) (if (number? n) n 1)))
   (set! level-streak (let ((n (hash-ref saved "streak" 0))) (if (number? n) n 0)))
+  (set! run-hearts (let ((n (hash-ref saved "hearts" 3))) (if (number? n) (max 0 (min 3 (floor n))) 3)))
+  (set! run-defeats (let ((n (hash-ref saved "defeats" 0))) (if (number? n) (max 0 (min 4 (floor n))) 0)))
+  (set! run-over (equal? (hash-ref saved "over" #f) #t))
   (set! skill-seen (let ((n (hash-ref saved "skill-seen" 0.0))) (if (number? n) n 0.0)))
   (set! rewind-quiet #f))
 
@@ -3615,6 +3683,8 @@
     (set! goal-lock #f)
     (set! ward-ready #t)
     (set! ward-left 0.0)
+    (set! run-hearts 3)
+    (set! run-over #f)
     (try (begin (begin-level!) (ensure-ahead!)) (catch (e) #f))
     (set! rewind-quiet #f)
     (set! pending kept)
@@ -3730,6 +3800,7 @@
     (else (floor (+ n 0.001)))))
 
 (define (on-tick c msg)
+  (note-hearts! msg)
   (absorb-skill! msg)
   (if (and (player-alive? player) (> (hash-ref msg "jump" 0) 0))
     (set! player (press-jump player))
