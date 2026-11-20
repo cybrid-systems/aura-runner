@@ -1150,6 +1150,18 @@ window.__lumenSetCombo = (n) => {
   comboText = "×" + combo;
 };
 
+// One forced near-miss for a recording. side -1 or 1 picks the nudge
+// direction. The cue is consumed on the next drawn frame unless hold is set.
+window.__lumenForceNear = (opts) => {
+  const cue = opts || {};
+  window.__lumenForceNearCue = {
+    side: cue.side < 0 ? -1 : 1,
+    ahead: Number.isFinite(cue.ahead) ? cue.ahead : 1.4,
+    hold: !!cue.hold,
+  };
+  return window.__lumenForceNearCue;
+};
+
 // Headless Chrome pauses animation frames. A few calls of the live frame
 // keep the picture moving while a test is the only thing reading the page.
 window.__lumenFrames = (n) => {
@@ -1529,7 +1541,9 @@ function frame(now) {
         gapMs: dt * 1000,
         visible: document.visibilityState !== "hidden",
         event: spark, alive: true, speed: rules.speed, g: rules.g,
-        near: nearSpark, reject: rejectSpark, evo: evoCue, combo,
+        near: nearSpark || !!window.__lumenForceNearCue,
+        nearCue: window.__lumenForceNearCue || null,
+        reject: rejectSpark, evo: evoCue, combo,
         blink: now < hurtUntil ? 1 : 0,
         duel,
         scene: sceneView, stumble: stumble / 1500, pals, hero, bend, loot,
@@ -1550,6 +1564,7 @@ function frame(now) {
     }
     spark = "";
     nearSpark = false;
+    if (window.__lumenForceNearCue && !window.__lumenForceNearCue.hold) window.__lumenForceNearCue = null;
     rejectSpark = false;
     evoCue = "";
     duel = "";

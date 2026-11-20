@@ -2250,12 +2250,13 @@ export function createRenderer(canvas, hooks) {
       if (st.near || (struck && !heldHit)) {
         shakeAmp = Math.max(shakeAmp, activeProfile.shake || 0);
         hitStop = 0.07;
-        if (activeProfile.tier === "high" && st.near) {
+        if (activeProfile.tier === "high" && (st.near || st.nearCue)) {
+          const cue = st.nearCue;
           const lane = px < -0.9 ? 0 : px > 0.9 ? 2 : 1;
-          let side = 0;
+          let side = cue && Number.isFinite(cue.side) ? cue.side : 0;
           let mark = null;
           const list = st.pieces;
-          if (list) {
+          if (!cue && list) {
             for (let i = 0; i < list.length; i++) {
               const q = list[i];
               if (!skimmed(pz, py, lane, q)) continue;
@@ -2270,6 +2271,9 @@ export function createRenderer(canvas, hooks) {
           if (mark) {
             const mid = mark[1] + mark[2] * 0.5;
             const at = sample(mid, laneX(mark.length > 5 && mark[5] >= 0 ? mark[5] : lane));
+            rimFlash = { x: at.x, y: 0.7, z: at.z, psi: at.psi, life: 0.22 };
+          } else if (cue) {
+            const at = sample(pz + (Number(cue.ahead) || 1.4), px + side * 1.8);
             rimFlash = { x: at.x, y: 0.7, z: at.z, psi: at.psi, life: 0.22 };
           }
         }
