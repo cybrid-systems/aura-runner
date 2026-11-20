@@ -1,0 +1,79 @@
+; Levels 1 through 30 keep a road. A clean run and a rough run both
+; still have obstacles and coins in every level, and no 36 m stretch
+; of a clean level is empty. The rival hit half stays 0.28.
+(require "lib/gen")
+(require "lib/phys")
+(require "lib/voice")
+
+(define (expect name ok)
+  (display name)
+  (display " ")
+  (display (if ok 1 0))
+  (newline)
+  (if ok #t (error (string-append "road: " name))))
+
+(define (obstacle? k)
+  (or (= k 2.0) (= k 3.0) (= k 4.0) (= k 7.0) (= k 8.0)))
+
+(define (tally ps)
+  (let loop ((xs ps) (obs 0) (coins 0))
+    (if (null? xs)
+      (list obs coins)
+      (let ((k (piece-k (car xs))))
+        (loop (cdr xs)
+              (if (obstacle? k) (+ obs 1) obs)
+              (if (= k 5.0) (+ coins 1) coins))))))
+
+(define (count-window ps x0 x1 obs)
+  (if (null? ps)
+    obs
+    (let ((q (car ps))
+          (x (piece-x (car ps))))
+      (count-window (cdr ps) x0 x1
+        (if (and (obstacle? (piece-k q)) (>= x x0) (< x x1)) (+ obs 1) obs)))))
+
+(define (windows-ok? ps x0 x1)
+  (let loop ((at x0))
+    (if (>= at (- x1 8.0))
+      #t
+      (if (< (count-window ps at (+ at 36.0) 0) 1)
+        #f
+        (loop (+ at 18.0))))))
+
+(define (lay-level seed band speed x0 x1 id)
+  (let loop ((x x0) (n id) (ps (list)))
+    (if (>= x x1)
+      ps
+      (let ((ch (chunk-or-fallback (pattern-chunk seed n band speed) speed)))
+        (let ((span (hash-ref ch "x1" 8.0))
+              (raw (hash-ref ch "pieces" (list))))
+          (let ((placed (string-pickups raw band span 1 25.0)))
+            (loop (+ x span) (+ n 1) (append ps (shift-pieces placed x)))))))))
+
+; points is the score at the start of the level. bumps is how the
+; previous gate felt: 0 clean, 2 rough.
+(define (walk label seed bumps points form level id)
+  (if (> level 30)
+    #t
+    (let ((speed (feel-speed (feel-for form)))
+          (span (adapt-span speed points level)))
+      (let ((ps (lay-level seed form speed 0.0 span id))
+            (row (tally ps)))
+        (let ((obs (car row))
+              (coins (car (cdr row))))
+          (if (or (< obs 3) (> obs 48) (< coins 1) (> coins 48)
+                  (and (= bumps 0) (not (windows-ok? ps 0.0 span))))
+            (error (string-append "road " label " level " (number->string level)
+                                  " obs " (number->string obs)
+                                  " coins " (number->string coins)))
+            (let ((plan (adapt-finish form bumps (+ points 180.0) level)))
+              (walk label seed bumps
+                    (+ points 180.0)
+                    (hash-ref plan "form")
+                    (+ level 1)
+                    (+ id 4)))))))))
+
+(expect "rival-half" (= RIVAL-HALF 0.28))
+(walk "clean" 42 0 0.0 0 1 0)
+(walk "rough" 7 2 40.0 2 1 0)
+(expect "levels" #t)

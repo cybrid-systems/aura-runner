@@ -3,6 +3,22 @@
 // A later animation frame is no longer a user gesture, and the browser drops it.
 // The piece goes straight to the speakers. Routing it through a media-element
 // source leaves it silent while that context is still suspended.
+//
+// The soft line is one voice for the whole session. Pitch used to follow the
+// clock, so the fallback hopped to a new note every beat. It stays on this
+// voice until the player mutes; unmuting keeps the same one.
+
+export const SESSION_VOICE = Object.freeze({
+  name: "lumen-soft",
+  type: "sine",
+  freq: 196,
+  pitch: 1,
+});
+
+// beat is ignored. A long run asks for the same voice it started with.
+export function voiceForBeat(_beat) {
+  return SESSION_VOICE;
+}
 
 export function createAudio() {
   let ctx = null;
@@ -141,6 +157,16 @@ export function createAudio() {
   function pop() { tone(180, 0.09, "sine", 0.4); tone(520, 0.12, "triangle", 0.28); }
   function ward() { tone(494, 0.09, "sine", 0.14); tone(740, 0.14, "triangle", 0.1); }
 
+  function noteVoice() {
+    const voice = voiceForBeat(0);
+    const root = document.documentElement;
+    root.dataset.voice = voice.name;
+    root.dataset.pitch = String(voice.pitch);
+    const log = window.__voiceLog || (window.__voiceLog = []);
+    log.push({ voice: voice.name, pitch: voice.pitch, freq: voice.freq, type: voice.type });
+    if (log.length > 80) log.shift();
+  }
+
   function music(reduced) {
     if (muted) return;
     if (song && !song.paused) {
@@ -150,11 +176,11 @@ export function createAudio() {
     }
     if (songState !== "soft" || reduced || !ctx) return;
     if (ctx.currentTime < nextBeat) return;
-    const scale = [262, 294, 330, 392, 440];
-    const f = scale[Math.floor(ctx.currentTime * 2) % scale.length];
-    tone(f / 2, 0.35, "sine", 0.12);
+    const voice = voiceForBeat(Math.floor(ctx.currentTime));
+    tone(voice.freq, 0.35, voice.type, 0.12);
     nextBeat = ctx.currentTime + 0.5;
     mark("soft");
+    noteVoice();
   }
 
   function setMuted(v) {

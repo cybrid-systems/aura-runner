@@ -451,14 +451,9 @@
 (define (adapt-finish form bumps points level . rest)
   (let ((f (voice-band form))
         (n (if (and (number? bumps) (> bumps 1.5)) 2 (if (and (number? bumps) (> bumps 0.5)) 1 0)))
-        (lv (cond
-              ((not (number? level)) 1)
-              ((< level 1.5) 1)
-              ((< level 2.5) 2)
-              ((< level 3.5) 3)
-              ((< level 4.5) 4)
-              ((< level 5.5) 5)
-              (else 6)))
+        ; The real level, not a cap at 6. Capping made every later gate
+        ; even, so the pace stopped climbing past level 6.
+        (lv (biome-level level))
         (rate (adapt-rate points level))
         (skill (if (and (pair? rest) (hash? (car rest))) (car rest) #f)))
     (let* ((pressure (pressure-band (skill-num skill "pressure" 1)))
