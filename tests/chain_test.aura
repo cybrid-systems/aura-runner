@@ -1,5 +1,6 @@
 ; Pickup strings follow the next move and the pace. Hazards stay put.
 (require "lib/gen")
+(require "lib/coins")
 
 (define (show k v)
   (display k)
@@ -93,7 +94,13 @@
 (show "hurdle" (let ((a (find-k arc 3.0)) (b (find-k arc-plain 3.0)))
                  (if (and a b (< (abs-diff (piece-x a) (piece-x b)) 0.01)) 1 0)))
 (show "clear" (if (clear-of? arc (find-k arc 3.0)) 1 0))
-(show "open-lane" (if (and (>= (ncoins lane) 3) (all-lane? lane 2.0)) 1 0))
+(show "open-lane" (if (and (>= (ncoins lane) 3)
+                           (coin-clear? lane)
+                           (coin-reachable? lane (feel-speed (feel-for 0))))
+                    1 0))
 (show "slide" (if (and (>= (ncoins low) 3) (<= (ymax low) 0.55)) 1 0))
-(show "teach" (if (and (>= (ncoins open) 4) (all-lane? open 2.0)) 1 0))
+(show "teach" (if (and (>= (ncoins open) 4)
+                       (coin-clear? open)
+                       (coin-reachable? open (feel-speed (feel-for 0))))
+                1 0))
 (void)

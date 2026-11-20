@@ -15,6 +15,21 @@
          (make-directory "out")
          (write-file "out/boot.txt" (string-append (number->string pct) " " label)))
        (catch (e) #f)))
+; Loaded with the road, before the port opens. The first chunk lays coins.
+(define coin-params #f)
+(define coins-on #f)
+(define (load-coins!)
+  (if coins-on
+    coin-params
+    (begin
+      (require "lib/coins")
+      (set! coins-on #t)
+      (if (hash? coin-params)
+        coin-params
+        (begin
+          (set! coin-params (coin-blank))
+          coin-params)))))
+
 (define (load-fast!)
   (boot-note! 8 "正在启动")
   (require "std/socket" all:)
@@ -36,6 +51,10 @@
   (require "lib/world")
   (require "lib/primer")
   (require "lib/music")
+  ; Coins are laid into the first chunk, so they load with the road.
+  ; One require here, before the port opens. A second require on the
+  ; first chunk compiles the module again.
+  (load-coins!)
   (boot-note! 92 "花园马上就好"))
 (load-fast!)
 (define (load-slow-one!)
@@ -278,6 +297,8 @@
 ; The rival's pace. One knob at a time, after a level, on its own arm.
 ; A miss puts the previous numbers back. It is not the band policy.
 (define chase (chase-blank))
+(define level-coins 0)
+(define level-swaps 0)
 (define chase-recent (list))
 (define chase-phase 0)
 (define chase-plan #f)
@@ -621,6 +642,8 @@
   (set! level-combo 0)
   (set! level-near 0)
   (set! level-overtakes 0)
+  (set! level-coins 0)
+  (set! level-swaps 0)
   ; Level 1 uses the plain span. adapt-span lives with voice, which is
   ; loaded after the garden is already open. For level 1 the two agree.
   (if (> level-n 1) (load-slow!) #f)
@@ -629,7 +652,8 @@
     (set! level-x1 (+ level-x0
                      (if (> level-n 1)
                        (adapt-span speed-now (player-score player) level-n)
-                       (level-span speed-now))))))
+                       (level-span speed-now)))))
+  (coin-open-level! level-x0 level-x1))
 
 ; A known-fair garden, painted at once. The rebind waits while a chat is up.
 (define (raise-banner! kind text gain)
@@ -769,6 +793,8 @@
          (combo level-combo)
          (near level-near)
          (overs level-overtakes)
+         (got-coins level-coins)
+         (got-swaps level-swaps)
          (gate level-x1)
          (rx (nearest-rival-x))
          (race (if (number? rx) (race-gate (player-x player) rx gate) ""))
@@ -842,6 +868,7 @@
       (note! "KEEP" "level" "run"
              (gate-line (level-clear-line combo near overs) race mood)
              "level"))
+    (consider-coins! played bumps got-coins got-swaps near)
     (queue-chase! played bumps (chase-sum chase-recent) speed-now race)
     (roster-evolve! "Level clear")
     (set! tune-due #t)))
@@ -1020,7 +1047,11 @@
   (let* ((margin (if (and (pair? rest) (number? (car rest)))
                    (exact->inexact (car rest))
                    9.0))
-         (placed (shift-onto (string-pickups pieces b span pressure-now (loot-worth loot-now)) next-x))
+         (placed (begin
+                   (coin-set-origin! next-x)
+                   (coin-span! level-x1)
+                   (shift-onto (string-pickups pieces b span pressure-now (loot-worth loot-now)
+                                               (coin-chunk-seed seed next-id b) coin-params) next-x)))
          (id next-id)
          (x0 next-x)
          (x1 (+ next-x span))
@@ -1158,6 +1189,11 @@
   (set! level-combo 0)
   (set! level-near 0)
   (set! level-overtakes 0)
+  (set! level-coins 0)
+  (set! level-swaps 0)
+  (load-coins!)
+  (coin-reset-course!)
+  (set! coin-params (coin-blank))
   (set! level-streak 0)
   (set! pressure-now 1)
   (set! skill-seen 0.0)
@@ -2229,6 +2265,63 @@
       #f)
     row)))
 
+; Coin lanes, pattern mix, density, and arc probability. One knob, then
+; the same evo:trial the other arms use. A collapsed lane weight, or a
+; coin sitting in an obstacle, rolls back.
+(define (consider-coins! played bumps coins swaps near)
+  (load-coins!)
+  (let ((step (coin-step coin-params played bumps coins swaps near speed-now)))
+    (if (not (hash-ref step "moved" #f))
+      #f
+      (let* ((params (hash-ref step "params" coin-params))
+             (pace (if (and (number? speed-now) (> speed-now 0.1)) speed-now 8.0))
+             (road (coin-sample seed params pace))
+             (engage (coin-engage coins swaps near))
+             (audit (coin-consider coin-params params road pace engage))
+             (fair (string=? (hash-ref audit "kind" "") "KEEP"))
+             (why (hash-ref audit "why" "trial"))
+             (cand (evo:candidate (hash-ref step "why" "lanes")
+                                  (hash "id" (string-append "c" (int-str level-n))
+                                        "target" "rule-coins")))
+             (trial (open-trial cand
+                                (hash "timeout-ms" 1500
+                                      "apply" (lambda (c) #t)
+                                      "evaluate"
+                                      (lambda (c)
+                                        (hash "status" "ok"
+                                              "objectives"
+                                              (hash "fair" (if fair 1.0 0.0)
+                                                    "engage" (hash-ref audit "engage" 0.0))
+                                              "constraints"
+                                              (hash "budget" 0.0
+                                                    "geometry" (if (string=? why "overlap") 1.0 0.0)
+                                                    "reachable" (if (or (string=? why "reachable")
+                                                                        (string=? why "engage"))
+                                                                  1.0 0.0)
+                                                    "safe" (if (or (string=? why "entropy")
+                                                                   (string=? why "floor")
+                                                                   (string=? why "bounds")
+                                                                   (string=? why "step"))
+                                                             1.0 0.0))
+                                              "behavior"
+                                              (hash "band" (exact->inexact band)
+                                                    "engage" (hash-ref audit "engage" 0.0))))))))
+        (if (trial-busy? trial)
+          #f
+          (begin
+            (if (or (not fair)
+                    (not trial)
+                    (not (evo:trial-ok? trial))
+                    (not (evo:feasible? trial)))
+              (note! "ROLLBACK" (if (string=? why "") "trial" why) "spread"
+                     "Coins stay spread" "lanes")
+              (begin
+                (set! coin-params (coin-keep coin-params step))
+                (note! "KEEP" (hash-ref step "why" "fair") "spread"
+                       "Coins found a new path" "lanes")))
+            (release-slot!)
+            #t))))))
+
 ; A step that the numbers already forbid does not take a slice. A legal
 ; step walks the proving road twelve frames at a time, under the rules
 ; the run is using now, including a kept deck.
@@ -2529,6 +2622,7 @@
 (define (note-play! ev held)
   (cond
     ((string=? ev "coin")
+     (set! level-coins (+ level-coins 1))
      (if (or (< pick-at 0.0) (> (- run-ms pick-at) 2400.0))
        (set! pick-streak 1)
        (set! pick-streak (+ pick-streak 1)))
@@ -3778,7 +3872,7 @@
         "chal-coins" chal-coins "chal-done" chal-done
         "banner-id" banner-id "banner-kind" banner-kind
         "banner-text" banner-text "banner-gain" banner-gain
-        "chase" chase "recent" chase-recent
+        "chase" chase "recent" chase-recent "spread" coin-params
         "card-phase" card-phase "hold-phase" hold-phase
         "primer-phase" primer-phase
         "dream-phase" dream-phase "chase-phase" chase-phase
@@ -3842,6 +3936,9 @@
   (set! band (hash-ref saved "band"))
   (set! chase (hash-ref saved "chase"))
   (set! chase-recent (hash-ref saved "recent"))
+  (load-coins!)
+  (set! coin-params (let ((row (hash-ref saved "spread" #f)))
+                      (if (and (hash? row) (coin-bounds? row)) row (coin-blank))))
   (set! card-phase (hash-ref saved "card-phase"))
   (set! primer-phase (hash-ref saved "primer-phase"))
   (set! hold-phase (hash-ref saved "hold-phase"))
@@ -4172,7 +4269,11 @@
     #f)
   (if (and (player-alive? player) (number? (hash-ref msg "lane" 0))
            (not (= (hash-ref msg "lane" 0) 0)))
-    (set! player (press-lane player (hash-ref msg "lane" 0)))
+    (let ((before (player-lane player)))
+      (set! player (press-lane player (hash-ref msg "lane" 0)))
+      (if (not (= (player-lane player) before))
+        (set! level-swaps (+ level-swaps 1))
+        #f))
     #f)
   ; Let a worker take the token before this tick records a bump or a
   ; cleared band. One yield; the tick does not wait out the POST.
