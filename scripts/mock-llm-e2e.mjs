@@ -246,6 +246,29 @@ function chromeBin() {
   return "";
 }
 
+// The top band mixes sky with a little HUD, so it will not match the
+// dataset colour exactly. A kept sky still moves that sample a long way
+// toward the dataset colour, whichever biome was on screen first.
+const SKY_MOVE = 30;
+const SKY_CLOSER = 20;
+
+function parseRgb(text) {
+  const xs = String(text).trim().split(/[\s,]+/).map(Number);
+  if (xs.length < 3 || xs.slice(0, 3).some((n) => !Number.isFinite(n))) return null;
+  return xs.slice(0, 3);
+}
+
+function datasetRgb(sky) {
+  const xs = parseRgb(sky);
+  if (!xs) return null;
+  if (xs.every((n) => n <= 1)) return xs.map((n) => n * 255);
+  return xs;
+}
+
+function rgbDist(a, b) {
+  return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+}
+
 async function shotColor(file) {
   const { execFileSync } = await import("node:child_process");
   const py = `
@@ -395,7 +418,7 @@ async function screenshots() {
     if (!heroNow || heroNow === "keeper") {
       throw new Error("runner stayed the light-keeper hero " + heroNow + " pals " + roster + " mock " + JSON.stringify(mock.hits));
     }
-    // A paused animation frame never paints the rose that the probe already
+    // A paused animation frame never paints the sky the probe already
     // recorded. Ask for a few frames, then shoot.
     for (let i = 0; i < 8; i++) {
       await cdp.call("Runtime.evaluate", {
@@ -407,11 +430,18 @@ async function screenshots() {
     await capture(cdp, late);
     const before = await shotColor(early);
     const after = await shotColor(late);
-    const [br, bg, bb] = before.split(" ").map(Number);
-    const [ar, ag, ab] = after.split(" ").map(Number);
-    console.log(`screenshot sky before ${before} after ${after} dataset ${sky}`);
-    if (!(ar > ab + 15 && ar > br + 10)) {
-      throw new Error(`sky did not shift toward rose (before ${before}, after ${after}, dataset ${sky}) hero ${heroNow} pals ${roster} chat ${JSON.stringify(chat)} mock ${JSON.stringify(mock.hits)} page ${JSON.stringify(cdp.logs)}\n` + core.log().slice(-500));
+    const beforeRgb = parseRgb(before);
+    const afterRgb = parseRgb(after);
+    const target = datasetRgb(sky);
+    if (!beforeRgb || !afterRgb || !target) {
+      throw new Error(`sky sample missing (before ${before}, after ${after}, dataset ${sky})`);
+    }
+    const moved = rgbDist(beforeRgb, afterRgb);
+    const fromTarget = rgbDist(beforeRgb, target);
+    const toTarget = rgbDist(afterRgb, target);
+    console.log(`screenshot sky before ${before} after ${after} dataset ${sky} moved ${moved.toFixed(1)} toward ${fromTarget.toFixed(1)} -> ${toTarget.toFixed(1)}`);
+    if (!(moved >= SKY_MOVE && toTarget <= fromTarget - SKY_CLOSER)) {
+      throw new Error(`sky did not move toward the dataset colour (before ${before}, after ${after}, dataset ${sky}, moved ${moved.toFixed(1)}, toward ${fromTarget.toFixed(1)} -> ${toTarget.toFixed(1)}) hero ${heroNow} pals ${roster} chat ${JSON.stringify(chat)} mock ${JSON.stringify(mock.hits)} page ${JSON.stringify(cdp.logs)}\n` + core.log().slice(-500));
     }
     cdp.close();
   } finally {
