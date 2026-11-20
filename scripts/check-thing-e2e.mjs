@@ -129,7 +129,10 @@ async function wish(io, text, opts) {
   const seen = (m) => {
     if (row.placeholderMs < 0) row.placeholderMs = m._at - t0;
     if (m.op === "thing") {
-      if (m.phase === "thinking") gen = m.gen;
+      if (m.phase === "thinking") {
+        gen = m.gen;
+        row.gen = m.gen;
+      }
       if (m.gen !== gen) return;
       row.phase = m.phase;
       const info = m.info || {};
@@ -181,17 +184,23 @@ async function mockRun() {
     if (row.passed !== 2) throw new Error("expected 2 fair (one dark) " + JSON.stringify(row));
     if (row.variant !== 2) throw new Error("expected the richer cake (variant 2) " + JSON.stringify(row));
     if (row.chunkMs < 0) throw new Error("no chunk carried the thing");
-    if (!/THING gen 1 installed via (rebind|set-code)/.test(log)) throw new Error("no install line\n" + log);
+    // The spoken toy takes the first generation. The model round is the
+    // next one, which is the generation the HUD named while it was thinking.
+    const gen = row.gen;
+    const genText = Number.isInteger(Number(gen)) ? String(Number(gen)) : String(gen);
+    const installed = new RegExp(`THING gen ${genText}(?:\\.0+)? installed via (rebind|set-code)`);
+    const late = new RegExp(`THING gen ${genText}(?:\\.0+)? late`);
+    if (!installed.test(log)) throw new Error("no install line\n" + log);
     // The late reply arrives after the round and is dropped.
     const lateBy = performance.now() + 5000;
-    while (performance.now() < lateBy && !/THING gen 1 late/.test(core.log())) {
+    while (performance.now() < lateBy && !late.test(core.log())) {
       io.send({ op: "tick", jump: 0, slide: 0, lane: 0 });
       await untilState(io, () => {});
       await new Promise((r) => setTimeout(r, 40));
     }
-    if (!/THING gen 1 late/.test(core.log())) throw new Error("late reply was not dropped\n" + core.log());
+    if (!late.test(core.log())) throw new Error("late reply was not dropped\n" + core.log());
     // A page that cannot draw it puts the previous one back.
-    io.send({ op: "thing-bad", gen: 1 });
+    io.send({ op: "thing-bad", gen });
     let rolled = false;
     for (let i = 0; i < 40 && !rolled; i++) {
       const m = await io.next();
