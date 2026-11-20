@@ -194,7 +194,7 @@ async function drive() {
           sawCue = true;
         }
         if (m.op === "decision" && m.kind === "KEEP" && m.arm === "pals") {
-          if (m.mark !== "kitten" && m.mark !== "car" && m.mark !== "bunny" && m.mark !== "bird" && m.mark !== "butterfly" && m.mark !== "frog" && m.mark !== "duck") {
+          if (m.mark !== "keeper" && m.mark !== "kitten" && m.mark !== "car" && m.mark !== "van" && m.mark !== "racer" && m.mark !== "taxi" && m.mark !== "wagon" && m.mark !== "bunny" && m.mark !== "bird" && m.mark !== "butterfly" && m.mark !== "frog" && m.mark !== "duck" && m.mark !== "puppy" && m.mark !== "fox" && m.mark !== "turtle" && m.mark !== "bee") {
             throw new Error("pal mark " + m.mark);
           }
           sawPal = true;
