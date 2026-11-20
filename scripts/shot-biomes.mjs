@@ -177,7 +177,7 @@ try {
     }
     if (!sent) throw new Error("wish did not send " + word);
     let probe = {};
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 80; i++) {
       await pump(cdp, 2);
       probe = await evalJson(cdp, `({
         biome: document.documentElement.dataset.biome || "",

@@ -138,6 +138,7 @@ html, body {
 #challenge.miss { opacity: 0.72; }
 #hearts {
   position: fixed;
+  z-index: 5;
   top: max(14px, env(safe-area-inset-top));
   right: max(148px, calc(env(safe-area-inset-right) + 140px));
   margin: 0;
@@ -152,6 +153,7 @@ html, body {
 #hearts.back { animation: pop 0.4s ease-out; }
 #race {
   position: fixed;
+  z-index: 5;
   top: max(50px, calc(env(safe-area-inset-top) + 40px));
   right: max(148px, calc(env(safe-area-inset-right) + 140px));
   margin: 0;
@@ -272,9 +274,12 @@ html, body {
 #score.pop, #grade.pop, #pace.pop, #mult.pop { animation: pop 0.28s ease-out; }
 #evo {
   position: fixed;
-  top: max(108px, calc(env(safe-area-inset-top) + 96px));
+  z-index: 4;
+  top: max(118px, calc(env(safe-area-inset-top) + 106px));
   right: max(16px, env(safe-area-inset-right));
   width: min(280px, 34vw);
+  max-height: 5.2em;
+  overflow: hidden;
   margin: 0;
   padding: 10px 14px;
   border-radius: 18px;
