@@ -1,0 +1,116 @@
+; Tune gate. Evolution stays inside the ear limits. KEEP waits in
+; pending until the bar, then ROLLBACK restores the previous phrase.
+; Tempo and density rise with speed and level, and stay capped.
+(require "std/evo-core" all:)
+(require "lib/music")
+
+(define (expect name ok)
+  (display name)
+  (display " ")
+  (display (if ok 1 0))
+  (newline)
+  (if ok #t (error (string-append "music: " name))))
+
+(define (near? a b)
+  (let ((d (- a b)))
+    (< (if (< d 0.0) (- 0.0 d) d) 0.05)))
+
+(define home-gate (music-gate music-home))
+(expect "home-keep" (and (string=? (hash-ref home-gate "verdict" "") "KEEP")
+                         (string=? (hash-ref home-gate "why" "") "fair")
+                         (string=? (hash-ref home-gate "id" "") "garden-day")))
+
+(define harsh
+  "(tune garden-day (key C major) (tempo 200) (chords I V vi IV) (motif 0 2 4 7 4 2 0 4) (tone triangle 880 0.02 0.22) (pad sine 620 0.04 0.30) (kick 1 0 0 0 1 0 0 0) (snare 0 0 1 0 0 0 1 0) (hat 1 0 1 0 1 0 1 0) (swing 0.06) (layers 2) (gain 0.12))")
+(define harsh-gate (music-gate harsh))
+(expect "harsh-rollback" (and (string=? (hash-ref harsh-gate "verdict" "") "ROLLBACK")
+                              (string=? (hash-ref harsh-gate "why" "") "tempo")))
+
+(define odd
+  "(tune garden-day (key C chromatic) (tempo 96) (chords I V vi IV) (motif 0 2 4 7 4 2 0 4) (tone triangle 880 0.02 0.22) (pad sine 620 0.04 0.30) (kick 1 0 0 0 1 0 0 0) (snare 0 0 1 0 0 0 1 0) (hat 1 0 1 0 1 0 1 0) (swing 0.06) (layers 2) (gain 0.12))")
+(expect "mode-rollback" (string=? (hash-ref (music-gate odd) "verdict" "") "ROLLBACK"))
+
+(define packed
+  "(tune garden-day (key C major) (tempo 96) (chords I V vi IV) (motif 0 2 4 7 4 2 0 4) (tone triangle 880 0.02 0.22) (pad sine 620 0.04 0.30) (kick 1 0 0 0 1 0 0 0) (snare 0 0 1 0 0 0 1 0) (hat 1 1 1 1 1 1 1 1) (swing 0.06) (layers 2) (gain 0.12))")
+(expect "drums-rollback" (string=? (hash-ref (music-check packed) "why" "") "drums"))
+
+(define (tempo-ok? n)
+  (and (number? n) (>= n 76.0) (<= n 126.0)))
+
+(define (named? xs name)
+  (let loop ((ys xs))
+    (if (or (not (pair? ys)) (null? ys))
+      #f
+      (if (string=? (car ys) name) #t (loop (cdr ys))))))
+
+(define (bounds-ok? form)
+  (let ((chk (music-check form)))
+    (and (hash-ref chk "ok" #f)
+         (tempo-ok? (hash-ref chk "tempo" 0))
+         (named? (list "C" "D" "E" "F" "G" "A" "Bb") (hash-ref chk "key" ""))
+         (named? (list "major" "minor" "dorian" "mixolydian" "pentatonic") (hash-ref chk "mode" ""))
+         (>= (hash-ref chk "swing" 1) 0.0)
+         (<= (hash-ref chk "swing" 1) 0.141)
+         (>= (hash-ref chk "layers" 0) 1.0)
+         (<= (hash-ref chk "layers" 9) 4.0)
+         (>= (hash-ref chk "gain" 0) 0.05)
+         (<= (hash-ref chk "gain" 1) 0.181))))
+
+(define (all-bounds i ok)
+  (if (>= i 24)
+    ok
+    (all-bounds (+ i 1)
+                (and ok (bounds-ok? (music-evolve music-home i))))))
+
+(expect "evolve-bounds" (all-bounds 0 #t))
+
+(define (chain i form ok)
+  (if (>= i 16)
+    ok
+    (let ((next (music-evolve form (+ i 8))))
+      (chain (+ i 1) next (and ok (bounds-ok? next))))))
+
+(expect "evolve-chain" (chain 0 music-home #t))
+(expect "evolve-id" (string=? (music-id-of (music-evolve music-home 0)) "evo-0"))
+(expect "evolve-keeps" (string=? (hash-ref (music-gate (music-evolve music-home 4)) "verdict" "") "KEEP"))
+(expect "evolve-from-harsh" (bounds-ok? (music-evolve harsh 3)))
+
+(define book (music-book music-home))
+(define born (music-evolve music-home 0))
+(define offered (music-offer book born))
+(expect "keep-holds" (and (string=? (hash-ref offered "verdict" "") "KEEP")
+                          (string=? (music-id-of (hash-ref (hash-ref offered "book") "current")) "garden-day")
+                          (string=? (music-id-of (hash-ref (hash-ref offered "book") "pending")) "evo-0")))
+(define swapped (music-bar (hash-ref offered "book")))
+(expect "bar-swap" (and (string=? (music-id-of (hash-ref swapped "current")) "evo-0")
+                        (string=? (music-id-of (hash-ref swapped "previous")) "garden-day")
+                        (string=? (hash-ref swapped "pending" "x") "")))
+(define cancelled (music-rollback (hash-ref offered "book")))
+(expect "rollback-cancel" (and (string=? (music-id-of (hash-ref cancelled "current")) "garden-day")
+                               (string=? (hash-ref cancelled "pending" "x") "")))
+(define queued (music-rollback swapped))
+(expect "rollback-queues" (and (string=? (music-id-of (hash-ref queued "current")) "evo-0")
+                               (string=? (music-id-of (hash-ref queued "pending")) "garden-day")))
+(define restored (music-bar queued))
+(expect "rollback-restore" (string=? (music-id-of (hash-ref restored "current")) "garden-day"))
+
+(define refused (music-offer book harsh))
+(expect "offer-harsh" (and (string=? (hash-ref refused "verdict" "") "ROLLBACK")
+                           (string=? (music-id-of (hash-ref (hash-ref refused "book") "current")) "garden-day")
+                           (string=? (hash-ref (hash-ref refused "book") "pending" "") "")))
+
+(define slow (music-tempo 96.0 8.0 1.0))
+(define fast (music-tempo 96.0 12.0 1.0))
+(define faster (music-tempo 96.0 18.0 1.0))
+(expect "tempo-speed" (and (< slow fast) (< fast faster)))
+(define early (music-tempo 96.0 8.0 1.0))
+(define mid (music-tempo 96.0 8.0 4.0))
+(define late (music-tempo 96.0 8.0 9.0))
+(expect "tempo-level" (and (< early mid) (< mid late)))
+(define capped (music-tempo 96.0 80.0 40.0))
+(expect "tempo-cap" (and (>= capped 72.0) (<= capped 156.0) (>= slow 72.0)))
+
+(expect "layers-speed" (< (music-layers 1.0 8.0 1.0) (music-layers 1.0 12.0 1.0)))
+(expect "layers-level" (< (music-layers 1.0 8.0 1.0) (music-layers 1.0 8.0 4.0)))
+(expect "layers-cap" (<= (music-layers 4.0 20.0 20.0) 4.0))
+(expect "tempo-near" (near? slow 95.04))
