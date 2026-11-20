@@ -5,7 +5,7 @@ import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 // The core compiles before it prints PORT; that takes about 8 s on a loaded box.
-const AURA_START_MS = Number(process.env.AURA_START_MS || 30000);
+const AURA_START_MS = Number(process.env.AURA_START_MS || 90000);
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const aura = process.env.AURA_BIN || "aura";
