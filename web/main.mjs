@@ -176,7 +176,12 @@ function applyPals(msg) {
   pals = next;
 }
 
-const HERO_PLANS = new Set(["keeper", "kitten", "car", "bunny", "bird", "butterfly", "frog", "duck", "friend"]);
+// Same bodies drawBody knows, and the same kinds plan-of keeps.
+const HERO_PLANS = new Set([
+  "keeper", "kitten", "car", "van", "racer", "taxi", "wagon",
+  "bunny", "bird", "butterfly", "frog", "duck",
+  "puppy", "fox", "turtle", "bee", "friend",
+]);
 
 function applyHero(msg) {
   const row = msg.hero;

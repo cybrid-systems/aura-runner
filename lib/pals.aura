@@ -44,9 +44,13 @@
       (string=? s "gap") (string=? s "coin") (string=? s "spring")
       (string=? s "hero") (string=? s "keeper")))
 
+; hop, pace, float, follow and side are the original steps.
+; near, cheer and pace-ahead are formation only: the view places
+; the picture, and the hit test never reads a motion.
 (define (motion? s)
   (or (string=? s "hop") (string=? s "pace") (string=? s "float")
-      (string=? s "follow") (string=? s "side")))
+      (string=? s "follow") (string=? s "side")
+      (string=? s "near") (string=? s "cheer") (string=? s "pace-ahead")))
 
 (define (plan-of kind)
   (cond
@@ -222,6 +226,14 @@
       ((string=? kind "butterfly") "The runner became a butterfly")
       ((string=? kind "frog") "The runner became a frog")
       ((string=? kind "duck") "The runner became a duck")
+      ((string=? kind "puppy") "The runner became a puppy")
+      ((string=? kind "fox") "The runner became a fox")
+      ((string=? kind "turtle") "The runner became a turtle")
+      ((string=? kind "bee") "The runner became a bee")
+      ((string=? kind "van") "The runner became a van")
+      ((string=? kind "racer") "The runner became a racer")
+      ((string=? kind "taxi") "The runner became a taxi")
+      ((string=? kind "wagon") "The runner became a wagon")
       ((string=? kind "keeper") "The runner is the light-keeper again")
       (else "The runner looks different"))))
 
@@ -384,17 +396,30 @@
     ((string=? kind "bird") "butterfly")
     ((string=? kind "butterfly") "frog")
     ((string=? kind "frog") "duck")
-    ((string=? kind "duck") "kitten")
+    ((string=? kind "duck") "puppy")
+    ((string=? kind "puppy") "fox")
+    ((string=? kind "fox") "turtle")
+    ((string=? kind "turtle") "bee")
+    ((string=? kind "bee") "kitten")
     (else "kitten")))
 
 (define (look-rgb kind)
   (cond
     ((string=? kind "car") "0.35 0.72 0.95")
+    ((string=? kind "van") "0.98 0.78 0.32")
+    ((string=? kind "racer") "0.96 0.45 0.32")
+    ((string=? kind "taxi") "0.98 0.86 0.28")
+    ((string=? kind "wagon") "0.48 0.78 0.55")
     ((string=? kind "bunny") "0.98 0.78 0.86")
     ((string=? kind "bird") "0.95 0.86 0.35")
     ((string=? kind "butterfly") "0.72 0.55 0.98")
     ((string=? kind "frog") "0.45 0.82 0.4")
     ((string=? kind "duck") "0.98 0.78 0.28")
+    ((string=? kind "puppy") "0.72 0.58 0.40")
+    ((string=? kind "fox") "0.95 0.55 0.28")
+    ((string=? kind "turtle") "0.45 0.78 0.48")
+    ((string=? kind "bee") "0.98 0.82 0.22")
+    ((string=? kind "keeper") "0.95 0.72 0.45")
     (else "0.95 0.62 0.45")))
 
 (define (hero-src kind)
@@ -459,3 +484,95 @@
             (if (blank? base)
               (hero-src (next-look cur))
               (join-hero base (hero-src (next-look cur))))))))))
+
+(define (next-motion motion)
+  (cond
+    ((string=? motion "hop") "pace")
+    ((string=? motion "pace") "float")
+    ((string=? motion "float") "follow")
+    ((string=? motion "follow") "side")
+    ((string=? motion "side") "near")
+    ((string=? motion "near") "cheer")
+    ((string=? motion "cheer") "pace-ahead")
+    ((string=? motion "pace-ahead") "hop")
+    (else "cheer")))
+
+; Animals step through the gentle kinds. Cars step through the fleet.
+; A made-up kind keeps its name and only changes how it moves.
+(define (next-kind kind)
+  (cond
+    ((string=? kind "kitten") "bunny")
+    ((string=? kind "bunny") "bird")
+    ((string=? kind "bird") "butterfly")
+    ((string=? kind "butterfly") "frog")
+    ((string=? kind "frog") "duck")
+    ((string=? kind "duck") "puppy")
+    ((string=? kind "puppy") "fox")
+    ((string=? kind "fox") "turtle")
+    ((string=? kind "turtle") "bee")
+    ((string=? kind "bee") "kitten")
+    ((string=? kind "car") "van")
+    ((string=? kind "van") "racer")
+    ((string=? kind "racer") "taxi")
+    ((string=? kind "taxi") "wagon")
+    ((string=? kind "wagon") "car")
+    (else kind)))
+
+(define (rows-last rows)
+  (if (not (pair? rows))
+    #f
+    (if (null? (cdr rows))
+      (car rows)
+      (rows-last (cdr rows)))))
+
+; Same name, next kind and motion. The count does not grow.
+(define (restyle-row row)
+  (if (not (hash? row))
+    row
+    (let ((kind (next-kind (hash-ref row "kind" "friend")))
+          (name (hash-ref row "name" ""))
+          (motion (next-motion (hash-ref row "motion" "pace"))))
+      (let ((text (string-append "(pal " kind " " name " " (look-rgb kind) " " motion ")")))
+        (let ((got (check-pals text)))
+          (if (and (hash? got) (hash-ref got "ok" #f) (pair? (hash-ref got "pals" (list))))
+            (car (hash-ref got "pals"))
+            row))))))
+
+; Restyle the newest friend. The others stay, so a clear or a streak
+; does not invite a stranger in.
+(define (evolve-rows rows)
+  (let ((row (rows-last rows)))
+    (if (not (hash? row))
+      rows
+      (replace-row rows (hash-ref row "name" "") (restyle-row row)))))
+
+; The light-keeper steps to a kitten. Any other look takes next-look.
+(define (evolve-hero hero)
+  (let ((kind (if (hash? hero) (hash-ref hero "kind" "keeper") "keeper")))
+    (let ((got (check-pals (hero-src (next-look kind)))))
+      (if (and (hash? got) (hash-ref got "ok" #f))
+        (let ((next (hash-ref got "hero" #f)))
+          (if (keeper-plan? next) #f next))
+        hero))))
+
+; A guest car is one pal clause. A dark colour or a bad motion returns
+; the roster unchanged, which is the rollback the live tick also takes.
+(define (admit-guest rows text)
+  (let ((cur (if (pair? rows) rows (list)))
+        (found (check-roster text)))
+    (if (not (and (hash? found) (hash-ref found "ok" #f)))
+      (hash "ok" #f
+            "why" (if (hash? found) (hash-ref found "why" "shape") "shape")
+            "rows" cur)
+      (let ((incoming (hash-ref found "pals" (list))))
+        (if (or (not (pair? incoming))
+                (find-row cur (hash-ref (car incoming) "name" "")))
+          (hash "ok" #f "why" "have" "rows" cur)
+          (merge-pals cur incoming))))))
+
+; A streak of three, a shield block, or a cleared level. Four is not
+; another step; the next one waits for six.
+(define (evolve-spark? streak held cleared?)
+  (or held
+      cleared?
+      (and (number? streak) (>= streak 3) (= (modulo streak 3) 0))))

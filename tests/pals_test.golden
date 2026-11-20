@@ -41,3 +41,16 @@ dress-keep 1
 dress-next 1
 dress-model 1
 join-hero 1
+near 1 fair A bunny hopped in
+cheer 1 fair A bird flew along
+ahead 1 fair A puppy bounded in
+hero-fox 1 fair The runner became a fox
+hero-bee 1 fair The runner became a bee
+hero-turtle 1 fair The runner became a turtle
+near-motion near
+evolve 1
+hero-step kitten
+dress-puppy puppy
+guest 1
+guest-back 1
+spark 1
