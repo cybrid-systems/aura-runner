@@ -12,6 +12,7 @@ import {
   contextPlan,
   createQuality,
   frameBudget,
+  frameWork,
   gapLimit,
   noteFbo,
   resolutionScale,
@@ -166,6 +167,33 @@ hz.samples = [];
 hz.pending = 0;
 snap = feed(hz, 36, 9, 8.33, 100000);
 assert(snap.tier === "low", "9 ms of work misses a 120 Hz budget");
+assert(frameWork(0, 1000 / 120) === 0, "a 0 ms reading is zero work");
+assert(frameWork(-1, 16) == null && frameWork(NaN, 16) == null, "invalid work is dropped");
+const quantised = createQuality(DEFAULT_POLICY, gpuCaps, 0);
+setMode(quantised, "auto", 0);
+quantised.tier = "high";
+quantised.cooldownUntil = 0;
+quantised.samples = [];
+quantised.pending = 0;
+quantised.blockedUntil = { medium: 0, high: 0 };
+let qNow = 600000;
+let qDemotes = 0;
+for (let i = 0; i < 13200; i++) {
+  const before = quantised.tier;
+  qNow += 8.3;
+  const work = i % 131 === 0 ? 0 : 1.2;
+  observe(quantised, { workMs: work, gapMs: 8.3, now: qNow, refreshHz: 120 });
+  if (tierRank(quantised.tier) < tierRank(before)) qDemotes++;
+}
+assert(qDemotes === 0 && quantised.tier === "high", "timer zeros never demote, " + quantised.tier + " " + qDemotes);
+const onlyZero = createQuality(DEFAULT_POLICY, gpuCaps, 0);
+setMode(onlyZero, "auto", 0);
+onlyZero.tier = "high";
+onlyZero.cooldownUntil = 0;
+onlyZero.samples = [];
+onlyZero.pending = 0;
+feed(onlyZero, 36 * 4, 0, 8.3, 800000);
+assert(onlyZero.tier === "high", "a window of 0 ms work is not a miss");
 const held = createQuality(DEFAULT_POLICY, gpuCaps, 0);
 for (let i = 0; i < 8; i++) noteRefresh(held, 1000 / 120);
 held.cooldownUntil = 0;
