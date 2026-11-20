@@ -1,0 +1,73 @@
+; Three hearts. A shield keeps the heart. A second hit inside the
+; window does not. A clean level or a high combo gives one back.
+; Zero hearts settles the run, and a fresh run starts at three.
+(require "lib/hearts")
+
+(define (expect name ok)
+  (display name)
+  (display " ")
+  (display (if ok 1 0))
+  (newline)
+  (if ok #t (error (string-append "hearts: " name))))
+
+(define (flag h k)
+  (equal? (hash-ref h k #f) #t))
+
+(define (near? a b)
+  (let ((d (- a b)))
+    (< (if (< d 0.0) (- 0.0 d) d) 0.001)))
+
+(define start (hearts-blank))
+(expect "start" (and (= (hash-ref start "hearts" 0) 3)
+                     (not (flag start "over"))
+                     (near? (hash-ref start "iframe" 1) 0.0)))
+
+(define held (hearts-hit start #t))
+(expect "shield" (and (= (hash-ref held "hearts" 0) 3)
+                      (flag held "shield")
+                      (not (flag held "heart"))
+                      (flag held "coins")
+                      (not (flag held "combo-reset"))
+                      (not (flag held "clean-fail"))))
+
+(define hit (hearts-hit start #f))
+(expect "damage" (and (= (hash-ref hit "hearts" 0) 2)
+                      (flag hit "heart")
+                      (flag hit "coins")
+                      (flag hit "combo-reset")
+                      (flag hit "clean-fail")
+                      (near? (hash-ref hit "iframe" 0) HEART-IFRAME)
+                      (near? HEART-IFRAME 1.2)))
+
+(define blocked (hearts-hit hit #f))
+(expect "iframe" (and (= (hash-ref blocked "hearts" 0) 2)
+                      (not (flag blocked "heart"))
+                      (not (flag blocked "combo-reset"))))
+
+(define open (hearts-tick hit 1.2))
+(expect "window" (near? (hash-ref open "iframe" 1) 0.0))
+(define hit2 (hearts-hit open #f))
+(expect "again" (= (hash-ref hit2 "hearts" 0) 1))
+
+(define back (hearts-recover hit "clean"))
+(expect "clean" (and (flag back "recovered") (= (hash-ref back "hearts" 0) 3)))
+(define combo (hearts-recover hit2 "combo"))
+(expect "combo" (and (flag combo "recovered") (= (hash-ref combo "hearts" 0) 2)))
+(define capped (hearts-recover start "combo"))
+(expect "cap" (and (not (flag capped "recovered")) (= (hash-ref capped "hearts" 0) 3)))
+
+(define low (hearts-hit (hearts-tick hit2 1.2) #f))
+(expect "over" (and (= (hash-ref low "hearts" 0) 0) (flag low "over") (flag low "coins")))
+(define stay (hearts-hit low #f))
+(expect "stay" (and (= (hash-ref stay "hearts" 0) 0) (flag stay "over")))
+(define dead (hearts-recover low "clean"))
+(expect "no-revive" (and (= (hash-ref dead "hearts" 0) 0) (not (flag dead "recovered"))))
+
+(define fresh (hearts-blank))
+(expect "restart" (and (= (hash-ref fresh "hearts" 0) HEARTS-MAX)
+                       (not (flag fresh "over"))
+                       (near? (hash-ref fresh "iframe" 1) 0.0)
+                       (= HEARTS-MAX 3)
+                       (= COMBO-HEART 5)))
+
+(void)

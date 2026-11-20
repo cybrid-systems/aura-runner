@@ -444,8 +444,10 @@
 ; the garden instead. scene -1 means the garden stays.
 ; Pressure is a second band for coin density and poppers. It moves by
 ; one band: up on a clean streak, a x3 combo, an overtake, or a high
-; score; down on two bumps or a low score. A speed lock keeps the feel
-; where it is and lets pressure tune density instead of asking for speed.
+; score; down on two bumps, a low score, one heart left, or a settled
+; run. Missing heart keys stay at a full set, so an older call plans
+; the same way. A speed lock keeps the feel where it is and lets
+; pressure tune density instead of asking for speed.
 (define (adapt-finish form bumps points level . rest)
   (let ((f (voice-band form))
         (n (if (and (number? bumps) (> bumps 1.5)) 2 (if (and (number? bumps) (> bumps 0.5)) 1 0)))
@@ -467,18 +469,22 @@
            (streak (if (<= n 0)
                      (+ (if (and (number? streak0) (> streak0 0)) streak0 0) 1)
                      0))
+           (hearts (skill-num skill "hearts" 3))
+           (defeats (skill-num skill "defeats" 0))
            (hot (and (<= n 0)
                      (or (>= streak 2)
                          (and (number? combo) (>= combo 3))
                          (and (number? overtakes) (>= overtakes 1))
                          (>= rate 80.0))))
-           (low (or (>= n 2) (< rate 25.0)))
+           (low (or (>= n 2) (< rate 25.0)
+                    (<= hearts 1)
+                    (>= defeats 1)))
            (next-p (cond
                      (low (max 0 (- pressure 1)))
                      (hot (min 4 (+ pressure 1)))
                      (else pressure))))
       (cond
-        ((or (>= n 2) (< rate 25.0))
+        (low
          (finish-plan (max 0 (- f 1)) "ease" 5 next-p streak))
         ((and (<= n 0) (= (modulo lv 2) 1))
          (if locked

@@ -135,6 +135,102 @@ html, body {
 }
 #challenge[hidden] { display: none; }
 #challenge.done { color: #ffe08a; }
+#challenge.miss { opacity: 0.72; }
+#hearts {
+  position: fixed;
+  top: max(14px, env(safe-area-inset-top));
+  right: max(148px, calc(env(safe-area-inset-right) + 140px));
+  margin: 0;
+  font-size: 28px;
+  letter-spacing: 0.14em;
+  color: #ff5d6c;
+  text-shadow: 0 2px 0 rgba(92, 52, 20, 0.28);
+  pointer-events: none;
+  line-height: 1;
+}
+#hearts .gone { opacity: 0.35; }
+#hearts.back { animation: pop 0.4s ease-out; }
+#race {
+  position: fixed;
+  top: max(50px, calc(env(safe-area-inset-top) + 40px));
+  right: max(148px, calc(env(safe-area-inset-right) + 140px));
+  margin: 0;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(255, 246, 232, 0.94);
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  pointer-events: none;
+  box-shadow: 0 8px 18px rgba(92, 52, 20, 0.14);
+}
+#race[data-place="2"] { background: #ffd7c8; }
+#race[hidden] { display: none; }
+#over {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(92, 52, 20, 0.42);
+}
+#over[hidden] { display: none; }
+.over-card {
+  width: min(420px, 92vw);
+  padding: 28px 28px 22px;
+  border-radius: 28px;
+  background: #fff6e8;
+  color: var(--ink);
+  text-align: center;
+  box-shadow: 0 18px 50px rgba(92, 52, 20, 0.28);
+}
+.over-kicker {
+  margin: 0;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-size: 12px;
+  font-weight: 800;
+  color: #b4532a;
+}
+#over-title {
+  margin: 6px 0 0;
+  font-size: 40px;
+  line-height: 1.05;
+}
+#over-soft {
+  margin: 8px 0 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+#over-score, #over-level, #over-mult, #over-race {
+  margin: 8px 0 0;
+  font-size: 20px;
+  font-weight: 800;
+}
+#over-score { font-size: 28px; margin-top: 16px; }
+#over-best {
+  display: inline-block;
+  margin: 12px 0 0;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: #ffe08a;
+  font-weight: 800;
+}
+#over-best[hidden] { display: none; }
+#play-again {
+  margin-top: 18px;
+  height: 56px;
+  padding: 0 28px;
+  border: 0;
+  border-radius: 999px;
+  background: #f0a04b;
+  color: #5c3414;
+  font: 800 22px/1 ui-rounded, "Segoe UI", system-ui, sans-serif;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(92, 52, 20, 0.16);
+}
 #ward.boost {
   color: #ffe08a;
   text-shadow: 0 0 12px rgba(255, 224, 138, 0.9);
@@ -176,7 +272,7 @@ html, body {
 #score.pop, #grade.pop, #pace.pop, #mult.pop { animation: pop 0.28s ease-out; }
 #evo {
   position: fixed;
-  top: max(78px, calc(env(safe-area-inset-top) + 66px));
+  top: max(108px, calc(env(safe-area-inset-top) + 96px));
   right: max(16px, env(safe-area-inset-right));
   width: min(280px, 34vw);
   margin: 0;
@@ -544,7 +640,7 @@ html, body {
   color: #8a5a32;
 }
 #card-share[hidden] { display: none; }
-#motion:focus-visible, #mute:focus-visible, #badge:focus-visible, #model:focus-visible, #again:focus-visible, #cards-open:focus-visible, #cards-use:focus-visible, #cards-share:focus-visible, .card:focus-visible, #note-list button:focus-visible, .primer-open:focus-visible, #primer-try:focus-visible, #primer-text:focus-visible {
+#motion:focus-visible, #mute:focus-visible, #badge:focus-visible, #model:focus-visible, #again:focus-visible, #play-again:focus-visible, #cards-open:focus-visible, #cards-use:focus-visible, #cards-share:focus-visible, .card:focus-visible, #note-list button:focus-visible, .primer-open:focus-visible, #primer-try:focus-visible, #primer-text:focus-visible {
   outline: 3px solid white;
   outline-offset: 3px;
 }

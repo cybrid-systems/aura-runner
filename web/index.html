@@ -21,6 +21,8 @@
   <p id="pace" aria-hidden="true">Level 1 · Speed 8</p>
   <div id="goal" aria-hidden="true"><span id="goal-fill"></span></div>
   <p id="ward" aria-hidden="true">Shield</p>
+  <p id="hearts" aria-live="polite" aria-label="3 hearts"></p>
+  <p id="race" hidden></p>
   <p id="record" hidden aria-hidden="true"></p>
   <p id="challenge" hidden></p>
   <p id="combo" hidden aria-hidden="true"></p>
@@ -42,6 +44,19 @@
   <button id="model" type="button" hidden>DeepSeek</button>
   <p id="stats" hidden></p>
   <pre id="bench" hidden></pre>
+  <div id="over" hidden>
+    <div class="over-card" role="dialog" aria-modal="true" aria-labelledby="over-title">
+      <p class="over-kicker">settlement</p>
+      <h2 id="over-title">Run over</h2>
+      <p id="over-soft">Great run. The path can wait.</p>
+      <p id="over-score">Score 0</p>
+      <p id="over-level">Level 1</p>
+      <p id="over-mult">Best ×1</p>
+      <p id="over-race">You 0 · Rival 0</p>
+      <p id="over-best" hidden>New best!</p>
+      <button id="play-again" type="button">Play Again</button>
+    </div>
+  </div>
   <script type="module" src="main.mjs"></script>
 </body>
 </html>
