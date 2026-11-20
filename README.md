@@ -81,7 +81,7 @@ With no `LLM_API_KEY`, `./run.sh` fills those three from `~/code/keys/deepseek` 
 
 ## Picture
 
-Auto starts on Low and moves to Medium or High only after frames stay under budget, then steps back if they miss. Low is the original single pass, with the round contact shadows. Medium and High add one sun shadow and a small bloom. The score stays in the page, so it stays sharp. A browser without WebGL2 draws a flat garden and says so.
+Auto starts on Low and moves to Medium or High only after frames stay under budget, then steps back if they miss. Low is the original single pass, with the round contact shadows. Medium and High add a sun shadow, bloom, ACES tonemapping, a scene colour grade, and FXAA. High also adds a short speed blur, light shafts, a small ambient occlusion pass, and a brighter hero trail. On those tiers the camera eases a lane change, kicks the field of view with speed, and shakes on a near miss. A kept scene or hero pulses the bloom. A rollback cools the frame. The score stays in the page, so it stays sharp. A browser without WebGL2 draws a flat garden and says so.
 
 The budgets live in [`lib/quality.aura`](lib/quality.aura). The page carries the same numbers, because it does not ask Aura to run them. Quality is not an `evo:trial`. A world, the runner, and a phrase still are. Pick Auto, Low, Medium, or High from the corner control. The browser remembers the choice.
 
@@ -89,7 +89,7 @@ The budgets live in [`lib/quality.aura`](lib/quality.aura). The page carries the
 
 ```
 core/      Aura entry (core/main.aura): simulation, wishes, evo:trial
-web/       WebGL2 view. Low is one pass; Medium and High add shadow and bloom
+web/       WebGL2 view. Low is one pass; Medium and High add shadow, bloom, grade, and FXAA
 lib/       Biome EDSL, physics, voice, pals, hearts, race
 scripts/   Checks, seeded play-review, LLM probe
 bridge/    Static page and the WebSocket bridge. ./run.sh starts it
