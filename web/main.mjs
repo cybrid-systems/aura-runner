@@ -392,6 +392,10 @@ function prune() {
   pieces = next;
 }
 
+// Last server run clock, in ms. A stall leaves it where it was. reset-run!
+// and a fresh process put it back near zero.
+let serverRun = -1;
+
 function resetLocal() {
   const p = makePlayer(1.2);
   player.set(p);
@@ -428,17 +432,28 @@ function resetLocal() {
   stumble = 0;
   flashEl.hidden = true;
   flashEl.classList.remove("on");
+  serverRun = -1;
 }
 
 function reconcile(st) {
   if (typeof st.g === "number") applyRules(st);
   alive = true;
   player[5] = 1;
-  // A late server pose, a few metres ahead after a hole the body already
-  // cleared, must not drag the runner into that hole. Only a real split snaps.
+  // lead > 0 means the prediction is ahead of this pose. A slow tick or a
+  // stalled server is behind on the same run; yanking the body back there
+  // rewinds the road, because the view is drawn from arc length. Leave the
+  // prediction alone and let the server catch up. Pieces stay on the arc
+  // the body is already on, so a later pose that has caught up does not
+  // have to teleport anyone. A pose more than 12 m ahead is a real split:
+  // snap forward so the body meets the obstacles that are actually there.
+  // A new run rewinds the server clock (reset-run!, restart, a process
+  // that is back at the opening). That one still snaps to the start.
   if (st.alive !== false && typeof st.x === "number") {
     const lead = player[0] - st.x;
-    if (lead < -12 || lead > 12) player[0] = st.x;
+    const run = typeof st.run === "number" ? st.run : null;
+    const restarted = run !== null && serverRun >= 0 && run + 800 < serverRun;
+    if (lead < -12 || (lead > 12 && restarted)) player[0] = st.x;
+    if (run !== null && (serverRun < 0 || restarted || run >= serverRun)) serverRun = run;
   }
   if (typeof st.hue === "number") hue = st.hue;
   applyLevel(st);
