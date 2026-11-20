@@ -6,7 +6,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-// The core compiles before it prints PORT; that takes about 8 s on a loaded box.
+// The prebuilt binary loads the game before it prints PORT; about 15 s cold.
 const AURA_START_MS = Number(process.env.AURA_START_MS || 30000);
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");

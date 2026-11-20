@@ -63,12 +63,37 @@ elif [[ -n "${1:-}" ]]; then
   exit 1
 fi
 
+aura_from=""
+aura_ver=""
 if [[ -z "${AURA_BIN:-}" ]]; then
-  AURA_BIN="$(install_aura "$ROOT")"
+  _bin_out="$(mktemp)"
+  if ! install_aura "$ROOT" >"$_bin_out"; then
+    rm -f "$_bin_out"
+    exit 1
+  fi
+  AURA_BIN="$(tr -d '\r' < "$_bin_out")"
+  rm -f "$_bin_out"
+  aura_from="${AURA_READY_FROM:-download}"
+  aura_ver="${AURA_READY_VERSION:-}"
+else
+  aura_from="AURA_BIN"
 fi
 if [[ "$(printf '%s\n' "$AURA_BIN" | wc -l)" -ne 1 || ! -x "$AURA_BIN" ]]; then
   echo "Aura binary path is not a single executable: [$AURA_BIN]" >&2
+  echo "Set AURA_BIN to a prebuilt Aura, or unset it to download the nightly." >&2
   exit 1
+fi
+if [[ -z "$aura_ver" ]]; then
+  _ver_err="$(mktemp)"
+  aura_ver="$("$AURA_BIN" --version 2>"$_ver_err" || true)"
+  if [[ -z "$aura_ver" ]]; then
+    echo "Could not run ${AURA_BIN} --version." >&2
+    cat "$_ver_err" >&2 || true
+    rm -f "$_ver_err"
+    echo "Set AURA_BIN to a prebuilt Aura for this machine, or unset it to download the nightly." >&2
+    exit 1
+  fi
+  rm -f "$_ver_err"
 fi
 
 # A trial leaves the parent read-only unless the sandbox is off, and a
@@ -84,8 +109,9 @@ configure_llm
 : > "$AURA_EVO_LOG" || true
 rm -f out/aura.port
 
-# The core compiles before it prints PORT. A cold compile is often past
-# 8s, so the default budget is 60s. AURA_CORE_WAIT overrides it (seconds).
+# The prebuilt binary loads the game in-process. That needs no compiler.
+# The page is served as soon as it binds; it retries until the core listens.
+# AURA_CORE_WAIT is how long that load may take before this script gives up.
 core_wait="${AURA_CORE_WAIT:-60}"
 if ! [[ "$core_wait" =~ ^[1-9][0-9]*$ ]]; then
   echo "AURA_CORE_WAIT must be a positive number of seconds" >&2
@@ -94,36 +120,50 @@ fi
 
 "$AURA_BIN" --quiet --preset dev --grant network core/main.aura > out/aura.log 2>&1 &
 AURA_PID=$!
-WEB_PID=""
+node bridge/server.mjs > out/web.log 2>&1 &
+WEB_PID=$!
 
 cleanup() {
   if [[ -n "${AURA_PID:-}" ]]; then kill "$AURA_PID" 2>/dev/null || true; fi
   if [[ -n "${WEB_PID:-}" ]]; then kill "$WEB_PID" 2>/dev/null || true; fi
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT TERM
 
-echo "compiling Aura core…" >&2
-deadline=$((SECONDS + core_wait))
-while (( SECONDS < deadline )); do
-  if grep -q "PORT " out/aura.log 2>/dev/null; then
-    break
-  fi
-  if ! kill -0 "$AURA_PID" 2>/dev/null; then
-    echo "Aura core exited" >&2
-    tail -n 40 out/aura.log >&2 || true
+web_deadline=$((SECONDS + 10))
+while port_free "$WEB_PORT"; do
+  if (( SECONDS >= web_deadline )) || ! kill -0 "$WEB_PID" 2>/dev/null; then
+    echo "page server did not listen on ${WEB_PORT}" >&2
+    tail -n 40 out/web.log >&2 || true
     exit 1
   fi
-  sleep 0.1
+  sleep 0.05
 done
-if ! grep -q "PORT " out/aura.log 2>/dev/null; then
-  echo "Aura core did not listen" >&2
-  tail -n 40 out/aura.log >&2 || true
-  exit 1
-fi
 
-node bridge/server.mjs &
-WEB_PID=$!
-sleep 0.2
+if [[ -n "$aura_ver" ]]; then
+  echo "${aura_ver}  ${aura_from}" >&2
+else
+  echo "Aura  ${aura_from}" >&2
+fi
 echo "open http://127.0.0.1:${WEB_PORT}" >&2
 echo "tap or space jumps, down slides, left and right change lane" >&2
-wait "$WEB_PID"
+
+core_deadline=$((SECONDS + core_wait))
+core_ready=0
+while kill -0 "$WEB_PID" 2>/dev/null; do
+  if [[ "$core_ready" -eq 0 ]]; then
+    if grep -q "PORT " out/aura.log 2>/dev/null; then
+      core_ready=1
+    elif ! kill -0 "$AURA_PID" 2>/dev/null; then
+      echo "Aura core exited before it was listening" >&2
+      tail -n 40 out/aura.log >&2 || true
+      exit 1
+    elif (( SECONDS >= core_deadline )); then
+      echo "Aura core did not listen within ${core_wait}s" >&2
+      echo "The log is out/aura.log. ./run.sh is using the prebuilt Aura binary." >&2
+      tail -n 40 out/aura.log >&2 || true
+      exit 1
+    fi
+  fi
+  sleep 0.2
+done

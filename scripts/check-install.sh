@@ -33,6 +33,7 @@ case "$ver" in
 esac
 
 echo "second call is idempotent" >&2
+unset AURA_FORCE_TOOLS
 out2="$(install_aura "$work")"
 if [[ "$out" != "$out2" ]]; then
   echo "second path differs: $out2" >&2
@@ -61,5 +62,85 @@ if [[ -n "$other" ]]; then
     exit 1
   fi
 fi
+
+echo "offline reuses the cache and does not touch the network" >&2
+out3="$(AURA_OFFLINE=1 AURA_DOWNLOAD_BASE="http://127.0.0.1:9" install_aura "$work")"
+if [[ "$out" != "$out3" ]]; then
+  echo "offline path differs: $out3" >&2
+  exit 1
+fi
+
+echo "offline with an empty cache fails clearly" >&2
+empty="$(mktemp -d)"
+set +e
+offline_err="$(AURA_OFFLINE=1 AURA_CACHE_DIR="$empty" install_aura "$work" 2>&1)"
+offline_rc=$?
+set -e
+rm -rf "$empty"
+if [[ "$offline_rc" -eq 0 ]]; then
+  echo "offline miss should have failed" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$offline_err" | grep -q "AURA_OFFLINE=1"; then
+  echo "offline miss was not actionable:" >&2
+  printf '%s\n' "$offline_err" >&2
+  exit 1
+fi
+
+echo "checksum mismatch is rejected" >&2
+sumdir="$(mktemp -d)"
+printf 'hello\n' > "$sumdir/file"
+printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  file\n' > "$sumdir/sum"
+if check_sha256 "$sumdir/file" "$sumdir/sum" 2>/dev/null; then
+  echo "bad checksum was accepted" >&2
+  exit 1
+fi
+sha256sum "$sumdir/file" > "$sumdir/good"
+if ! check_sha256 "$sumdir/file" "$sumdir/good"; then
+  echo "good checksum was rejected" >&2
+  exit 1
+fi
+rm -rf "$sumdir"
+
+echo "unsupported platform names the release assets" >&2
+set +e
+plat_err="$(AURA_OS=darwin AURA_ARCH=arm64 install_aura "$work" 2>&1)"
+plat_rc=$?
+set -e
+if [[ "$plat_rc" -eq 0 ]]; then
+  echo "darwin/arm64 should not install from this release" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$plat_err" | grep -q "darwin/arm64"; then
+  echo "platform error did not name darwin/arm64:" >&2
+  printf '%s\n' "$plat_err" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$plat_err" | grep -q "AURA_BIN"; then
+  echo "platform error did not mention AURA_BIN:" >&2
+  printf '%s\n' "$plat_err" >&2
+  exit 1
+fi
+
+echo "pinned version names the v0.2.7 asset" >&2
+if [[ "$(AURA_VERSION=v0.2.7 aura_tag)" != "v0.2.7" || "$(AURA_VERSION=0.2.7 aura_version_slug)" != "0.2.7" ]]; then
+  echo "pin tag/slug mismatch" >&2
+  exit 1
+fi
+pin_name="$(aura_asset_candidates 0.2.7 linux x86_64 | head -n 1)"
+if [[ "$pin_name" != "aura-0.2.7-linux-x86_64.tar.gz" ]]; then
+  echo "unexpected pin asset: $pin_name" >&2
+  exit 1
+fi
+pin_sum="$(mktemp)"
+if ! fetch_to "https://github.com/cybrid-systems/aura/releases/download/v0.2.7/${pin_name}.sha256" "$pin_sum"; then
+  echo "v0.2.7 checksum was not published" >&2
+  exit 1
+fi
+if [[ "$(awk 'NF { print $1; exit }' "$pin_sum" | wc -c)" -lt 64 ]]; then
+  echo "v0.2.7 checksum is empty" >&2
+  exit 1
+fi
+rm -f "$pin_sum"
 
 echo "install check ok: $out"
