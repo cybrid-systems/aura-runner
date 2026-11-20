@@ -1,5 +1,6 @@
 ; The rival's pace. One small change at a time, checked before it sticks.
-; Speed, lane-change pause, and where it appears. Not the band policy.
+; Speed, lane-change pause, where it appears, or which body it wears.
+; Not the band policy, and not the hit half-width.
 (require "lib/gen")
 
 (define CHASE-SPEED-LO 1.6)
@@ -22,8 +23,10 @@
   (let ((d (- a b)))
     (if (< d 0.0) (> (- 0.0 d) 0.0001) (> d 0.0001))))
 
+; look -1 means the level still picks fox, bird, or beetle.
+; 0, 1 and 2 are a chosen body. The hit box does not read this.
 (define (chase-blank)
-  (hash "speed" 2.1 "cool" 0.42 "at" 0.42 "commit" 7.5 "knob" 0 "prev" #f))
+  (hash "speed" 2.1 "cool" 0.42 "at" 0.42 "commit" 7.5 "look" -1 "knob" 0 "prev" #f))
 
 (define (chase-cap pace)
   (* (if (and (number? pace) (> pace 0.1)) (exact->inexact pace) 8.0)
@@ -62,13 +65,15 @@
   (and (not (chase-apart? (chase-get a "speed" 0.0) (chase-get b "speed" 0.0)))
        (not (chase-apart? (chase-get a "cool" 0.0) (chase-get b "cool" 0.0)))
        (not (chase-apart? (chase-get a "at" 0.0) (chase-get b "at" 0.0)))
-       (not (chase-apart? (chase-get a "commit" 0.0) (chase-get b "commit" 0.0)))))
+       (not (chase-apart? (chase-get a "commit" 0.0) (chase-get b "commit" 0.0)))
+       (not (chase-apart? (chase-get a "look" -1) (chase-get b "look" -1)))))
 
 (define (chase-changes state params)
   (+ (if (chase-apart? (chase-get state "speed" 2.1) (chase-get params "speed" 2.1)) 1 0)
      (if (chase-apart? (chase-get state "cool" 0.42) (chase-get params "cool" 0.42)) 1 0)
      (if (chase-apart? (chase-get state "at" 0.42) (chase-get params "at" 0.42)) 1 0)
-     (if (chase-apart? (chase-get state "commit" 7.5) (chase-get params "commit" 7.5)) 1 0)))
+     (if (chase-apart? (chase-get state "commit" 7.5) (chase-get params "commit" 7.5)) 1 0)
+     (if (chase-apart? (chase-get state "look" -1) (chase-get params "look" -1)) 1 0)))
 
 ; Band 0's first row is the slide, the lane step, and the jump.
 ; The rival waits until that stretch, plus a few metres, is behind.
@@ -96,6 +101,13 @@
     ((= (chase-look level) 1) "bird")
     (else "beetle")))
 
+; A chosen look wins. Until the knob moves, the level still names the body.
+(define (chase-shown state level)
+  (let ((n (chase-get state "look" -1)))
+    (if (and (number? n) (>= n 0))
+      (modulo n 3)
+      (chase-look level))))
+
 (define (chase-mood form bumps recent)
   (cond
     ((>= bumps 2) "gentle")
@@ -104,7 +116,14 @@
     (else "hold")))
 
 (define (chase-knob-name k)
-  (cond ((= k 0) "speed") ((= k 1) "cool") (else "at")))
+  (cond ((= k 0) "speed") ((= k 1) "cool") ((= k 2) "at") (else "look")))
+
+; Keen steps to the next body. Gentle steps back. Always a different slot.
+(define (chase-nudge-look look mood)
+  (let ((base (if (and (number? look) (>= look 0)) (modulo look 3) 0)))
+    (if (string=? mood "keen")
+      (modulo (+ base 1) 3)
+      (modulo (+ base 2) 3))))
 
 (define (chase-nudge-speed speed pace commit mood)
   (let ((cap (- (chase-cap pace) 0.05)))
@@ -126,42 +145,48 @@
     (max (- at CHASE-AT-STEP) CHASE-AT-LO)
     (min (+ at CHASE-AT-STEP) CHASE-AT-HI)))
 
-(define (chase-params-of state speed cool at)
+(define (chase-params-of state speed cool at look)
   (hash "speed" speed
         "cool" cool
         "at" at
+        "look" look
         "commit" (chase-get state "commit" 7.5)))
 
 ; One knob. If that knob is already at its bound, try the next.
+; The fourth knob is the body. Speed, pause and place stay the other three.
 (define (chase-step state form bumps recent pace)
   (let ((mood (chase-mood form bumps recent))
         (knob (chase-get state "knob" 0)))
     (if (string=? mood "hold")
       (hash "moved" #f "why" "hold" "mood" mood "knob" knob "params" state)
       (let loop ((k 0) (use knob))
-        (if (>= k 3)
+        (if (>= k 4)
           (hash "moved" #f "why" "hold" "mood" mood "knob" knob "params" state)
           (let* ((speed (chase-get state "speed" 2.1))
                  (cool (chase-get state "cool" 0.42))
                  (at (chase-get state "at" 0.42))
+                 (look (chase-get state "look" -1))
                  (commit (chase-get state "commit" 7.5))
                  (params (cond
                            ((= use 0)
                             (chase-params-of state
                                              (chase-nudge-speed speed pace commit mood)
-                                             cool at))
+                                             cool at look))
                            ((= use 1)
                             (chase-params-of state speed
-                                             (chase-nudge-cool cool mood) at))
-                           (else
+                                             (chase-nudge-cool cool mood) at look))
+                           ((= use 2)
                             (chase-params-of state speed cool
-                                             (chase-nudge-at at mood))))))
+                                             (chase-nudge-at at mood) look))
+                           (else
+                            (chase-params-of state speed cool at
+                                             (chase-nudge-look look mood))))))
             (if (chase-same? params state)
-              (loop (+ k 1) (modulo (+ use 1) 3))
+              (loop (+ k 1) (modulo (+ use 1) 4))
               (hash "moved" #t
                     "why" (chase-knob-name use)
                     "mood" mood
-                    "knob" (modulo (+ use 1) 3)
+                    "knob" (modulo (+ use 1) 4)
                     "params" params))))))))
 
 (define (chase-keep state step)
@@ -170,11 +195,13 @@
           "cool" (chase-get params "cool" 0.42)
           "at" (chase-get params "at" 0.42)
           "commit" (chase-get params "commit" 7.5)
+          "look" (chase-get params "look" -1)
           "knob" (chase-get step "knob" 0)
           "prev" (hash "speed" (chase-get state "speed" 2.1)
                        "cool" (chase-get state "cool" 0.42)
                        "at" (chase-get state "at" 0.42)
                        "commit" (chase-get state "commit" 7.5)
+                       "look" (chase-get state "look" -1)
                        "knob" (chase-get state "knob" 0)))))
 
 (define (chase-undo state)
@@ -185,6 +212,7 @@
             "cool" (chase-get prev "cool" 0.42)
             "at" (chase-get prev "at" 0.42)
             "commit" (chase-get prev "commit" 7.5)
+            "look" (chase-get prev "look" -1)
             "knob" (chase-get prev "knob" 0)
             "prev" #f))))
 
@@ -287,7 +315,8 @@
         "speed" (chase-get state "speed" 2.1)
         "cool" (chase-get state "cool" 0.42)
         "at" (chase-get state "at" 0.42)
-        "commit" (chase-get state "commit" 7.5)))
+        "commit" (chase-get state "commit" 7.5)
+        "look" (chase-get state "look" -1)))
 
 ; Full check used by the tests. The live tick slices the same course.
 (define (chase-consider state proposal rules)
