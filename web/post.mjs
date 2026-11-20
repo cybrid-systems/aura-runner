@@ -208,9 +208,26 @@ const COMPOSITE_HIGH_FS = COMPOSITE_FS
 `,
   );
 
-// High finish. The medium finish source stays FINISH_FS. Blur is radial
-// about the hero and then given back, so the runner stays sharp while the
-// world streaks. Two extra diagonal taps steady thin edges.
+// One eighth-resolution gather. Four bilinear taps cover the source
+// footprint, so the speed tail can step a few pixels without reprinting edges.
+const DOWNSAMPLE_FS = `#version 300 es
+precision highp float;
+uniform sampler2D uTex;
+uniform vec2 uTexel;
+in vec2 vUv;
+out vec4 o;
+void main() {
+  vec2 o1 = uTexel * 2.0;
+  vec3 c = texture(uTex, vUv + vec2(-o1.x, -o1.y)).rgb;
+  c += texture(uTex, vUv + vec2(o1.x, -o1.y)).rgb;
+  c += texture(uTex, vUv + vec2(-o1.x, o1.y)).rgb;
+  c += texture(uTex, vUv + vec2(o1.x, o1.y)).rgb;
+  o = vec4(c * 0.25, 1.0);
+}`;
+
+// High finish. The medium finish source stays FINISH_FS. FXAA matches
+// that pass. The speed tail is four samples of the eighth-res image,
+// only along the line away from the runner.
 const FINISH_HIGH_FS = `#version 300 es
 precision highp float;
 uniform sampler2D uTex;
@@ -231,19 +248,13 @@ void main() {
     float lR = luma(texture(uTex, vUv + vec2(px.x, 0.0)).rgb);
     float lU = luma(texture(uTex, vUv + vec2(0.0, px.y)).rgb);
     float lD = luma(texture(uTex, vUv + vec2(0.0, -px.y)).rgb);
-    float lUL = luma(texture(uTex, vUv + vec2(-px.x, px.y)).rgb);
-    float lUR = luma(texture(uTex, vUv + vec2(px.x, px.y)).rgb);
-    float lDL = luma(texture(uTex, vUv + vec2(-px.x, -px.y)).rgb);
-    float lDR = luma(texture(uTex, vUv + vec2(px.x, -px.y)).rgb);
     vec2 dir = vec2(lL - lR, lU - lD);
-    dir += vec2((lUL + lDL) - (lUR + lDR), (lUL + lUR) - (lDL + lDR));
-    float edge = clamp(length(dir) * 5.0, 0.0, 1.0);
-    if (edge > 0.035) {
+    float edge = clamp(length(dir) * 6.0, 0.0, 1.0);
+    if (edge > 0.04) {
       dir = dir / max(length(dir), 1e-4) * px;
       vec3 a = texture(uTex, vUv + dir * 0.75).rgb;
       vec3 b = texture(uTex, vUv - dir * 0.75).rgb;
-      vec3 d = texture(uTex, vUv + dir * 1.6).rgb;
-      c = mix(c, (a + b) * 0.42 + d * 0.16, edge * 0.8);
+      c = mix(c, (a + b) * 0.5, edge * 0.72);
     }
   }
   if (uBlur > 0.001) {
@@ -252,21 +263,14 @@ void main() {
     float z = texture(uDepth, vUv).r;
     float nearZ = 1.0 - smoothstep(0.97, 0.995, z);
     float sharp = clamp(max(body, nearZ * 0.9), 0.0, 1.0);
-    // Same reach as before, then clamped to 24 framebuffer pixels so the
-    // pre-blurred taps overlap. A sharp tap 40px away reprints the edge.
     vec2 step = (vUv - hero) * uBlur * 0.085 * 0.45;
     float span = length(step * uRes);
-    if (span > 24.0) step *= 24.0 / span;
-    vec3 acc = c * 0.46;
-    acc += texture(uSoft, vUv + step).rgb * 0.12;
-    acc += texture(uSoft, vUv + step * 2.0).rgb * 0.10;
-    acc += texture(uSoft, vUv + step * 3.0).rgb * 0.08;
-    acc += texture(uSoft, vUv + step * 4.0).rgb * 0.07;
-    acc += texture(uSoft, vUv + step * 5.0).rgb * 0.06;
-    acc += texture(uSoft, vUv + step * 6.0).rgb * 0.05;
-    acc += texture(uSoft, vUv + step * 7.0).rgb * 0.03;
-    acc += texture(uSoft, vUv + step * 8.0).rgb * 0.03;
-    c = mix(acc, c, sharp);
+    if (span > 8.0) step *= 8.0 / span;
+    vec3 tail = texture(uSoft, vUv + step).rgb * 0.34;
+    tail += texture(uSoft, vUv + step * 2.0).rgb * 0.28;
+    tail += texture(uSoft, vUv + step * 3.0).rgb * 0.22;
+    tail += texture(uSoft, vUv + step * 4.0).rgb * 0.16;
+    c = mix(c, tail, (1.0 - sharp) * 0.42);
   }
   o = vec4(c, 1.0);
 }`;
@@ -458,6 +462,7 @@ export const POST_SOURCES = {
   compositeHigh: [POST_VS, COMPOSITE_HIGH_FS],
   finishHigh: [POST_VS, FINISH_HIGH_FS],
   reflect: [POST_VS, REFLECT_FS],
+  downsample: [POST_VS, DOWNSAMPLE_FS],
 };
 
 function colorTex(gl, w, h, hdr) {
@@ -622,7 +627,10 @@ export function createPost(gl, compiler) {
   let quartB = null;
   let aoBuf = null;
   let flat = null;
+  let eighth = null;
   let reflBuf = null;
+  let downProg = null;
+  let locDown = null;
   let tiny = null;
   let primed = false;
   let aoLive = false;
@@ -639,9 +647,12 @@ export function createPost(gl, compiler) {
     dropTarget(gl, quartB);
     dropTarget(gl, aoBuf);
     dropTarget(gl, flat);
+    dropTarget(gl, eighth);
     dropTarget(gl, reflBuf);
     dropTarget(gl, tiny);
-    scene = shadow = halfA = halfB = quartA = quartB = aoBuf = flat = reflBuf = tiny = null;
+    scene = shadow = halfA = halfB = quartA = quartB = aoBuf = flat = eighth = reflBuf = tiny = null;
+    downProg = null;
+    locDown = null;
     primed = false;
     aoLive = false;
   }
@@ -736,6 +747,15 @@ export function createPost(gl, compiler) {
           flat = null;
         }
       }
+      if (profile && profile.tier === "high") {
+        const ew = Math.max(1, w >> 3);
+        const eh = Math.max(1, h >> 3);
+        if (!eighth || eighth.w !== ew || eighth.h !== eh) {
+          dropTarget(gl, eighth);
+          try { eighth = target(gl, ew, eh, false, false); } catch { eighth = null; }
+          if (!eighth || !eighth.ok) eighth = null;
+        }
+      }
       const wantReflect = !!(profile && profile.tier === "high" && profile.reflect > 0 && scene && scene.depthTex);
       if (wantReflect) {
         const rw = Math.max(1, w >> 2);
@@ -757,6 +777,31 @@ export function createPost(gl, compiler) {
     gl.bindVertexArray(vao);
     gl.useProgram(prog);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+
+  function ensureDown() {
+    if (downProg && locDown) return true;
+    downProg = take("downsample", POST_VS, DOWNSAMPLE_FS);
+    if (!downProg) return false;
+    locDown = {
+      tex: gl.getUniformLocation(downProg, "uTex"),
+      texel: gl.getUniformLocation(downProg, "uTexel"),
+    };
+    return true;
+  }
+
+  function downsample(src, dest) {
+    if (!ensureDown() || !src || !dest) return false;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, dest.fb);
+    gl.viewport(0, 0, dest.w, dest.h);
+    gl.useProgram(downProg);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, src.tex);
+    gl.uniform1i(locDown.tex, 0);
+    gl.uniform2f(locDown.texel, 1 / src.w, 1 / src.h);
+    gl.bindVertexArray(vao);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    return true;
   }
 
   function blurPass(src, dirX, dirY, dest) {
@@ -868,6 +913,12 @@ export function createPost(gl, compiler) {
     gl.uniform1f(locR.amt, 0.4);
     gl.uniform1f(locR.time, 0);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+    if (ensureDown()) {
+      gl.useProgram(downProg);
+      gl.uniform1i(locDown.tex, 0);
+      gl.uniform2f(locDown.texel, 0.25, 0.25);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
     gl.bindFramebuffer(gl.FRAMEBUFFER, prev);
     primed = true;
   }
@@ -921,7 +972,10 @@ export function createPost(gl, compiler) {
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
     const highPic = !!(profile && profile.tier === "high" && ensureHighShaders());
-    if (highPic) primeHigh();
+    if (highPic) {
+      primeHigh();
+      ensureDown();
+    }
     reflectOn = false;
     if (highPic && tone.reflect > 0 && reflBuf && scene.depthTex && tone.invProj && tone.proj) {
       if (tone.span) tone.span("reflect");
@@ -998,14 +1052,8 @@ export function createPost(gl, compiler) {
     gl.bindVertexArray(vao);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     let softTex = null;
-    if (highPic && tone.blur > 0.001 && dest && flat && quartA && quartB) {
-      // Wide prefilter. The last passes cover about 48px, wider than the
-      // 24px finish step, so the tail is one streak.
-      blurPass(flat, 2 / flat.w, 0, quartA);
-      blurPass(quartA, 0, 2 / quartA.h, quartB);
-      blurPass(quartB, 4 / quartB.w, 0, quartA);
-      blurPass(quartA, 0, 4 / quartA.h, quartB);
-      softTex = quartB.tex;
+    if (highPic && tone.blur > 0.001 && dest && flat && eighth && downsample(flat, eighth)) {
+      softTex = eighth.tex;
     }
     if (dest) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);

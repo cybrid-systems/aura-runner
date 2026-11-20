@@ -1252,7 +1252,8 @@ export function createRenderer(canvas, hooks) {
     gl = null;
   }
   if (!gl) return null;
-  let sky, mesh, meshBox, meshPat, meshBall, tri, cubeBuf, inst, vao, u, um, ub, up, uBall, castBuf;
+  let sky, mesh, meshBox, meshPat, meshBall, tri, cubeBuf, inst, vao, u, um, ub, up, uBall, castBuf, rimBuf;
+  const rimData = new Float32Array(3 * STRIDE);
   const data = new Float32Array(MAX * STRIDE);
   const proj = new Float32Array(16);
   const view = new Float32Array(16);
@@ -1299,6 +1300,9 @@ export function createRenderer(canvas, hooks) {
     castBuf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, castBuf);
     gl.bufferData(gl.ARRAY_BUFFER, CAST_MAX * STRIDE * 4, gl.DYNAMIC_DRAW);
+    rimBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, rimBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, rimData.byteLength, gl.DYNAMIC_DRAW);
     vao = gl.createVertexArray();
     gl.bindVertexArray(vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, cubeBuf);
@@ -2271,10 +2275,10 @@ export function createRenderer(canvas, hooks) {
           if (mark) {
             const mid = mark[1] + mark[2] * 0.5;
             const at = sample(mid, laneX(mark.length > 5 && mark[5] >= 0 ? mark[5] : lane));
-            rimFlash = { x: at.x, y: 0.7, z: at.z, psi: at.psi, life: 0.22 };
+            rimFlash = { x: at.x, y: 0.7, z: at.z, psi: at.psi, life: 0.22, side };
           } else if (cue) {
             const at = sample(pz + (Number(cue.ahead) || 1.4), px + side * 1.8);
-            rimFlash = { x: at.x, y: 0.7, z: at.z, psi: at.psi, life: 0.22 };
+            rimFlash = { x: at.x, y: 0.7, z: at.z, psi: at.psi, life: 0.22, side };
           }
         }
       }
@@ -3502,10 +3506,6 @@ export function createRenderer(canvas, hooks) {
       push(dust[o], Math.max(0.08, dust[o + 1]), dust[o + 2], puff, puff * 0.55, puff, 1, [0.92, 0.78, 0.52], 0.8, 0.14);
       dustN++;
     }
-    if (rimFlash && rimFlash.life > 0 && activeProfile.tier === "high" && n < MAX - 4) {
-      const k = Math.max(0, rimFlash.life / 0.22);
-      push(rimFlash.x, rimFlash.y, rimFlash.z, 1.05, 0.95, 0.38, 0, [1, 0.96, 0.8], 0.16, 0.4 + k * 0.85, rimFlash.psi);
-    }
     if (activeProfile.tier === "high" && !reduced && n < MAX - 8) {
       if (st.event === "coin") {
         for (let i = 0; i < 5 && i < COIN_MAX; i++) {
@@ -3743,6 +3743,38 @@ export function createRenderer(canvas, hooks) {
     drawSpan(ballProg, ballLoc, lo, mid - lo, false, 0);
     drawSpan(marchProg, marchLoc, mid, n - mid, !usePost, 0);
     gl.disable(gl.SAMPLE_ALPHA_TO_COVERAGE);
+    if (useHigh && rimFlash && rimFlash.life > 0 && rimBuf) {
+      const k = Math.max(0, Math.min(1, rimFlash.life / 0.22));
+      const ax = roadAxes(rimFlash.psi || 0);
+      const face = -(rimFlash.side || 1);
+      const ex = rimFlash.x + ax.rx * face * 0.46;
+      const ez = rimFlash.z + ax.rz * face * 0.46;
+      const emit = 0.45 + k * 1.15;
+      const warm = [1, 0.93, 0.72];
+      const put = (i, x, y, z, sx, sy, sz, e) => {
+        const o = i * STRIDE;
+        rimData[o] = x; rimData[o + 1] = y; rimData[o + 2] = z; rimData[o + 3] = 0;
+        rimData[o + 4] = sx; rimData[o + 5] = sy; rimData[o + 6] = sz; rimData[o + 7] = 0.18;
+        rimData[o + 8] = warm[0]; rimData[o + 9] = warm[1]; rimData[o + 10] = warm[2]; rimData[o + 11] = e;
+        rimData[o + 12] = rimFlash.psi || 0; rimData[o + 13] = 0; rimData[o + 14] = 0.35; rimData[o + 15] = 0;
+      };
+      put(0, ex, rimFlash.y, ez, 0.035, 1.02 * (0.45 + 0.55 * k), 0.035, emit);
+      put(1, ex, rimFlash.y + 0.5 * k, ez, 0.62 * (0.4 + 0.6 * k), 0.028, 0.04, emit * 0.85);
+      put(2, ex - ax.tx * 0.18, rimFlash.y + 0.2, ez - ax.tz * 0.18, 0.03, 0.03, 0.55 * (0.35 + 0.65 * k), emit * 0.7);
+      gl.bindBuffer(gl.ARRAY_BUFFER, rimBuf);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, rimData);
+      for (let i = 0; i < 4; i++) {
+        gl.vertexAttribPointer(2 + i, 4, gl.FLOAT, false, STRIDE * 4, i * 16);
+      }
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE);
+      gl.depthMask(false);
+      bindMesh(boxProg, boxLoc);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 36, 3);
+      gl.disable(gl.BLEND);
+      gl.depthMask(true);
+      gl.blendFunc(gl.ONE, gl.ZERO);
+    }
     if (usePost && post) {
       const graded = sceneGrade(pal);
       post.present(w, h, activeProfile, {

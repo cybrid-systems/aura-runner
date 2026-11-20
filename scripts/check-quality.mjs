@@ -443,7 +443,8 @@ const postText = readFileSync(new URL("../web/post.mjs", import.meta.url), "utf8
 assert(postText.includes("KHR_parallel_shader_compile"), "post can compile without stalling the frame");
 assert(postText.includes("FINISH_FS") && !postText.slice(postText.indexOf("const FINISH_FS"), postText.indexOf("const COMPOSITE_HIGH_FS")).includes("uHero"), "medium finish does not mask a hero");
 assert(postText.includes("uHero"), "high finish keeps the hero sharp");
-assert(postText.includes("uSoft") && postText.includes("24.0 / span"), "speed blur samples a prefilter inside 24px");
+assert(postText.includes("uSoft") && postText.includes("8.0 / span"), "speed blur steps at most 8px on the eighth-res tail");
+assert(postText.includes("DOWNSAMPLE_FS") && !postText.includes("blurPass(flat, 2 / flat.w"), "speed blur does not run four full-frame passes");
 const pageText = readFileSync(new URL("../web/main.mjs", import.meta.url), "utf8");
 assert(pageText.includes("window.__lumenForceNear"), "a recording can force one near miss");
 assert(renderSrc.includes("softwareFromRenderer(gpuName)") && renderSrc.includes("quality.mode === \"low\""), "a forced low tier does not warm high shaders");
