@@ -2,7 +2,7 @@
 
 A kid-friendly 3D runner whose worlds, runner, and phrases are evolved live by [Aura](https://github.com/cybrid-systems/aura).
 
-[![Lumen Run demo poster: Garden, Beijing, Space, and Aurora Ice](docs/media/lumen-run-demo.jpg)](docs/media/lumen-run-demo.mp4)
+![Lumen Run demo poster: Garden, Beijing, Space, and Aurora Ice](docs/media/lumen-run-demo.jpg)
 
 Hero on autopilot, voice switches worlds, each new world is an Aura Biome EDSL form gated by `evo:trial` KEEP/ROLLBACK, rebound live with no restart.
 
@@ -127,7 +127,7 @@ lib/       Biome EDSL, physics, voice, pals, hearts, race
 scripts/   Checks, seeded play-review, LLM probe
 bridge/    Static page and the WebSocket bridge. ./run.sh starts it
 docker/    Container entrypoint. ./play.sh starts the image
-docs/      Demo poster and video
+docs/      Demo poster
 ```
 
 ## Checks
