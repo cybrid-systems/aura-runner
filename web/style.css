@@ -20,6 +20,48 @@ html, body {
   height: 100%;
   display: block;
 }
+#boot[hidden] { display: none; }
+#boot {
+  position: fixed;
+  z-index: 20;
+  left: 50%;
+  bottom: max(24px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: min(360px, 92vw);
+  padding: 16px 18px 14px;
+  border-radius: 16px;
+  background: rgba(255, 246, 232, 0.96);
+  color: var(--ink);
+  box-shadow: 0 8px 28px rgba(92, 52, 20, 0.18);
+}
+#boot-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+}
+#boot-step {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+}
+#boot-track {
+  width: min(280px, 70vw);
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(92, 52, 20, 0.18);
+  overflow: hidden;
+}
+#boot-bar {
+  width: 6%;
+  height: 100%;
+  border-radius: inherit;
+  background: #e07a2f;
+  transition: width 0.2s ease;
+}
 #nogpu[hidden] { display: none; }
 #nogpu {
   position: fixed;

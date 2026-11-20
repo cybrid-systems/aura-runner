@@ -169,6 +169,19 @@ function attachSocket(ws) {
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://127.0.0.1");
   let rel = decodeURIComponent(url.pathname);
+  if (rel === "/boot") {
+    const note = path.join(root, "out/boot.txt");
+    fs.readFile(note, "utf8", (err, text) => {
+      if (err) {
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+      res.end(text);
+    });
+    return;
+  }
   if (rel === "/favicon.ico" || rel === "/apple-touch-icon.png" || rel === "/apple-touch-icon-precomposed.png") {
     res.writeHead(204);
     res.end();

@@ -10,6 +10,11 @@
 </head>
 <body>
   <canvas id="view" tabindex="0"></canvas>
+  <div id="boot" role="status" aria-live="polite">
+    <p id="boot-title">花园正在打开</p>
+    <p id="boot-step">正在启动</p>
+    <div id="boot-track"><div id="boot-bar"></div></div>
+  </div>
   <p id="nogpu" hidden>This browser has no WebGL2. The garden is drawn flat so the run can continue.</p>
   <p id="toast" hidden lang="zh-CN" aria-live="polite"></p>
   <div id="flash" hidden></div>

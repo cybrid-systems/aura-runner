@@ -127,7 +127,7 @@ time. It is now the library's body (`lib/phys.aura`).
 
 ## The run on aura v0.2.5
 
-Both targets were re-run on **aura v0.2.5** (`7167490e`, the release
+Both targets were re-run on **aura v0.2.5** (tag `v0.2.5`, `21ec25bd`, the release
 tarball) with the runtime probe passing (the named-let reentrancy of
 cybrid-systems/aura#5116 is fixed there).
 

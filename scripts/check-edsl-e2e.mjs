@@ -49,7 +49,7 @@ function session(sock) {
   });
   return {
     send(obj) { sock.write(JSON.stringify(obj) + "\n"); },
-    next(ms = 8000) {
+    next(ms = 25000) {
       if (sock._queue.length) return Promise.resolve(sock._queue.shift());
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => reject(new Error("read timeout")), ms);

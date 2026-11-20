@@ -3,7 +3,7 @@ entry = "core/main.aura"
 preset = "dev"
 out = "out"
 
-# Rolling Aura nightly from main. CI uses ghcr.io/cybrid-systems/aura:nightly.
-# To reproduce one run, pin that image's commit tag instead.
+# Rolling Aura nightly from main. ./run.sh downloads that prebuilt release.
+# AURA_VERSION=v0.2.7 pins one tag. CI's aura test job uses the nightly image.
 [dependencies]
 aura = "nightly"

@@ -96,8 +96,10 @@ jobs:
           bin="$(install_aura "$RUNNER_TEMP")"
           echo "$(dirname "$bin")" >> "$GITHUB_PATH"
           "$bin" --version
-      - name: First install from an empty tools directory
+      - name: First install from an empty cache
         run: bash scripts/check-install.sh
+      - name: No-compile ./run.sh
+        run: bash scripts/check-runsh.sh
       - name: Seeded end-to-end run
         run: node scripts/smoke.mjs
       - name: Mock LLM rebind
