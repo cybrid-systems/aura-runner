@@ -20,11 +20,12 @@ export const POLICY_TEXT = `(quality lumen
   (demote-p95 0.92)
   (cooldown-ms 4500)
   (promote-cooldown-ms 8000)
-  (gap-slack 1.2)
+  (repromote-ms 60000)
+  (gap-slack 1.5)
   (start low)
   (software-cap low)
   (reduced-auto low)
-  (dpr-medium 1.25)
+  (dpr-medium 2)
   (dpr-high 2)
   (shadow-medium 1024)
   (shadow-high 2048)
@@ -43,6 +44,7 @@ const POLICY_KEYS = {
   "demote-p95": "demoteP95",
   "cooldown-ms": "cooldownMs",
   "promote-cooldown-ms": "promoteCooldownMs",
+  "repromote-ms": "repromoteMs",
   "gap-slack": "gapSlack",
   start: "start",
   "software-cap": "softwareCap",
@@ -142,9 +144,10 @@ export function writeQualityMode(storage, mode) {
   }
 }
 
+// One detector for the 1× cap and for Auto. WARP shows up as Basic Render.
 export function softwareFromRenderer(name) {
   if (!name) return false;
-  return /swiftshader|llvmpipe|softpipe|software|basic render/i.test(String(name));
+  return /swiftshader|llvmpipe|softpipe|software|basic render|\bwarp\b/i.test(String(name));
 }
 
 // Caps the picture can actually build. A missing debug extension leaves
@@ -176,10 +179,25 @@ export function frameBudget(policy, refreshHz) {
   return 1000 / hz;
 }
 
+// A late frame is a dropped refresh, not vsync jitter. 1.5× the interval
+// sits above the 6.5–10.3 ms scatter of a healthy 120 Hz panel and below
+// a missed vsync (about 2×).
 export function gapLimit(policy, refreshHz) {
-  const slack = (policy && policy.gapSlack) || 1.2;
+  const slack = (policy && policy.gapSlack) || 1.5;
   const hz = refreshHz > 0 ? refreshHz : ((policy && policy.targetHz) || 60);
   return (1000 / hz) * slack;
+}
+
+// Low's cap is the floor. Medium and High may match it or go higher, and
+// a software or slow-frame cap still applies to every tier.
+export function resolutionScale(tier, deviceDpr, baseCap, policy) {
+  const use = policy || DEFAULT_POLICY;
+  const device = deviceDpr > 0 ? deviceDpr : 1;
+  const base = baseCap > 0 ? baseCap : device;
+  const low = Math.min(device, base);
+  const want = tier === "high" ? use.dprHigh : tier === "medium" ? use.dprMedium : low;
+  const raised = Math.max(low, Number(want) || low);
+  return Math.min(device, base, raised);
 }
 
 function autoCap(state) {
@@ -207,6 +225,7 @@ export function createQuality(policy, caps, now = 0) {
     refreshHz: use.targetHz || 60,
     refreshGuess: 0,
     refreshStreak: 0,
+    blockedUntil: { medium: 0, high: 0 },
     changes: [],
     now,
   };
@@ -226,6 +245,7 @@ export function setMode(state, mode, now = 0) {
   state.bad = 0;
   state.samples = [];
   state.pending = 0;
+  state.blockedUntil = { medium: 0, high: 0 };
   if (mode === "auto") {
     const start = state.caps.software ? (state.policy.softwareCap || "low") : (state.policy.start || "low");
     state.tier = clampTier(start, autoCap(state));
@@ -329,8 +349,9 @@ function snapshot(state, extra) {
 }
 
 // One sample is one drawn frame. Promotion needs several quiet windows.
-// A p95 miss demotes on the next window, then a cooldown holds the tier
-// so the two cannot chase each other.
+// A p95 of real dropped refreshes demotes on the next window. The tier
+// that was just left stays blocked for repromoteMs, so a miss does not
+// climb straight back.
 export function observe(state, sample) {
   if (!state) return null;
   const now = (sample && sample.now) || 0;
@@ -368,23 +389,33 @@ export function observe(state, sample) {
     state.bad++;
     state.good = 0;
     if (state.bad >= state.policy.demoteWindows && tierRank(state.tier) > 0) {
+      const left = state.tier;
       state.tier = TIERS[tierRank(state.tier) - 1];
       state.bad = 0;
       state.good = 0;
       state.samples = [];
       state.cooldownUntil = now + state.policy.cooldownMs;
+      if (!state.blockedUntil) state.blockedUntil = { medium: 0, high: 0 };
+      state.blockedUntil[left] = now + (state.policy.repromoteMs || 60000);
       remember(state, now, "demote");
     }
   } else if (p95work <= state.policy.promoteP95 && p95gap < limit && tierRank(state.tier) < tierRank(cap)) {
-    state.good++;
-    state.bad = 0;
-    if (state.good >= state.policy.promoteWindows) {
-      state.tier = TIERS[tierRank(state.tier) + 1];
+    const next = TIERS[tierRank(state.tier) + 1];
+    const blocked = state.blockedUntil && state.blockedUntil[next] > now;
+    if (blocked) {
       state.good = 0;
       state.bad = 0;
-      state.samples = [];
-      state.cooldownUntil = now + state.policy.promoteCooldownMs;
-      remember(state, now, "promote");
+    } else {
+      state.good++;
+      state.bad = 0;
+      if (state.good >= state.policy.promoteWindows) {
+        state.tier = next;
+        state.good = 0;
+        state.bad = 0;
+        state.samples = [];
+        state.cooldownUntil = now + state.policy.promoteCooldownMs;
+        remember(state, now, "promote");
+      }
     }
   } else {
     state.good = 0;

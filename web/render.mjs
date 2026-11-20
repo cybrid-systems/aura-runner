@@ -3,7 +3,7 @@ import { DEPTH_FS, litFragment, litSky } from "./lit.mjs";
 import { createPost, probeFloat } from "./post.mjs";
 import {
   DEFAULT_POLICY, bindContextLoss, contextPlan, createQuality, noteFbo,
-  noteReduced, noteRefresh, noteVisibility, observe, probeCaps, setMode,
+  noteReduced, noteRefresh, noteVisibility, observe, probeCaps, resolutionScale, setMode,
   softwareFromRenderer, tierProfile,
 } from "./quality.mjs";
 
@@ -1280,10 +1280,10 @@ export function createRenderer(canvas, hooks) {
   const gpuName = gpuInfo
     ? `${gl.getParameter(gpuInfo.UNMASKED_VENDOR_WEBGL) || ""} ${gl.getParameter(gpuInfo.UNMASKED_RENDERER_WEBGL) || ""}`
     : "";
-  let dprCap = /swiftshader|llvmpipe|softpipe|software/i.test(gpuName) ? 1 : 2;
+  const software = softwareFromRenderer(gpuName);
+  let dprCap = software ? 1 : 2;
   const msaa = gl.getParameter(gl.SAMPLES) || 0;
   const maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE) || 0;
-  const software = softwareFromRenderer(gpuName);
   let floatFb = false;
   try { floatFb = probeFloat(gl); } catch { floatFb = false; }
   const quality = createQuality(DEFAULT_POLICY, probeCaps({
@@ -1486,10 +1486,7 @@ export function createRenderer(canvas, hooks) {
   let dustStep = 0;
 
   function resize() {
-    const prof = tierProfile(quality.tier, quality.policy, quality.caps);
-    let cap = dprCap;
-    if (prof.dpr) cap = Math.min(cap, prof.dpr);
-    const dpr = Math.min(cap, window.devicePixelRatio || 1);
+    const dpr = resolutionScale(quality.tier, window.devicePixelRatio || 1, dprCap, quality.policy);
     w = Math.max(1, Math.floor(canvas.clientWidth * dpr));
     h = Math.max(1, Math.floor(canvas.clientHeight * dpr));
     if (canvas.width !== w || canvas.height !== h) {
@@ -2021,8 +2018,7 @@ export function createRenderer(canvas, hooks) {
       gl.uniform1f(locs.sunAmt, skyShow.shader * (pal.disc == null ? 1 : pal.disc));
       // The full-screen streak is a real-GPU extra. SwiftShader keeps the
       // few road-edge quads below and skips this pass.
-      const softwareGL = /swiftshader|llvmpipe|softpipe|software/i.test(gpuName);
-      const rush = !reduced && speed >= 12 && !softwareGL ? 1 : 0;
+      const rush = !reduced && speed >= 12 && !software ? 1 : 0;
       gl.uniform1f(locs.rush, rush);
       gl.uniform1f(locs.stars, pal.stars || 0);
       gl.uniform3fv(locs.nebula, pal.nebula || [0, 0, 0]);
