@@ -84,6 +84,14 @@ configure_llm
 : > "$AURA_EVO_LOG" || true
 rm -f out/aura.port
 
+# The core compiles before it prints PORT. A cold compile is often past
+# 8s, so the default budget is 60s. AURA_CORE_WAIT overrides it (seconds).
+core_wait="${AURA_CORE_WAIT:-60}"
+if ! [[ "$core_wait" =~ ^[1-9][0-9]*$ ]]; then
+  echo "AURA_CORE_WAIT must be a positive number of seconds" >&2
+  exit 1
+fi
+
 "$AURA_BIN" --quiet --preset dev --grant network core/main.aura > out/aura.log 2>&1 &
 AURA_PID=$!
 WEB_PID=""
@@ -94,20 +102,22 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-for _ in $(seq 1 80); do
+echo "compiling Aura core…" >&2
+deadline=$((SECONDS + core_wait))
+while (( SECONDS < deadline )); do
   if grep -q "PORT " out/aura.log 2>/dev/null; then
     break
   fi
   if ! kill -0 "$AURA_PID" 2>/dev/null; then
     echo "Aura core exited" >&2
-    cat out/aura.log >&2
+    tail -n 40 out/aura.log >&2 || true
     exit 1
   fi
   sleep 0.1
 done
-if ! grep -q "PORT " out/aura.log; then
+if ! grep -q "PORT " out/aura.log 2>/dev/null; then
   echo "Aura core did not listen" >&2
-  cat out/aura.log >&2
+  tail -n 40 out/aura.log >&2 || true
   exit 1
 fi
 
