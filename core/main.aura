@@ -22,6 +22,7 @@
 (require "lib/race")
 (require "lib/world")
 (require "lib/primer")
+(require "lib/music")
 
 (define SYS
   "You design one obstacle phrase for a children's 3D endless runner called Lumen Run. The runner has three lanes (0 left, 1 centre, 2 right), jumps, and slides. No markdown. Allowed pieces: (seq (ground W) (gap W) (hurdle H W) (gate BOTTOM W) (coin Y) (spring W) (block LANE DEPTH) (coin-lane LANE Y)). Every parameter is a number; never write the words BOTTOM, W, H, LANE, DEPTH or other placeholders. Ranges in meters: spring W 0.45-1.6, hurdle W 0.35-2.2 and H 0.15-0.9, gate W 0.35-2.0 and BOTTOM 0.58-0.85, coin Y 0.4-2.4, coin-lane LANE 0, 1 or 2 and Y 0.4-2.4, ground W 0.8-18, gap W 0.4-2.0, block LANE 0, 1 or 2 and DEPTH 0.5-2.2. Optional (loot KIND) restyles every pickup. KIND is coin, star, gem, blossom, or apple. Optional (bend AMP) turns the road. AMP is 0.12 to 0.65. Start and end with ground. Leave at least one lane open beside every block. No violence, fear, weapons, or scary words. Bright garden, friendly shapes. First write one short bright English sentence with no parentheses, then the s-expression. That sentence is what the child reads. A ground of 10.4 is one beat, about 1.3 seconds, and a ground of 4.8 is a short rest. Leave a full beat of ground before a jump. Optional (flyer KIND LANE Y) sends one gentle toy flying toward the runner along one lane. KIND is plane, bubble, lantern, leaf, or ball. LANE is 0, 1 or 2. Y is 0.55 to 0.85. At most two flyers, and never on every lane at once. Optional last word on a hurdle, a gate, or a block picks its look. A hurdle is bar, log, fence, bloom, or drum. A gate is bar, ribbon, vine, lights, or scarf. A block is pot, stump, mushroom, crate, or bush. A low wide shape is a jump, a bar with room underneath is a slide, and one tall shape in a single lane is a lane change. Recolor a shape freely. One beat holds one move. Example: (seq (ground 6) (block 0 1) (hurdle 0.4 0.7) (ground 5) (gate 0.72 0.8) (ground 5) (gap 1.1) (ground 5))")
@@ -46,6 +47,9 @@
 (define motif-now "")
 (define motif-pieces (list))
 (define motif-span 0.0)
+(define tune-now music-home)
+(define tune-prev music-home)
+(define tune-due #f)
 (define scene-now default-scene)
 (define pals-now default-pals)
 (define pals-rows (list))
@@ -794,7 +798,8 @@
              (gate-line (level-clear-line combo near overs) race mood)
              "level"))
     (queue-chase! played bumps (chase-sum chase-recent) speed-now race)
-    (roster-evolve! "Level clear")))
+    (roster-evolve! "Level clear")
+    (set! tune-due #t)))
 
 ; Three coins in one level step the multiplier once. A gate does not
 ; clear a combo, and this counter starts over for the next level only.
@@ -1146,6 +1151,9 @@
   (set! motif-now "")
   (set! motif-pieces (list))
   (set! motif-span 0.0)
+  (set! tune-now music-home)
+  (set! tune-prev music-home)
+  (set! tune-due #f)
   (set! next-dream 1500.0)
   (set! motif-next 2500.0)
   (set! scene-next 5000.0)
@@ -1210,7 +1218,8 @@
         "level" level-n "goal" level-x1 "level0" level-x0
         "mult" run-mult "biome" biome-now "mood" mood-now "spec" edsl-spec
         "banner-id" banner-id "banner-kind" banner-kind
-        "banner" banner-text "banner-gain" banner-gain))
+        "banner" banner-text "banner-gain" banner-gain
+        "tune" (tune-public)))
 
 (define (welcome-msg)
   (hash "op" "welcome" "seed" seed
@@ -1238,7 +1247,8 @@
         "props" props "sun-hide" sun-hide "shown" shown
         "mult" run-mult "biome" biome-now "mood" mood-now "spec" edsl-spec
         "banner-id" banner-id "banner-kind" banner-kind
-        "banner" banner-text "banner-gain" banner-gain))
+        "banner" banner-text "banner-gain" banner-gain
+        "tune" (tune-public)))
 
 ; The event is part of the hash when it is built. A later hash-set! on
 ; this value is the site cybrid-systems/aura #5274 exits from.
@@ -4061,6 +4071,42 @@
     ((>= n 99.0) 99)
     (else (floor (+ n 0.001)))))
 
+(define (tune-public)
+  (let ((found (music-check tune-now)))
+    (if (and (hash? found) (hash-ref found "ok" #f))
+      (music-pub found)
+      #f)))
+
+; The phrase is queued, not installed on this tick. The page swaps it
+; on the next bar. A harsh proposal never replaces tune-now.
+(define (tune-send! kind why form)
+  (let ((pub (music-pub (music-check form))))
+    (if (not (hash? pub))
+      #f
+      (begin
+        (set! pending (cons
+          (hash "op" "decision" "kind" kind "why" why "arm" "tune"
+                "via" publish-via "cue" "" "mark" "tune" "ask" ""
+                "tune" pub)
+          pending))
+        #t))))
+
+(define (tune-commit!)
+  (set! tune-due #f)
+  (let ((born (music-evolve tune-now (+ (floor seed) level-n))))
+    (let ((gate (music-gate born)))
+      (if (string=? (hash-ref gate "verdict" "") "KEEP")
+        (begin
+          (set! tune-prev tune-now)
+          (set! tune-now born)
+          (tune-send! "KEEP" "fair" born))
+        (tune-send! "ROLLBACK" (hash-ref gate "why" "bounds") tune-now)))))
+
+(define (maybe-tune!)
+  (if (and tune-due (not (llm-posting?)) (not trial-open))
+    (try (tune-commit!) (catch (e) (set! tune-due #f)))
+    #f))
+
 (define (on-tick c msg)
   (note-hearts! msg)
   (absorb-skill! msg)
@@ -4101,6 +4147,8 @@
       #f)
     ; Decisions go out before state. The rebind check stops at state, so a
     ; note sent after it can sit unread when the deadline lands on that tick.
+    ; A level's tune trial waits until no chat is holding the slot.
+    (maybe-tune!)
     (flush-notes! c)
     (send c (state-msg ev))))
 
