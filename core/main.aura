@@ -1988,8 +1988,13 @@
                   (note! "ROLLBACK" "commit" "scene" "The garden stayed"))))))
             (release-slot!)))))))
 
-(define (keep-pals! canon merged say hero changed?)
-  (let ((found #f))
+; rest is an optional note arm. Guest cars pass "guest" so a rolled-in
+; car is not read as a model phrase that restyled the runner.
+(define (keep-pals! canon merged say hero changed? . rest)
+  (let ((found #f)
+        (arm (if (and (pair? rest) (string? (car rest)) (> (string-length (car rest)) 0))
+               (car rest)
+               "pals")))
     (let* ((cand (evo:candidate canon (hash "id" (string-append "p" (int-str next-id))
                                             "target" "pals-form")))
            (trial (open-trial cand
@@ -2016,7 +2021,7 @@
           (note! "ROLLBACK" (if (and found (string? (hash-ref found "why")))
                             (hash-ref found "why")
                             "trial")
-               "pals" "The friends stayed"))
+               arm "The friends stayed"))
         (let ((prev-form pals-now)
               (prev-rows pals-rows)
               (prev-hero hero-now))
@@ -2034,20 +2039,20 @@
                 (set! rule-rev (+ rule-rev 1))
                 (set! rules-dirty #t)
                 (mark-pals! #t changed?)
-                (note! "KEEP" "fair" "pals"
+                (note! "KEEP" "fair" arm
                       (if (and (string? say) (> (string-length say) 0))
                         say
                         (hash-ref merged "cue" "A new friend came along"))
                       (if changed?
                         (if (hash? hero) (hash-ref hero "kind" "keeper") "keeper")
-                        "friend")
+                        (if (string=? arm "pals") "friend" ""))
                       "Who wants to run with us?"))
               (begin
                 (set! pals-now prev-form)
                 (set! pals-rows prev-rows)
                 (set! hero-now prev-hero)
                 (mark-pals! #f #f)
-                (note! "ROLLBACK" "commit" "pals" "The friends stayed")))))
+                (note! "ROLLBACK" "commit" arm "The friends stayed")))))
           (release-slot!)))))))
 
 (define (consider-pals! text say)
@@ -3952,7 +3957,8 @@
                       got
                       (hash-ref got "cue" "A new friend came along")
                       hero-now
-                      #f))))))
+                      #f
+                      "guest"))))))
 
 (define (boot-pals!)
   (let ((found (check-pals default-pals)))
