@@ -2,9 +2,9 @@
 // The picture policy must not change how fast the runner moves.
 import { readFileSync } from "node:fs";
 import { DT, makePlayer, rulesOf, step } from "../web/sim.mjs";
-import { litAnchorsOk, litFragment, litSky, LIGHT_LINE } from "../web/lit.mjs";
-import { meshSources } from "../web/render.mjs";
-import { blurAmount, fovKick, laneEase, sceneGrade, shakeOffset, sunScreen } from "../web/feel.mjs";
+import { highFragment, highSky, litAnchorsOk, litFragment, litSky, LIGHT_LINE } from "../web/lit.mjs";
+import { invertMat, meshSources } from "../web/render.mjs";
+import { blurAmount, fovKick, glossFor, heroShape, laneEase, sceneGrade, shakeOffset, sunScreen, whooshNudge } from "../web/feel.mjs";
 import {
   DEFAULT_POLICY,
   POLICY_TEXT,
@@ -86,11 +86,14 @@ const high = tierProfile("high", DEFAULT_POLICY, gpuCaps);
 assert(high.chain === "half" && high.shadowSize === 2048 && high.pcf === 9 && high.hdr === true, "high profile");
 assert(tierProfile("high", DEFAULT_POLICY, noFbo).tier === "low", "profile follows fbo failure");
 assert(lowProfile.fxaa === false && lowProfile.ssao === 0 && lowProfile.blur === 0 && lowProfile.shaft === 0, "low skips the new passes");
+assert(lowProfile.reflect === 0 && lowProfile.mote === 0 && lowProfile.streak === 0 && lowProfile.whoosh === 0 && lowProfile.aerial === 0 && lowProfile.penumbra === 0, "low has no high-only budgets");
 assert(lowProfile.trail === 0 && lowProfile.dust === 12 && lowProfile.spark === 36 && lowProfile.fovKick === 0, "low keeps the old particle budget");
 assert(lowProfile.grade === 0 && lowProfile.sky === 0 && lowProfile.keep === 0 && lowProfile.back === 0, "low has no grade or evolution cue");
 assert(med.fxaa === true && med.blur === 0 && med.shaft === 0 && med.ssao === 0 && med.hdr === false, "medium is grade and fxaa, not the heavy passes");
+assert(med.reflect === 0 && med.mote === 0 && med.streak === 0 && med.whoosh === 0 && med.aerial === 0 && med.penumbra === 0, "medium does not take the high passes");
 assert(med.fovKick === 0.045 && med.dust === 18 && med.spark === 42 && med.trail === 4 && med.grade === 0.4, "medium budgets");
-assert(high.fxaa === true && high.blur === 0.34 && high.shaft === 0.22 && high.ssao === 0.8, "high atmosphere budgets");
+assert(high.fxaa === true && high.blur === 0.88 && high.shaft === 0.22 && high.ssao === 0.8, "high atmosphere budgets");
+assert(high.reflect === 0.62 && high.mote === 36 && high.streak === 8 && high.whoosh === 0.2 && high.aerial === 0.62 && high.penumbra === 8, "high presentation budgets");
 assert(high.dust === 28 && high.spark === 56 && high.trail === 7 && high.sky === 1 && high.exposure === 1.02, "high counts");
 assert(high.keep === 0.62 && high.back === 0.34, "evolution cue budgets");
 assert(fovKick(8, 0.07) === 0 && Math.abs(fovKick(16, 0.07) - 0.07) < 1e-9, "fov kick waits for speed");
@@ -108,7 +111,20 @@ assert(Math.abs(lat - 1.8) < 0.08, "lane ease arrives, " + lat);
 assert(shakeOffset(0, 1).every((v) => v === 0), "no shake without an amplitude");
 const kick = shakeOffset(0.04, 0.2);
 assert(kick.some((v) => Math.abs(v) > 0) && kick.every((v) => Math.abs(v) <= 0.04), "shake stays inside its budget");
-assert(blurAmount(8, 0.34) === 0 && Math.abs(blurAmount(18, 0.34) - 0.34) < 1e-9, "blur waits for pace");
+assert(blurAmount(8, 0.88) === 0 && blurAmount(9, 0.88) === 0, "blur stays quiet through 9 m/s");
+const blur12 = blurAmount(12, 0.88);
+assert(blur12 > 0.2 && blur12 < 0.28, "12 m/s is already a readable streak, " + blur12);
+assert(Math.abs(blurAmount(18, 0.88) - 0.88) < 1e-9, "blur is full at 18 m/s");
+assert(whooshNudge(0, 0) === 0 && whooshNudge(0.2, 1) === 0, "whoosh is quiet at rest");
+assert(Math.abs(whooshNudge(0.2, 0) - 0.2) < 1e-9 && whooshNudge(0.2, 0.5) < 0.06, "whoosh eases out");
+const shapeLow = heroShape(false, 0.5, 1, "medium");
+assert(Math.abs(shapeLow.squash - (1 - 0.5 * 0.16)) < 1e-9 && Math.abs(shapeLow.widen - (1 + 0.5 * 0.12)) < 1e-9 && Math.abs(shapeLow.lean - -0.35) < 1e-9, "medium hero shape is unchanged");
+const shapeAir = heroShape(true, 0, 0, "low");
+assert(shapeAir.squash === 1.14 && shapeAir.widen === 0.9, "low jump stretch is unchanged");
+const shapeHigh = heroShape(true, 0, 1, "high");
+assert(shapeHigh.squash === 1.28 && shapeHigh.widen === 0.82 && Math.abs(shapeHigh.lean - -0.62) < 1e-9, "high leans and stretches");
+assert(glossFor({ biome: "garden" }) === 0 && glossFor({ biome: "space" }) === 0, "garden and space stay matte");
+assert(glossFor({ biome: "city" }) === 0.85 && glossFor({ biome: "aurora-ice", surface: "ice" }) === 1, "city and ice take the sheen");
 const sunAt = sunScreen(0, 0.95, 16 / 9, [0.74, 0.78]);
 assert(sunAt[0] >= 0 && sunAt[0] <= 1 && sunAt[1] >= 0 && sunAt[1] <= 1, "sun stays on screen");
 const gardenGrade = sceneGrade({ biome: "garden", sky: [0.55, 0.72, 0.95], fog: [0.9, 0.85, 0.75] });
@@ -393,6 +409,37 @@ const animated = litSky("uniform float uFlash;\n" + sky);
 assert(animated.includes("uniform float uSkyAnim") && animated.includes("uSkyAnim > 0.01"), "lit sky animates");
 assert(!sky.includes("uSkyAnim"), "the knee sample stays plain");
 assert(litAnchorsOk(meshSources()), "live mesh shaders accept the lit variant");
+const highBox = highFragment(meshSources()[1]);
+assert(highBox.includes("uGloss") && highBox.includes("uPenumbra") && highBox.includes("highShade"), "high mesh adds gloss, penumbra, and haze");
+assert(!litFragment(meshSources()[1]).includes("uGloss"), "the medium lit shader has no gloss");
+assert(!meshSources()[1].includes("uGloss"), "the low box shader has no gloss");
+const knee = `uniform float uFlash;
+void main() {
+  vec3 over = max(c - vec3(0.9), vec3(0.0));
+  c = min(max(c, vec3(0.0)), vec3(0.9)) + over / (vec3(1.0) + over * 10.0);
+  o = vec4(c, 1.0);
+}`;
+assert(highSky(knee).includes("vec4(max(c, vec3(0.0)), 0.0)"), "high sky keeps alpha for gloss");
+assert(litSky(knee).includes("vec4(max(c, vec3(0.0)), 1.0)"), "medium sky alpha stays 1");
+const id = new Float32Array(16);
+const proj = new Float32Array(16);
+proj[0] = 1.2; proj[5] = 1.8; proj[10] = -1.1; proj[11] = -1; proj[14] = -0.2; proj[15] = 0;
+id.fill(0);
+assert(invertMat(id, proj), "projection inverse");
+let col = 0;
+for (let c = 0; c < 4; c++) {
+  for (let r = 0; r < 4; r++) {
+    let s = 0;
+    for (let k = 0; k < 4; k++) s += id[k * 4 + r] * proj[c * 4 + k];
+    col += Math.abs(s - (r === c ? 1 : 0));
+  }
+}
+assert(col < 1e-5, "inverse rounds back to identity, " + col);
+const postText = readFileSync(new URL("../web/post.mjs", import.meta.url), "utf8");
+assert(postText.includes("KHR_parallel_shader_compile"), "post can compile without stalling the frame");
+assert(postText.includes("FINISH_FS") && !postText.slice(postText.indexOf("const FINISH_FS"), postText.indexOf("const COMPOSITE_HIGH_FS")).includes("uHero"), "medium finish does not mask a hero");
+assert(postText.includes("uHero"), "high finish keeps the hero sharp");
+assert(renderSrc.includes("softwareFromRenderer(gpuName)") && renderSrc.includes("quality.mode === \"low\""), "a forced low tier does not warm high shaders");
 assert(clampTier("high", "medium") === "medium", "clamp");
 
 function present(hz, seconds) {

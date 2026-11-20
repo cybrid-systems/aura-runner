@@ -44,7 +44,7 @@ export const POLICY_TEXT = `(quality lumen
   (fxaa-medium 1)
   (fxaa-high 1)
   (blur-medium 0)
-  (blur-high 0.34)
+  (blur-high 0.88)
   (shaft-medium 0)
   (shaft-high 0.22)
   (ssao-medium 0)
@@ -58,7 +58,19 @@ export const POLICY_TEXT = `(quality lumen
   (spark-medium 42)
   (spark-high 56)
   (keep-pulse 0.62)
-  (rollback-cue 0.34))`;
+  (rollback-cue 0.34)
+  (reflect-medium 0)
+  (reflect-high 0.62)
+  (mote-medium 0)
+  (mote-high 36)
+  (streak-medium 0)
+  (streak-high 8)
+  (whoosh-medium 0)
+  (whoosh-high 0.2)
+  (aerial-medium 0)
+  (aerial-high 0.62)
+  (penumbra-medium 0)
+  (penumbra-high 8))`;
 
 const POLICY_KEYS = {
   "target-hz": "targetHz",
@@ -109,6 +121,18 @@ const POLICY_KEYS = {
   "spark-high": "sparkHigh",
   "keep-pulse": "keepPulse",
   "rollback-cue": "rollbackCue",
+  "reflect-medium": "reflectMedium",
+  "reflect-high": "reflectHigh",
+  "mote-medium": "moteMedium",
+  "mote-high": "moteHigh",
+  "streak-medium": "streakMedium",
+  "streak-high": "streakHigh",
+  "whoosh-medium": "whooshMedium",
+  "whoosh-high": "whooshHigh",
+  "aerial-medium": "aerialMedium",
+  "aerial-high": "aerialHigh",
+  "penumbra-medium": "penumbraMedium",
+  "penumbra-high": "penumbraHigh",
 };
 
 function tokenize(text) {
@@ -499,7 +523,7 @@ export function tierProfile(tier, policy, caps) {
       pcf: 0, shadowSize: 0, bloomAmt: 0, chain: "none",
       fovKick: 0, shake: 0, exposure: 1, grade: 0, fxaa: false,
       blur: 0, shaft: 0, ssao: 0, sky: 0, trail: 0, dust: 12, spark: 36,
-      keep: 0, back: 0,
+      keep: 0, back: 0, reflect: 0, mote: 0, streak: 0, whoosh: 0, aerial: 0, penumbra: 0,
     };
   }
   const high = tier === "high";
@@ -522,6 +546,12 @@ export function tierProfile(tier, policy, caps) {
     grade: high ? use.gradeHigh : use.gradeMedium,
     fxaa: (high ? use.fxaaHigh : use.fxaaMedium) >= 1,
     blur: high ? use.blurHigh : use.blurMedium,
+    reflect: high ? use.reflectHigh : use.reflectMedium,
+    mote: high ? use.moteHigh : use.moteMedium,
+    streak: high ? use.streakHigh : use.streakMedium,
+    whoosh: high ? use.whooshHigh : use.whooshMedium,
+    aerial: high ? use.aerialHigh : use.aerialMedium,
+    penumbra: high ? use.penumbraHigh : use.penumbraMedium,
     shaft: high ? use.shaftHigh : use.shaftMedium,
     ssao: high ? use.ssaoHigh : use.ssaoMedium,
     sky: high ? use.skyHigh : use.skyMedium,

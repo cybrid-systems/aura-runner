@@ -1,7 +1,8 @@
 import { drawThing, growOf, animOf, showBox } from "./thing.mjs";
-import { DEPTH_FS, litFragment, litSky } from "./lit.mjs";
-import { createPost, probeFloat } from "./post.mjs";
-import { blurAmount, fovKick, laneEase, sceneGrade, shakeOffset, sunScreen } from "./feel.mjs";
+import { DEPTH_FS, highFragment, highSky, litFragment, litSky } from "./lit.mjs";
+import { POST_SOURCES, createPost, probeFloat, shaderCompiler } from "./post.mjs";
+import { blurAmount, fovKick, glossFor, heroShape, laneEase, sceneGrade, shakeOffset, sunScreen, whooshNudge } from "./feel.mjs";
+import { skimmed } from "./score.mjs";
 import {
   DEFAULT_POLICY, bindContextLoss, contextPlan, createQuality, noteFbo,
   noteReduced, noteRefresh, noteVisibility, observe, probeCaps, resolutionScale, setMode,
@@ -711,6 +712,45 @@ export function cameraPose(simLx, simY, simZ, fovy = 0.95, bend = 0) {
   };
 }
 
+export function invertMat(out, a) {
+  const a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3];
+  const a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+  const a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+  const a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15];
+  const b00 = a00 * a11 - a01 * a10;
+  const b01 = a00 * a12 - a02 * a10;
+  const b02 = a00 * a13 - a03 * a10;
+  const b03 = a01 * a12 - a02 * a11;
+  const b04 = a01 * a13 - a03 * a11;
+  const b05 = a02 * a13 - a03 * a12;
+  const b06 = a20 * a31 - a21 * a30;
+  const b07 = a20 * a32 - a22 * a30;
+  const b08 = a20 * a33 - a23 * a30;
+  const b09 = a21 * a32 - a22 * a31;
+  const b10 = a21 * a33 - a23 * a31;
+  const b11 = a22 * a33 - a23 * a32;
+  let det = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
+  if (!det) return null;
+  det = 1 / det;
+  out[0] = (a11 * b11 - a12 * b10 + a13 * b09) * det;
+  out[1] = (a02 * b10 - a01 * b11 - a03 * b09) * det;
+  out[2] = (a31 * b05 - a32 * b04 + a33 * b03) * det;
+  out[3] = (a22 * b04 - a21 * b05 - a23 * b03) * det;
+  out[4] = (a12 * b08 - a10 * b11 - a13 * b07) * det;
+  out[5] = (a00 * b11 - a02 * b08 + a03 * b07) * det;
+  out[6] = (a32 * b02 - a30 * b05 - a33 * b01) * det;
+  out[7] = (a20 * b05 - a22 * b02 + a23 * b01) * det;
+  out[8] = (a10 * b10 - a11 * b08 + a13 * b06) * det;
+  out[9] = (a01 * b08 - a00 * b10 - a03 * b06) * det;
+  out[10] = (a30 * b04 - a31 * b02 + a33 * b00) * det;
+  out[11] = (a21 * b02 - a20 * b04 - a23 * b00) * det;
+  out[12] = (a11 * b07 - a10 * b09 - a12 * b06) * det;
+  out[13] = (a00 * b09 - a01 * b07 + a02 * b06) * det;
+  out[14] = (a31 * b01 - a30 * b03 - a32 * b00) * det;
+  out[15] = (a20 * b03 - a21 * b01 + a22 * b00) * det;
+  return out;
+}
+
 function mulMatPoint(m, p) {
   const x = m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12] * p[3];
   const y = m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13] * p[3];
@@ -1235,6 +1275,10 @@ export function createRenderer(canvas, hooks) {
       shadowMat: gl.getUniformLocation(prog, "uShadowMat"),
       shadowOn: gl.getUniformLocation(prog, "uShadowOn"),
       pcf: gl.getUniformLocation(prog, "uPcf"),
+      penumbra: gl.getUniformLocation(prog, "uPenumbra"),
+      aerial: gl.getUniformLocation(prog, "uAerial"),
+      gloss: gl.getUniformLocation(prog, "uGloss"),
+      haze: gl.getUniformLocation(prog, "uHaze"),
     };
   }
   function bootGL() {
@@ -1307,13 +1351,27 @@ export function createRenderer(canvas, hooks) {
   let litBox = null;
   let litPat = null;
   let litBall = null;
+  let highSkyProg = null;
+  let highMesh = null;
+  let highBox = null;
+  let highPat = null;
+  let highBall = null;
   let depthProg = null;
   let uLitSky = null;
+  let uHighSky = null;
   let ulm = null;
   let ulb = null;
   let ulp = null;
   let ulBall = null;
+  let uhm = null;
+  let uhb = null;
+  let uhp = null;
+  let uhBall = null;
   let depthLoc = null;
+  let meshWarm = null;
+  let postWarm = null;
+  let warmFrames = 0;
+  let highReady = false;
   let castN = 0;
   const lightProj = new Float32Array(16);
   const lightView = new Float32Array(16);
@@ -1381,26 +1439,120 @@ export function createRenderer(canvas, hooks) {
     gpuOpen = false;
     try { gl.endQuery(timerExt.TIME_ELAPSED_EXT); } catch { /* context already gone */ }
   }
+  const passQueries = [];
+  const passMs = {};
+  let spanOpen = false;
+  let spanQuery = null;
+  let spanName = "";
+  function pollSpans() {
+    if (!timerExt) return;
+    let i = 0;
+    while (i < passQueries.length) {
+      const item = passQueries[i];
+      let available = false;
+      try { available = !!gl.getQueryParameter(item.q, gl.QUERY_RESULT_AVAILABLE); }
+      catch { i++; continue; }
+      if (!available) { i++; continue; }
+      let disjoint = false;
+      try { disjoint = !!gl.getParameter(timerExt.GPU_DISJOINT_EXT); } catch { disjoint = true; }
+      if (!disjoint) {
+        const ns = gl.getQueryParameter(item.q, gl.QUERY_RESULT);
+        if (ns > 0) passMs[item.name] = ns / 1e6;
+      }
+      gl.deleteQuery(item.q);
+      passQueries.splice(i, 1);
+    }
+  }
+  function endSpan() {
+    if (!spanOpen) return;
+    spanOpen = false;
+    try { gl.endQuery(timerExt.TIME_ELAPSED_EXT); } catch { /* already closed */ }
+    if (spanQuery) passQueries.push({ q: spanQuery, name: spanName });
+    spanQuery = null;
+  }
+  function beginSpan(name) {
+    const forced = typeof window !== "undefined" && !!window.__lumenPassTimers;
+    if (!timerExt || (software && !forced)) return;
+    endSpan();
+    const q = gl.createQuery();
+    if (!q) return;
+    spanQuery = q;
+    spanName = name;
+    gl.beginQuery(timerExt.TIME_ELAPSED_EXT, q);
+    spanOpen = true;
+  }
   bootGL();
 
   function dropLit() {
     litSkyProg = litMesh = litBox = litPat = litBall = depthProg = null;
+    highSkyProg = highMesh = highBox = highPat = highBall = null;
     uLitSky = ulm = ulb = ulp = ulBall = depthLoc = null;
+    uHighSky = uhm = uhb = uhp = uhBall = null;
+    highReady = false;
+    meshWarm = null;
+    postWarm = null;
+    warmFrames = 0;
     if (post) {
       try { post.release(); } catch { /* context already gone */ }
       post = null;
     }
   }
 
-  function ensureLit() {
-    if (litMesh && depthProg) return true;
-    try {
-      litSkyProg = link(gl, SKY_VS, litSky(SKY_FS));
-      litMesh = link(gl, MESH_VS, litFragment(MESH_FS));
-      litBox = link(gl, MESH_VS, litFragment(MESH_FS_BOX));
-      litPat = link(gl, MESH_VS, litFragment(MESH_FS_BOX_PAT));
-      litBall = link(gl, MESH_VS, litFragment(MESH_FS_BALL));
-      depthProg = link(gl, MESH_VS, DEPTH_FS);
+  function kickWarm() {
+    if (software || quality.mode === "low" || meshWarm) return;
+    meshWarm = shaderCompiler(gl);
+    const jobs = [
+      ["litSky", SKY_VS, litSky(SKY_FS)],
+      ["highSky", SKY_VS, highSky(SKY_FS)],
+      ["litMesh", MESH_VS, litFragment(MESH_FS)],
+      ["litBox", MESH_VS, litFragment(MESH_FS_BOX)],
+      ["litPat", MESH_VS, litFragment(MESH_FS_BOX_PAT)],
+      ["litBall", MESH_VS, litFragment(MESH_FS_BALL)],
+      ["highMesh", MESH_VS, highFragment(MESH_FS)],
+      ["highBox", MESH_VS, highFragment(MESH_FS_BOX)],
+      ["highPat", MESH_VS, highFragment(MESH_FS_BOX_PAT)],
+      ["highBall", MESH_VS, highFragment(MESH_FS_BALL)],
+      ["depth", MESH_VS, DEPTH_FS],
+    ];
+    for (let i = 0; i < jobs.length; i++) meshWarm.add(jobs[i][0], jobs[i][1], jobs[i][2]);
+    postWarm = shaderCompiler(gl);
+    const names = Object.keys(POST_SOURCES);
+    for (let i = 0; i < names.length; i++) {
+      const pair = POST_SOURCES[names[i]];
+      postWarm.add(names[i], pair[0], pair[1]);
+    }
+  }
+
+  function pumpWarm() {
+    warmFrames++;
+    if (meshWarm) meshWarm.poll();
+    if (postWarm) {
+      postWarm.patient = !!(postWarm.ext && warmFrames < 24);
+      postWarm.poll();
+    }
+  }
+
+  function takeMesh(name, vs, fs) {
+    if (meshWarm) {
+      meshWarm.add(name, vs, fs);
+      const ready = meshWarm.program(name);
+      if (ready) return ready;
+      if (meshWarm.ext && warmFrames < 24) return null;
+      const linked = meshWarm.linkNow(name);
+      if (linked) return linked;
+    }
+    return link(gl, vs, fs);
+  }
+
+  function adoptLit() {
+    litSkyProg = litSkyProg || takeMesh("litSky", SKY_VS, litSky(SKY_FS));
+    litMesh = litMesh || takeMesh("litMesh", MESH_VS, litFragment(MESH_FS));
+    litBox = litBox || takeMesh("litBox", MESH_VS, litFragment(MESH_FS_BOX));
+    litPat = litPat || takeMesh("litPat", MESH_VS, litFragment(MESH_FS_BOX_PAT));
+    litBall = litBall || takeMesh("litBall", MESH_VS, litFragment(MESH_FS_BALL));
+    depthProg = depthProg || takeMesh("depth", MESH_VS, DEPTH_FS);
+    if (!(litSkyProg && litMesh && litBox && litPat && litBall && depthProg)) return false;
+    if (!uLitSky) {
       uLitSky = skyLocs(litSkyProg);
       ulm = meshLocs(litMesh);
       ulb = meshLocs(litBox);
@@ -1410,6 +1562,33 @@ export function createRenderer(canvas, hooks) {
         proj: gl.getUniformLocation(depthProg, "uProj"),
         view: gl.getUniformLocation(depthProg, "uView"),
       };
+    }
+    return true;
+  }
+
+  function adoptHigh() {
+    if (highReady) return true;
+    highSkyProg = highSkyProg || takeMesh("highSky", SKY_VS, highSky(SKY_FS));
+    highMesh = highMesh || takeMesh("highMesh", MESH_VS, highFragment(MESH_FS));
+    highBox = highBox || takeMesh("highBox", MESH_VS, highFragment(MESH_FS_BOX));
+    highPat = highPat || takeMesh("highPat", MESH_VS, highFragment(MESH_FS_BOX_PAT));
+    highBall = highBall || takeMesh("highBall", MESH_VS, highFragment(MESH_FS_BALL));
+    if (!(highSkyProg && highMesh && highBox && highPat && highBall)) return false;
+    if (!uHighSky) {
+      uHighSky = skyLocs(highSkyProg);
+      uhm = meshLocs(highMesh);
+      uhb = meshLocs(highBox);
+      uhp = meshLocs(highPat);
+      uhBall = meshLocs(highBall);
+    }
+    highReady = true;
+    return true;
+  }
+
+  function ensureLit() {
+    if (litMesh && depthProg) return true;
+    try {
+      if (!adoptLit()) return false;
       return true;
     } catch (err) {
       dropLit();
@@ -1422,10 +1601,14 @@ export function createRenderer(canvas, hooks) {
 
   function ensurePasses(profile) {
     if (!ensureLit()) return false;
+    if (profile && profile.tier === "high") {
+      try { adoptHigh(); } catch (err) { console.error(err); }
+    }
     if (!post) {
-      try { post = createPost(gl); }
-      catch {
+      try { post = createPost(gl, postWarm); }
+      catch (err) {
         post = null;
+        if (err && String(err.message || err).includes("pending")) return false;
         return false;
       }
     }
@@ -1515,6 +1698,9 @@ export function createRenderer(canvas, hooks) {
   let camLatVel = 0;
   let shakeAmp = 0;
   let hitStop = 0;
+  let whooshT = 1;
+  let whooshSide = 0;
+  let rimFlash = null;
   let heldHit = false;
   let keepT = 0;
   let backT = 0;
@@ -1535,6 +1721,10 @@ export function createRenderer(canvas, hooks) {
   const DUST_MAX = 32;
   const sparks = new Float32Array(SPARK_MAX * 8);
   const dust = new Float32Array(DUST_MAX * 8);
+  const MOTE_MAX = 40;
+  const motes = new Float32Array(MOTE_MAX * 8);
+  const COIN_MAX = 12;
+  const coinTrail = new Float32Array(COIN_MAX * 4);
   let prevSparkLim = SPARK_BASE;
   let prevDustLim = DUST_BASE;
   let dustStep = 0;
@@ -1961,12 +2151,17 @@ export function createRenderer(canvas, hooks) {
     }
     try {
     pollGpu();
-    beginGpu();
+    pollSpans();
+    const splitPass = typeof window !== "undefined" && !!window.__lumenPassTimers && quality.tier === "high" && !!timerExt;
+    if (!splitPass) beginGpu();
+    if (!software && quality.mode !== "low") kickWarm();
+    pumpWarm();
+    const pace = typeof window !== "undefined" ? Number(window.__lumenPace) : 0;
     const arrived = dressPalette(palette(st.hue || 0, st.scene), st.biome, st.mood, st.spec);
     const px = st.lx || 0;
     const py = st.y || 0;
     const pz = Number.isFinite(st.x) ? st.x : runS;
-    const speed = st.speed || 5;
+    const speed = pace > 0 ? pace : (st.speed || 5);
     const grav = st.g || 32;
     const alive = st.alive !== false;
     const bend = Number.isFinite(st.bend) ? st.bend : DEFAULT_BEND;
@@ -2055,6 +2250,29 @@ export function createRenderer(canvas, hooks) {
       if (st.near || (struck && !heldHit)) {
         shakeAmp = Math.max(shakeAmp, activeProfile.shake || 0);
         hitStop = 0.07;
+        if (activeProfile.tier === "high" && st.near) {
+          const lane = px < -0.9 ? 0 : px > 0.9 ? 2 : 1;
+          let side = 0;
+          let mark = null;
+          const list = st.pieces;
+          if (list) {
+            for (let i = 0; i < list.length; i++) {
+              const q = list[i];
+              if (!skimmed(pz, py, lane, q)) continue;
+              const pl = q.length > 5 ? q[5] : lane;
+              side = (pl >= 0 ? pl : lane) - lane;
+              mark = q;
+              break;
+            }
+          }
+          whooshT = 0;
+          whooshSide = side;
+          if (mark) {
+            const mid = mark[1] + mark[2] * 0.5;
+            const at = sample(mid, laneX(mark.length > 5 && mark[5] >= 0 ? mark[5] : lane));
+            rimFlash = { x: at.x, y: 0.7, z: at.z, psi: at.psi, life: 0.22 };
+          }
+        }
       }
       heldHit = struck;
       if (st.evo === "keep") keepT = 1;
@@ -2064,12 +2282,16 @@ export function createRenderer(canvas, hooks) {
       camLatVel = 0;
       shakeAmp = 0;
       hitStop = 0;
+      whooshT = 1;
+      rimFlash = null;
       heldHit = false;
       keepT = 0;
       backT = 0;
     }
     shakeAmp = Math.max(0, shakeAmp - frameDt * 1.8);
     hitStop = Math.max(0, hitStop - frameDt);
+    if (whooshT < 1) whooshT = Math.min(1, whooshT + frameDt / 0.26);
+    if (rimFlash && rimFlash.life > 0) rimFlash.life -= frameDt;
     keepT = Math.max(0, keepT - frameDt / 0.7);
     backT = Math.max(0, backT - frameDt / 0.55);
     camS += (drawS - camS) * followS;
@@ -2097,6 +2319,14 @@ export function createRenderer(canvas, hooks) {
       eye[1] += off[1];
       eye[2] += off[2];
     }
+    if (activeProfile.tier === "high" && whooshT < 1) {
+      const nudge = whooshNudge(activeProfile.whoosh || 0, whooshT);
+      const right = roadAxes(psi);
+      const away = whooshSide > 0 ? -1 : whooshSide < 0 ? 1 : 0;
+      eye[0] += right.rx * away * nudge;
+      eye[2] += right.rz * away * nudge;
+      eye[1] += nudge * (whooshSide === 0 ? 0.7 : 0.28);
+    }
     drawFov = camFov - (hitStop > 0 ? (activeProfile.shake || 0.04) * (hitStop / 0.07) * 1.4 : 0);
     // One beat ahead, so the next move sits in the view. The eye stays
     // 4.7 m behind, and a bend still rebases only past 8 m.
@@ -2108,6 +2338,10 @@ export function createRenderer(canvas, hooks) {
     ];
     perspective(proj, drawFov, w / h, 0.08, 96);
     lookAt(view, eye, at, [0, 1, 0]);
+    const invProj = new Float32Array(16);
+    if (!invertMat(invProj, proj)) invProj.set(proj);
+    const heroClip = mulMatPoint(proj, mulMatPoint(view, [rx, py + 0.7, rz, 1]));
+    const heroUv = heroClip[3] ? [heroClip[0] / heroClip[3] * 0.5 + 0.5, heroClip[1] / heroClip[3] * 0.5 + 0.5] : [0.5, 0.42];
 
     function paintSky(prog, locs) {
       gl.disable(gl.DEPTH_TEST);
@@ -2132,7 +2366,8 @@ export function createRenderer(canvas, hooks) {
       gl.uniform1f(locs.rush, rush);
       gl.uniform1f(locs.stars, pal.stars || 0);
       gl.uniform3fv(locs.nebula, pal.nebula || [0, 0, 0]);
-      gl.uniform1f(locs.flash, worldFlash || 0);
+      const highPic = usePost && activeProfile.tier === "high" && highReady;
+      gl.uniform1f(locs.flash, highPic ? 0 : (worldFlash || 0));
       if (locs.skyAnim) gl.uniform1f(locs.skyAnim, usePost && !reduced ? (activeProfile.sky || 0) : 0);
       gl.uniform2f(locs.res, w, h);
       gl.bindVertexArray(null);
@@ -3138,9 +3373,10 @@ export function createRenderer(canvas, hooks) {
     const freq = reduced || !alive ? 0 : (9.2 + speed * 0.35);
     const swing = Math.sin((st.time || 0) * freq);
     const stride = Math.cos((st.time || 0) * freq);
-    const squash = !alive ? 1 : air ? 1.14 : 1 - land * 0.16;
-    const widen = !alive ? 1 : air ? 0.9 : 1 + land * 0.12;
-    const leanLat = reduced ? 0 : -lean * 0.35;
+    const shaped = heroShape(air, land, reduced ? 0 : lean, activeProfile.tier);
+    const squash = !alive ? 1 : shaped.squash;
+    const widen = !alive ? 1 : shaped.widen;
+    const leanLat = reduced ? 0 : shaped.lean;
     const spot = (ds, dlat) => sample(drawS + ds, px + dlat);
     const hero = st.hero || {};
     const heroPlan = hero.plan || "keeper";
@@ -3197,10 +3433,16 @@ export function createRenderer(canvas, hooks) {
       }
       if (usePost && !reduced) {
         const extra = activeProfile.trail | 0;
+        const highTrail = activeProfile.tier === "high";
+        const combo = highTrail ? Math.max(0, Math.min(8, st.combo || 0)) : 0;
+        const speedK = highTrail ? Math.min(1, Math.max(0, (speed - 6) / 12)) : 0;
         for (let t = 1; t <= extra; t++) {
           const fade = 1 - t / (extra + 1);
-          const ribbon = spot(-0.7 - t * 0.24, leanLat * 0.15);
-          push(ribbon.x, 0.28 + fade * 0.22, ribbon.z, 0.05, 0.04 + fade * 0.06, 0.34 * fade + 0.12, 0, pal.cape, 0.18, 0.55 + fade * 0.4, feet.psi);
+          const step = highTrail ? 0.24 * (1 + speedK * 0.65) : 0.24;
+          const ribbon = spot(-0.7 - t * step, leanLat * 0.15);
+          const emit = highTrail ? (0.55 + fade * 0.4) * (0.8 + speedK * 0.85 + combo * 0.06) : 0.55 + fade * 0.4;
+          const depth = highTrail ? (0.34 * fade + 0.12) * (1 + speedK * 0.7) : 0.34 * fade + 0.12;
+          push(ribbon.x, 0.28 + fade * 0.22, ribbon.z, 0.05, 0.04 + fade * 0.06, depth, 0, pal.cape, 0.18, emit, feet.psi);
         }
       }
       }
@@ -3255,6 +3497,77 @@ export function createRenderer(canvas, hooks) {
       const puff = 0.1 + (0.4 - life) * 0.28;
       push(dust[o], Math.max(0.08, dust[o + 1]), dust[o + 2], puff, puff * 0.55, puff, 1, [0.92, 0.78, 0.52], 0.8, 0.14);
       dustN++;
+    }
+    if (rimFlash && rimFlash.life > 0 && activeProfile.tier === "high" && n < MAX - 4) {
+      const k = Math.max(0, rimFlash.life / 0.22);
+      push(rimFlash.x, rimFlash.y, rimFlash.z, 1.05, 0.95, 0.38, 0, [1, 0.96, 0.8], 0.16, 0.4 + k * 0.85, rimFlash.psi);
+    }
+    if (activeProfile.tier === "high" && !reduced && n < MAX - 8) {
+      if (st.event === "coin") {
+        for (let i = 0; i < 5 && i < COIN_MAX; i++) {
+          const slot = i * 4;
+          const at = sample(drawS - 0.25 - i * 0.22, px + ((i % 2) ? 0.12 : -0.12));
+          coinTrail[slot] = at.x;
+          coinTrail[slot + 1] = py + 0.7 + i * 0.05;
+          coinTrail[slot + 2] = at.z;
+          coinTrail[slot + 3] = 0.45 - i * 0.04;
+        }
+      }
+      for (let i = 0; i < COIN_MAX && n < MAX - 4; i++) {
+        const slot = i * 4;
+        const life = coinTrail[slot + 3];
+        if (life <= 0) continue;
+        coinTrail[slot + 3] = life - frameDt;
+        const s = 0.06 + life * 0.08;
+        push(coinTrail[slot], coinTrail[slot + 1], coinTrail[slot + 2], s, s, s * 1.8, 1, [1, 0.9, 0.45], 0.12, 0.7 + life, 0);
+      }
+      const moteN = Math.min(MOTE_MAX, activeProfile.mote | 0);
+      const moteKind = pal.surface === "ice" || pal.biome === "aurora-ice" || pal.particles === "snow" ? "snow"
+        : pal.biome === "space" || pal.particles === "stardust" ? "star"
+        : pal.biome === "city" ? "dust"
+        : "petal";
+      for (let i = 0; i < moteN && n < MAX - 4; i++) {
+        const o = i * 8;
+        let life = motes[o + 6];
+        if (life <= 0) {
+          const h = laneHash(i * 1.7 + 4);
+          const side = (h - 0.5) * 7;
+          const ahead = laneHash(i * 2.3 + 1) * 16 - 2;
+          const at = sample(drawS + ahead, side);
+          motes[o] = at.x;
+          motes[o + 1] = moteKind === "star" ? 2.2 + h * 2.2 : moteKind === "snow" ? 1.4 + h * 2.4 : 0.5 + h * 1.6;
+          motes[o + 2] = at.z;
+          motes[o + 3] = (laneHash(i * 3.1) - 0.5) * 0.6;
+          motes[o + 4] = moteKind === "snow" ? -0.35 - h * 0.4 : (laneHash(i + 9) - 0.4) * 0.25;
+          motes[o + 5] = (laneHash(i * 5.2) - 0.5) * 0.6;
+          motes[o + 6] = 0.8 + h * 1.4;
+          motes[o + 7] = i + 1;
+          life = motes[o + 6];
+        }
+        motes[o] += motes[o + 3] * frameDt * 2.2;
+        motes[o + 1] += motes[o + 4] * frameDt * 2.2;
+        motes[o + 2] += motes[o + 5] * frameDt * 2.2;
+        motes[o + 6] = life - frameDt * 0.35;
+        const tw = 0.55 + 0.45 * Math.sin((st.time || 0) * 3 + i);
+        const rgb = moteKind === "snow" ? [0.95, 0.97, 1]
+          : moteKind === "star" ? [0.75, 0.86, 1]
+          : moteKind === "dust" ? [0.85, 0.72, 0.48]
+          : (i % 2 ? [1, 0.72, 0.78] : [1, 0.9, 0.95]);
+        const sz = moteKind === "star" ? 0.035 : moteKind === "snow" ? 0.05 : 0.07;
+        const emit = moteKind === "star" ? 0.85 * tw : moteKind === "petal" ? 0.35 : 0.22;
+        push(motes[o], motes[o + 1], motes[o + 2], sz, moteKind === "petal" ? sz * 0.45 : sz, sz, moteKind === "petal" ? 0 : 1, rgb, 0.25, emit, feet.psi);
+      }
+      if (speed >= 10 && n < MAX - 16) {
+        const rows = activeProfile.streak | 0;
+        const scroll = ((st.time || 0) * Math.min(speed, 18)) % 2.4;
+        for (let s = 0; s < rows && n < MAX - 2; s++) {
+          const side = s % 2 === 0 ? -1 : 1;
+          const along = drawS - 0.6 + ((s * 0.85 - scroll + 8) % 5.2);
+          const at = sample(along, px + side * (1.5 + (s % 3) * 0.38));
+          const emit = 0.32 + Math.min(0.55, (speed - 10) / 16);
+          push(at.x, 0.32 + (s % 4) * 0.24, at.z, 0.02, 0.07 + (s % 3) * 0.04, 1.35 + (speed - 10) * 0.06, 0, [1, 0.98, 0.92], 0.2, emit, at.psi);
+        }
+      }
     }
     if (!reduced && speed >= 12 && n < MAX - 16) {
       const scroll = ((st.time || 0) * Math.min(speed, 18)) % 3.4;
@@ -3324,6 +3637,7 @@ export function createRenderer(canvas, hooks) {
     };
     const boxPat = splitKind(0, lo, 2.5);
     if (usePost && wantShadow && castN > 0 && depthProg) {
+      if (splitPass) beginSpan("shadow");
       const len = Math.hypot(aim[0], aim[1], aim[2]) || 1;
       const dir = [aim[0] / len, aim[1] / len, aim[2] / len];
       const tx = Math.round((rx + Math.sin(psi) * 7) * 2) / 2;
@@ -3362,7 +3676,10 @@ export function createRenderer(canvas, hooks) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, post.sceneFb());
       gl.viewport(0, 0, w, h);
       gl.colorMask(true, true, true, true);
-      rush = paintSky(litSkyProg || sky, uLitSky || u);
+      const skyProg = activeProfile.tier === "high" && highSkyProg ? highSkyProg : (litSkyProg || sky);
+      const skyLoc = activeProfile.tier === "high" && uHighSky ? uHighSky : (uLitSky || u);
+      if (splitPass) beginSpan("scene");
+      rush = paintSky(skyProg, skyLoc);
     }
     gl.bindVertexArray(vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, inst);
@@ -3387,6 +3704,14 @@ export function createRenderer(canvas, hooks) {
         gl.uniform1f(locs.shadowOn, wantShadow && castN > 0 ? 1 : 0);
         gl.uniform1f(locs.pcf, activeProfile.pcf || 4);
       }
+      if (locs.gloss) {
+        gl.uniform1f(locs.penumbra, activeProfile.penumbra || 0);
+        gl.uniform1f(locs.aerial, activeProfile.aerial || 0);
+        const gloss = activeProfile.tier === "high" ? glossFor(pal) : 0;
+        gl.uniform1f(locs.gloss, gloss);
+        const haze = pal.sky || pal.fog || [0.7, 0.8, 0.9];
+        gl.uniform3f(locs.haze, haze[0] || 0, haze[1] || 0, haze[2] || 0);
+      }
     };
     const drawSpan = (prog, locs, first, count, coverage, pat) => {
       if (!count) return;
@@ -3400,14 +3725,15 @@ export function createRenderer(canvas, hooks) {
       else gl.disable(gl.SAMPLE_ALPHA_TO_COVERAGE);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 36, count);
     };
-    const boxProg = usePost && litBox ? litBox : meshBox;
-    const patProg = usePost && litPat ? litPat : meshPat;
-    const ballProg = usePost && litBall ? litBall : meshBall;
-    const marchProg = usePost && litMesh ? litMesh : mesh;
-    const boxLoc = usePost && ulb ? ulb : ub;
-    const patLoc = usePost && ulp ? ulp : up;
-    const ballLoc = usePost && ulBall ? ulBall : uBall;
-    const marchLoc = usePost && ulm ? ulm : um;
+    const useHigh = usePost && activeProfile.tier === "high" && highReady;
+    const boxProg = useHigh && highBox ? highBox : usePost && litBox ? litBox : meshBox;
+    const patProg = useHigh && highPat ? highPat : usePost && litPat ? litPat : meshPat;
+    const ballProg = useHigh && highBall ? highBall : usePost && litBall ? litBall : meshBall;
+    const marchProg = useHigh && highMesh ? highMesh : usePost && litMesh ? litMesh : mesh;
+    const boxLoc = useHigh && uhb ? uhb : usePost && ulb ? ulb : ub;
+    const patLoc = useHigh && uhp ? uhp : usePost && ulp ? ulp : up;
+    const ballLoc = useHigh && uhBall ? uhBall : usePost && ulBall ? ulBall : uBall;
+    const marchLoc = useHigh && uhm ? uhm : usePost && ulm ? ulm : um;
     drawSpan(boxProg, boxLoc, 0, boxPat, false, 0);
     drawSpan(patProg, patLoc, boxPat, lo - boxPat, false, 0);
     drawSpan(ballProg, ballLoc, lo, mid - lo, false, 0);
@@ -3430,10 +3756,20 @@ export function createRenderer(canvas, hooks) {
         back: backT * (activeProfile.back || 0),
         hit: hitStop > 0 ? hitStop / 0.07 : 0,
         blur: reduced ? 0 : blurAmount(speed, activeProfile.blur || 0),
+        reflect: activeProfile.tier === "high" ? (activeProfile.reflect || 0) * glossFor(pal) : 0,
+        reveal: activeProfile.tier === "high" ? (worldFlash || 0) : 0,
+        revealCol: (blendTo && blendTo.sky0) || pal.sky0 || pal.sky || [0.7, 0.8, 0.9],
+        sky: pal.sky0 || pal.sky || [0.6, 0.75, 0.95],
+        hero: heroUv,
+        invProj,
+        proj,
+        time: st.time || 0,
+        span: splitPass ? beginSpan : null,
       });
       wasPost = true;
     }
-    endGpu();
+    if (splitPass) endSpan();
+    else endGpu();
     const work = performance.now() - t0;
     lastWork = work;
     const stamp = nowMs || performance.now();
@@ -3457,13 +3793,15 @@ export function createRenderer(canvas, hooks) {
     canvas.dataset.ao = usePost && post && post.aoOn && post.aoOn() ? "1" : "0";
     canvas.dataset.grade = usePost && activeProfile.grade > 0 ? "1" : "0";
     canvas.dataset.blur = usePost && activeProfile.blur > 0 ? "1" : "0";
+    canvas.dataset.shade = useHigh ? "high" : usePost ? "lit" : "low";
+    canvas.dataset.reflect = useHigh && post && post.reflectOn && post.reflectOn() ? "1" : "0";
     canvas.dataset.work = lastWork.toFixed(2);
     canvas.dataset.gpu = gpuMs >= 0 ? gpuMs.toFixed(2) : "";
     canvas.dataset.gpuExt = timerExt ? "1" : "0";
     canvas.dataset.renderer = "webgl2";
     return n;
     } catch (err) {
-      try { endGpu(); } catch { /* query already closed */ }
+      try { endSpan(); endGpu(); } catch { /* query already closed */ }
       if (lost || (gl.isContextLost && gl.isContextLost())) {
         lost = true;
         tell("failed", { message: contextPlan("restore-failed").message });
@@ -3483,6 +3821,7 @@ export function createRenderer(canvas, hooks) {
       gpuP50: at(0.5),
       gpuP95: at(0.95),
       gpuN: copy.length,
+      passes: Object.assign({}, passMs),
       tier: quality.tier,
       ext: !!timerExt,
       software: !!software,
