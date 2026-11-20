@@ -101,7 +101,7 @@
 (expect "single-n" (= (ncoins one) 1))
 (expect "single-lane" (not (= (lane-of (car (coin-take one))) -1)))
 (expect "line-n" (>= (ncoins line) 4))
-(expect "line-same" (same-lane? line))
+(expect "line-lanes" (>= (coin-used line) 2))
 (expect "line-low" (and (>= (ymin line) 0.45) (<= (ymax line) 0.85)))
 (expect "zig-lanes" (>= (coin-used zig) 2))
 (expect "switch-lanes" (>= (coin-used arc) 2))
@@ -109,6 +109,17 @@
 (expect "jump-clear" (coin-clear? jump))
 (expect "jump-reach" (coin-reachable? jump pace8))
 (expect "line-clear" (and (coin-clear? line) (coin-reachable? line pace8)))
+(define early-speed (feel-speed (feel-for 0)))
+(define early-chunk (chunk-or-fallback (pattern-chunk 42 0 0 early-speed) early-speed))
+(define early-line (string-pickups (hash-ref early-chunk "pieces" (list))
+                                    0
+                                    (hash-ref early-chunk "x1" 8.0)
+                                    1 25.0
+                                    (coin-chunk-seed 42 0 0)
+                                    (hash "force" "line")))
+(expect "early-centre" (and (> (car (cdr (coin-share early-line))) 0)
+                             (coin-clear? early-line)
+                             (coin-reachable? early-line early-speed)))
 (expect "zig-clear" (and (coin-clear? zig) (coin-reachable? zig pace8)))
 
 (define again (forced "zig" flat))
@@ -120,7 +131,7 @@
                                              "mix" 0.55 "density" 0.55 "arc" 0.34
                                              "knob" 0 "prev" #f "force" "line")))
 (expect "other-seed" (and (equal? (coin-rows other) (coin-rows other-again))
-                          (same-lane? other)
+                          (>= (coin-used other) 2)
                           (>= (ncoins other) 4)))
 
 (define (lay-level seed params form speed x1 id)
@@ -242,3 +253,90 @@
 (define back (coin-undo (hash-ref kept "state" blank)))
 (expect "undo" (and (near? (hash-ref back "left" 0.0) (hash-ref blank "left" 0.0))
                     (near? (hash-ref back "mix" 0.0) (hash-ref blank "mix" 0.0))))
+
+; Opening form holds the weights still. The centre still has to show up
+; in every short run, not only in a 30-level total.
+(expect "mood-hold" (string=? "hold" (coin-mood 0 0 0 0 0)))
+
+(define (window-ok? counts)
+  (let ((n0 (car counts))
+        (n1 (car (cdr counts)))
+        (n2 (car (cdr (cdr counts))))
+        (nz (car (cdr (cdr (cdr counts))))))
+    (let ((tot (+ n0 n1 n2 nz)))
+      (and (> tot 0)
+           (= nz 0)
+           (>= (* n0 100) (* tot 20))
+           (<= (* n0 100) (* tot 45))
+           (>= (* n1 100) (* tot 20))
+           (<= (* n1 100) (* tot 45))
+           (>= (* n2 100) (* tot 20))
+           (<= (* n2 100) (* tot 45))))))
+
+(define (hold-windows seed)
+  (let loop ((level 1) (bucket (list 0 0 0 0)) (ok #t))
+    (if (> level 12)
+      ok
+      (let* ((speed (feel-speed (feel-for 0)))
+             (span (adapt-span speed (* (- level 1) 180.0) level))
+             (ps (lay-level seed blank 0 speed span (* level 4)))
+             (next (add-share bucket (coin-share ps)))
+             (fair (and (coin-clear? ps) (coin-reachable? ps speed))))
+        (if (= (modulo level 3) 0)
+          (begin
+            (display "window ")
+            (display seed)
+            (display " ")
+            (display level)
+            (display " ")
+            (display (car next))
+            (display " ")
+            (display (car (cdr next)))
+            (display " ")
+            (display (car (cdr (cdr next))))
+            (newline)
+            (loop (+ level 1) (list 0 0 0 0) (and ok fair (window-ok? next))))
+          (loop (+ level 1) next (and ok fair)))))))
+
+(define (all-windows xs)
+  (if (null? xs)
+    #t
+    (and (hold-windows (car xs)) (all-windows (cdr xs)))))
+
+(expect "windows" (all-windows seeds))
+
+; The same windows once the form is allowed to climb, which is the run
+; a player actually sees. Level 1 still starts on the opening form.
+(define (climb-windows seed)
+  (let loop ((level 1) (form 0) (points 0.0) (bucket (list 0 0 0 0)) (ok #t))
+    (if (> level 12)
+      ok
+      (let* ((speed (feel-speed (feel-for form)))
+             (span (adapt-span speed points level))
+             (ps (lay-level seed blank form speed span (* level 4)))
+             (plan (adapt-finish form 0 (+ points 180.0) level))
+             (next (add-share bucket (coin-share ps)))
+             (fair (and (coin-clear? ps) (coin-reachable? ps speed))))
+        (if (= (modulo level 3) 0)
+          (begin
+            (display "climb ")
+            (display seed)
+            (display " ")
+            (display level)
+            (display " ")
+            (display (car next))
+            (display " ")
+            (display (car (cdr next)))
+            (display " ")
+            (display (car (cdr (cdr next))))
+            (newline)
+            (loop (+ level 1) (hash-ref plan "form") (+ points 180.0)
+                  (list 0 0 0 0) (and ok fair (window-ok? next))))
+          (loop (+ level 1) (hash-ref plan "form") (+ points 180.0) next (and ok fair)))))))
+
+(define (all-climb xs)
+  (if (null? xs)
+    #t
+    (and (climb-windows (car xs)) (all-climb (cdr xs)))))
+
+(expect "climb-windows" (all-climb seeds))
