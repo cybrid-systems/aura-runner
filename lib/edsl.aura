@@ -1,0 +1,627 @@
+; Biome EDSL. A city is data: colours, one mood, one building style, and
+; up to three landmark names. The browser draws those names. This file
+; only checks the data. It does not eval a model reply.
+(require "std/string" all:)
+(require "lib/sexp")
+
+(define edsl-cap 150)
+(define edsl-props
+  (list "pagoda" "palace-gate" "pearl-tower" "spire" "bridge-tower" "eiffel-tower"
+        "clock-tower" "colonnade" "bamboo" "palm" "stone-bridge" "battlement"
+        "willow" "cypress" "sakura"))
+(define edsl-moods (list "day" "night" "sunset" "neon"))
+(define edsl-styles
+  (list "palace" "neon" "deco" "stone" "pastel" "brick" "bay" "wall" "mist" "canal"))
+(define edsl-parts (list "lantern" "petal" "mist" "neon" "dust" "sakura" "none"))
+(define edsl-heads
+  (list "sky" "sky1" "fog" "sun" "path" "curb" "ground" "hill" "hill2"
+        "water" "build" "roof" "mote" "light" "mood" "style" "part" "props"))
+(define edsl-ids
+  (list "beijing" "shanghai" "hangzhou" "chengdu" "xian" "chongqing" "hongkong"
+        "newyork" "sanfrancisco" "losangeles" "paris" "london" "rome" "venice" "tokyo"
+        "visit-china" "visit-us" "visit-europe" "visit-asia" "visit-world"))
+(define edsl-china
+  (list "beijing" "shanghai" "hangzhou" "chengdu" "xian" "chongqing" "hongkong"))
+(define edsl-us (list "newyork" "sanfrancisco" "losangeles"))
+(define edsl-europe (list "paris" "london" "rome" "venice"))
+(define edsl-world
+  (list "beijing" "shanghai" "hangzhou" "chengdu" "xian" "chongqing" "hongkong"
+        "newyork" "sanfrancisco" "losangeles" "paris" "london" "rome" "venice" "tokyo"))
+(define edsl-hurdle (list 0.28 0.62 0.98))
+(define edsl-gate (list 1.0 0.72 0.18))
+
+(define (edsl-abs n)
+  (if (< n 0) (- 0 n) n))
+
+(define (edsl-num n)
+  (let ((s (number->string (exact->inexact (if (number? n) n 0)))))
+    (if (>= (string-index s "." 0) 0) s (string-append s ".0"))))
+
+(define (edsl-has? text w)
+  (and (string? text) (string? w) (>= (string-index text w 0) 0)))
+
+(define (edsl-word? low w)
+  (edsl-has? (string-append " " low " ") (string-append " " w " ")))
+
+(define (edsl-member? xs name)
+  (let loop ((ys xs))
+    (if (or (not (pair? ys)) (null? ys))
+      #f
+      (if (and (string? (car ys)) (string=? (car ys) name))
+        #t
+        (loop (cdr ys))))))
+
+(define (edsl-id? s)
+  (and (string? s) (edsl-member? edsl-ids s)))
+
+(define (edsl-cost name)
+  (cond
+    ((string=? name "pagoda") 11)
+    ((string=? name "palace-gate") 9)
+    ((string=? name "pearl-tower") 6)
+    ((string=? name "spire") 5)
+    ((string=? name "bridge-tower") 8)
+    ((string=? name "eiffel-tower") 7)
+    ((string=? name "clock-tower") 5)
+    ((string=? name "colonnade") 6)
+    ((string=? name "bamboo") 5)
+    ((string=? name "palm") 6)
+    ((string=? name "stone-bridge") 6)
+    ((string=? name "battlement") 5)
+    ((string=? name "willow") 4)
+    ((string=? name "cypress") 2)
+    ((string=? name "sakura") 4)
+    (else 99)))
+
+(define (edsl-style-cost name)
+  (cond
+    ((string=? name "palace") 3)
+    ((string=? name "neon") 3)
+    ((string=? name "deco") 3)
+    ((string=? name "stone") 2)
+    ((string=? name "pastel") 3)
+    ((string=? name "brick") 3)
+    ((string=? name "bay") 3)
+    ((string=? name "wall") 4)
+    ((string=? name "mist") 2)
+    ((string=? name "canal") 3)
+    (else 9)))
+
+(define (edsl-budget props style)
+  (let ((a (edsl-cost (if (pair? props) (car props) "")))
+        (b (if (and (pair? props) (pair? (cdr props))) (edsl-cost (car (cdr props))) 0))
+        (c (if (and (pair? props) (pair? (cdr props)) (pair? (cdr (cdr props))))
+             (edsl-cost (car (cdr (cdr props))))
+             0)))
+    (+ (* 8 (edsl-style-cost style))
+       16 8
+       (if (string=? style "canal") 8 0)
+       a (* 4 b) (* 2 c))))
+
+(define (edsl-make id title en region mood style part light fog-a
+                   sky sky1 fog sun path curb ground hill hill2 water build roof mote props)
+  (hash "id" id "title" title "title-en" en "region" region
+        "mood" mood "style" style "part" part
+        "light" (exact->inexact light) "fog-amt" (exact->inexact fog-a)
+        "sky" sky "sky1" sky1 "fog" fog "sun" sun "path" path "curb" curb
+        "ground" ground "hill" hill "hill2" hill2 "water" water
+        "build" build "roof" roof "mote" mote "props" props))
+
+;; SPECS
+(define edsl-cities (list
+  (edsl-make "beijing" "北京" "Beijing" "china" "day" "palace" "lantern" 0.9 0.16 (list 0.97 0.8 0.46) (list 1.0 0.64 0.34) (list 0.98 0.84 0.58) (list 1.0 0.84 0.42) (list 0.58 0.26 0.16) (list 0.75 0.15 0.12) (list 0.55 0.46 0.26) (list 0.46 0.3 0.26) (list 0.34 0.2 0.22) (list 0.28 0.45 0.58) (list 0.74 0.14 0.12) (list 0.16 0.09 0.08) (list 1.0 0.35 0.18) (list "pagoda" "palace-gate"))
+  (edsl-make "shanghai" "上海" "Shanghai" "china" "neon" "neon" "neon" 0.9 0.18 (list 0.16 0.14 0.36) (list 0.86 0.3 0.58) (list 0.4 0.22 0.48) (list 0.55 0.88 1.0) (list 0.24 0.26 0.34) (list 0.15 0.78 0.86) (list 0.14 0.16 0.26) (list 0.1 0.12 0.26) (list 0.16 0.1 0.22) (list 0.1 0.28 0.46) (list 0.12 0.2 0.4) (list 0.4 0.9 1.0) (list 0.25 0.95 0.95) (list "pearl-tower" "spire"))
+  (edsl-make "hangzhou" "杭州" "Hangzhou" "china" "day" "mist" "petal" 0.84 0.26 (list 0.74 0.86 0.92) (list 0.96 0.82 0.78) (list 0.86 0.9 0.93) (list 1.0 0.9 0.75) (list 0.7 0.64 0.52) (list 0.45 0.42 0.38) (list 0.42 0.62 0.4) (list 0.5 0.62 0.58) (list 0.36 0.5 0.48) (list 0.35 0.62 0.68) (list 0.93 0.91 0.86) (list 0.22 0.24 0.28) (list 0.98 0.75 0.82) (list "stone-bridge" "willow"))
+  (edsl-make "chengdu" "成都" "Chengdu" "china" "day" "palace" "lantern" 0.82 0.22 (list 0.62 0.84 0.7) (list 0.78 0.9 0.72) (list 0.7 0.86 0.74) (list 0.95 0.9 0.55) (list 0.5 0.38 0.24) (list 0.3 0.48 0.28) (list 0.2 0.52 0.3) (list 0.28 0.48 0.36) (list 0.18 0.36 0.3) (list 0.22 0.48 0.5) (list 0.68 0.22 0.16) (list 0.2 0.16 0.12) (list 1.0 0.55 0.25) (list "bamboo" "pagoda"))
+  (edsl-make "xian" "西安" "Xi'an" "china" "day" "wall" "dust" 0.86 0.18 (list 0.96 0.58 0.28) (list 0.62 0.3 0.28) (list 0.92 0.58 0.34) (list 1.0 0.62 0.28) (list 0.52 0.32 0.18) (list 0.48 0.22 0.14) (list 0.5 0.36 0.22) (list 0.48 0.28 0.2) (list 0.36 0.2 0.18) (list 0.3 0.4 0.48) (list 0.62 0.32 0.18) (list 0.28 0.12 0.1) (list 1.0 0.62 0.22) (list "pagoda" "battlement"))
+  (edsl-make "chongqing" "重庆" "Chongqing" "china" "night" "neon" "lantern" 0.8 0.2 (list 0.28 0.12 0.26) (list 0.9 0.34 0.22) (list 0.48 0.22 0.28) (list 1.0 0.48 0.28) (list 0.32 0.24 0.26) (list 0.55 0.18 0.14) (list 0.22 0.16 0.2) (list 0.18 0.12 0.16) (list 0.12 0.08 0.12) (list 0.15 0.22 0.36) (list 0.4 0.16 0.18) (list 1.0 0.45 0.2) (list 1.0 0.55 0.25) (list "bridge-tower" "spire"))
+  (edsl-make "hongkong" "香港" "Hong Kong" "china" "neon" "bay" "neon" 0.9 0.18 (list 0.12 0.16 0.38) (list 0.95 0.32 0.55) (list 0.35 0.2 0.45) (list 0.45 0.85 1.0) (list 0.22 0.24 0.32) (list 0.1 0.8 0.75) (list 0.12 0.14 0.24) (list 0.1 0.14 0.3) (list 0.18 0.1 0.28) (list 0.08 0.26 0.42) (list 0.1 0.14 0.32) (list 0.95 0.3 0.55) (list 0.2 1.0 0.85) (list "spire" "pearl-tower"))
+  (edsl-make "newyork" "纽约" "New York" "us" "day" "deco" "dust" 0.86 0.16 (list 0.95 0.62 0.36) (list 0.32 0.38 0.62) (list 0.9 0.62 0.42) (list 1.0 0.72 0.38) (list 0.3 0.3 0.32) (list 0.75 0.65 0.3) (list 0.28 0.32 0.28) (list 0.25 0.28 0.38) (list 0.18 0.2 0.3) (list 0.18 0.32 0.48) (list 0.48 0.46 0.44) (list 0.86 0.72 0.4) (list 1.0 0.8 0.45) (list "spire"))
+  (edsl-make "sanfrancisco" "旧金山" "San Francisco" "us" "day" "stone" "mist" 0.88 0.22 (list 0.46 0.74 0.96) (list 0.82 0.9 0.96) (list 0.78 0.86 0.92) (list 1.0 0.95 0.75) (list 0.55 0.5 0.44) (list 0.7 0.22 0.16) (list 0.4 0.55 0.42) (list 0.35 0.5 0.58) (list 0.22 0.38 0.48) (list 0.12 0.42 0.62) (list 0.78 0.76 0.72) (list 0.55 0.28 0.22) (list 0.85 0.92 1.0) (list "bridge-tower"))
+  (edsl-make "losangeles" "洛杉矶" "Los Angeles" "us" "day" "pastel" "dust" 0.92 0.14 (list 0.98 0.55 0.4) (list 0.98 0.4 0.55) (list 0.98 0.7 0.58) (list 1.0 0.62 0.4) (list 0.75 0.64 0.46) (list 0.9 0.55 0.45) (list 0.55 0.5 0.28) (list 0.55 0.4 0.38) (list 0.4 0.28 0.36) (list 0.2 0.45 0.62) (list 0.92 0.78 0.62) (list 0.85 0.45 0.4) (list 1.0 0.7 0.45) (list "palm"))
+  (edsl-make "paris" "巴黎" "Paris" "europe" "sunset" "stone" "lantern" 0.82 0.16 (list 0.55 0.42 0.58) (list 0.96 0.55 0.4) (list 0.86 0.64 0.55) (list 1.0 0.7 0.48) (list 0.48 0.42 0.38) (list 0.62 0.52 0.4) (list 0.4 0.46 0.32) (list 0.42 0.36 0.4) (list 0.3 0.26 0.34) (list 0.25 0.4 0.52) (list 0.91 0.84 0.72) (list 0.38 0.3 0.28) (list 1.0 0.78 0.42) (list "eiffel-tower"))
+  (edsl-make "london" "伦敦" "London" "europe" "day" "brick" "lantern" 0.78 0.24 (list 0.52 0.6 0.7) (list 0.7 0.74 0.78) (list 0.68 0.72 0.78) (list 0.85 0.88 0.92) (list 0.34 0.34 0.36) (list 0.45 0.28 0.2) (list 0.32 0.36 0.3) (list 0.35 0.4 0.46) (list 0.24 0.28 0.34) (list 0.22 0.36 0.46) (list 0.58 0.5 0.44) (list 0.32 0.22 0.18) (list 1.0 0.78 0.4) (list "clock-tower"))
+  (edsl-make "rome" "罗马" "Rome" "europe" "day" "stone" "dust" 0.9 0.14 (list 0.96 0.78 0.48) (list 0.98 0.62 0.36) (list 0.96 0.8 0.58) (list 1.0 0.82 0.42) (list 0.72 0.58 0.4) (list 0.78 0.64 0.42) (list 0.55 0.5 0.3) (list 0.5 0.42 0.28) (list 0.36 0.32 0.24) (list 0.22 0.45 0.58) (list 0.92 0.84 0.68) (list 0.62 0.4 0.28) (list 0.95 0.8 0.4) (list "colonnade" "cypress"))
+  (edsl-make "venice" "威尼斯" "Venice" "europe" "day" "canal" "mist" 0.84 0.18 (list 0.64 0.76 0.9) (list 0.96 0.72 0.64) (list 0.78 0.84 0.9) (list 1.0 0.86 0.62) (list 0.62 0.5 0.52) (list 0.85 0.55 0.55) (list 0.55 0.58 0.48) (list 0.55 0.58 0.62) (list 0.4 0.44 0.52) (list 0.2 0.48 0.64) (list 0.94 0.72 0.7) (list 0.55 0.32 0.4) (list 0.9 0.85 0.95) (list "stone-bridge" "colonnade"))
+  (edsl-make "tokyo" "东京" "Tokyo" "asia" "day" "palace" "sakura" 0.88 0.14 (list 0.96 0.74 0.8) (list 0.98 0.55 0.62) (list 0.96 0.78 0.84) (list 1.0 0.85 0.75) (list 0.36 0.34 0.36) (list 0.75 0.2 0.24) (list 0.4 0.48 0.34) (list 0.55 0.4 0.46) (list 0.4 0.28 0.36) (list 0.25 0.45 0.58) (list 0.82 0.16 0.18) (list 0.95 0.95 0.96) (list 1.0 0.7 0.8) (list "spire" "sakura"))))
+
+(define edsl-templates (list
+  (hash-set (edsl-make "visit-china" "中国" "China" "china" "day" "mist" "petal" 0.84 0.24 (list 0.7 0.84 0.78) (list 0.9 0.88 0.75) (list 0.78 0.88 0.8) (list 1.0 0.9 0.7) (list 0.62 0.56 0.4) (list 0.4 0.48 0.32) (list 0.28 0.55 0.34) (list 0.4 0.58 0.46) (list 0.26 0.42 0.36) (list 0.28 0.55 0.58) (list 0.9 0.88 0.82) (list 0.24 0.26 0.28) (list 0.98 0.78 0.7) (list "bamboo" "stone-bridge")) "key" "china-mist")
+  (hash-set (edsl-make "visit-china" "中国" "China" "china" "day" "wall" "dust" 0.86 0.16 (list 0.95 0.62 0.36) (list 0.7 0.36 0.28) (list 0.92 0.64 0.4) (list 1.0 0.7 0.36) (list 0.55 0.36 0.22) (list 0.5 0.28 0.16) (list 0.48 0.36 0.24) (list 0.5 0.32 0.24) (list 0.34 0.22 0.2) (list 0.28 0.4 0.5) (list 0.64 0.34 0.2) (list 0.3 0.14 0.12) (list 1.0 0.65 0.28) (list "pagoda" "battlement")) "key" "china-high")
+  (hash-set (edsl-make "visit-china" "中国" "China" "china" "day" "mist" "petal" 0.86 0.22 (list 0.78 0.86 0.94) (list 0.96 0.8 0.76) (list 0.84 0.9 0.94) (list 1.0 0.9 0.72) (list 0.68 0.6 0.5) (list 0.5 0.46 0.4) (list 0.4 0.6 0.42) (list 0.48 0.62 0.55) (list 0.32 0.48 0.46) (list 0.3 0.58 0.66) (list 0.94 0.92 0.88) (list 0.25 0.28 0.32) (list 1.0 0.78 0.84) (list "willow" "stone-bridge")) "key" "china-lake")
+  (hash-set (edsl-make "visit-europe" "欧洲" "Europe" "europe" "day" "canal" "mist" 0.84 0.18 (list 0.62 0.74 0.88) (list 0.95 0.7 0.6) (list 0.76 0.82 0.9) (list 1.0 0.84 0.6) (list 0.58 0.5 0.48) (list 0.8 0.55 0.5) (list 0.5 0.55 0.46) (list 0.5 0.55 0.6) (list 0.36 0.42 0.5) (list 0.18 0.42 0.58) (list 0.9 0.7 0.62) (list 0.5 0.3 0.34) (list 0.9 0.86 0.95) (list "stone-bridge" "colonnade")) "key" "europe-canal")
+  (hash-set (edsl-make "visit-europe" "欧洲" "Europe" "europe" "day" "brick" "lantern" 0.8 0.22 (list 0.58 0.64 0.74) (list 0.78 0.7 0.62) (list 0.7 0.74 0.8) (list 0.9 0.86 0.7) (list 0.4 0.38 0.36) (list 0.5 0.36 0.26) (list 0.36 0.4 0.32) (list 0.4 0.42 0.46) (list 0.28 0.3 0.36) (list 0.22 0.38 0.48) (list 0.7 0.64 0.56) (list 0.4 0.28 0.24) (list 1.0 0.78 0.45) (list "clock-tower" "colonnade")) "key" "europe-stone")
+  (hash-set (edsl-make "visit-us" "美国" "America" "us" "day" "deco" "dust" 0.86 0.16 (list 0.7 0.78 0.9) (list 0.95 0.6 0.4) (list 0.85 0.78 0.68) (list 1.0 0.78 0.45) (list 0.34 0.34 0.36) (list 0.7 0.55 0.3) (list 0.32 0.38 0.3) (list 0.3 0.36 0.42) (list 0.22 0.26 0.34) (list 0.18 0.36 0.5) (list 0.5 0.46 0.44) (list 0.75 0.55 0.35) (list 1.0 0.8 0.5) (list "spire")) "key" "us-brick")
+  (hash-set (edsl-make "visit-asia" "亚洲" "Asia" "asia" "neon" "neon" "neon" 0.88 0.18 (list 0.14 0.16 0.34) (list 0.9 0.35 0.55) (list 0.4 0.22 0.48) (list 0.5 0.85 1.0) (list 0.26 0.26 0.34) (list 0.2 0.8 0.8) (list 0.16 0.18 0.26) (list 0.12 0.14 0.28) (list 0.18 0.12 0.24) (list 0.1 0.28 0.42) (list 0.14 0.18 0.36) (list 0.45 0.9 1.0) (list 0.3 0.95 0.95) (list "spire" "sakura")) "key" "asia-neon")
+  (hash-set (edsl-make "visit-world" "远方" "Far away" "world" "day" "pastel" "dust" 0.9 0.16 (list 0.95 0.7 0.5) (list 0.98 0.5 0.45) (list 0.96 0.78 0.62) (list 1.0 0.75 0.45) (list 0.7 0.6 0.45) (list 0.85 0.55 0.4) (list 0.5 0.52 0.32) (list 0.5 0.42 0.36) (list 0.36 0.3 0.32) (list 0.2 0.48 0.6) (list 0.9 0.78 0.62) (list 0.8 0.45 0.38) (list 1.0 0.75 0.5) (list "palm" "spire")) "key" "world-palm")))
+
+(define (edsl-all)
+  (append edsl-cities edsl-templates))
+
+(define (edsl-find xs id)
+  (let loop ((ys xs))
+    (if (or (not (pair? ys)) (null? ys))
+      #f
+      (if (string=? (hash-ref (car ys) "id" "") id)
+        (car ys)
+        (loop (cdr ys))))))
+
+(define (edsl-find-key xs key)
+  (let loop ((ys xs))
+    (if (or (not (pair? ys)) (null? ys))
+      #f
+      (if (string=? (hash-ref (car ys) "key" "") key)
+        (car ys)
+        (loop (cdr ys))))))
+
+(define (edsl-get id)
+  (let ((row (edsl-find edsl-cities id)))
+    (if row row (edsl-find edsl-templates id))))
+
+(define (edsl-title name lang)
+  (let ((zh (string=? lang "zh")))
+    (cond
+      ((string=? name "beijing") (if zh "北京" "Beijing"))
+      ((string=? name "shanghai") (if zh "上海" "Shanghai"))
+      ((string=? name "hangzhou") (if zh "杭州" "Hangzhou"))
+      ((string=? name "chengdu") (if zh "成都" "Chengdu"))
+      ((string=? name "xian") (if zh "西安" "Xi'an"))
+      ((string=? name "chongqing") (if zh "重庆" "Chongqing"))
+      ((string=? name "hongkong") (if zh "香港" "Hong Kong"))
+      ((string=? name "newyork") (if zh "纽约" "New York"))
+      ((string=? name "sanfrancisco") (if zh "旧金山" "San Francisco"))
+      ((string=? name "losangeles") (if zh "洛杉矶" "Los Angeles"))
+      ((string=? name "paris") (if zh "巴黎" "Paris"))
+      ((string=? name "london") (if zh "伦敦" "London"))
+      ((string=? name "rome") (if zh "罗马" "Rome"))
+      ((string=? name "venice") (if zh "威尼斯" "Venice"))
+      ((string=? name "tokyo") (if zh "东京" "Tokyo"))
+      ((string=? name "visit-china") (if zh "中国" "China"))
+      ((string=? name "visit-us") (if zh "美国" "America"))
+      ((string=? name "visit-europe") (if zh "欧洲" "Europe"))
+      ((string=? name "visit-asia") (if zh "亚洲" "Asia"))
+      ((string=? name "visit-world") (if zh "远方" "Far away"))
+      (else ""))))
+
+(define (edsl-index xs name)
+  (let loop ((ys xs) (i 0))
+    (if (or (not (pair? ys)) (null? ys))
+      -1
+      (if (string=? (car ys) name) i (loop (cdr ys) (+ i 1))))))
+
+(define (edsl-next region current)
+  (let ((xs (cond
+              ((string=? region "china") edsl-china)
+              ((string=? region "us") edsl-us)
+              ((string=? region "europe") edsl-europe)
+              ((string=? region "world") edsl-world)
+              (else (list)))))
+    (if (null? xs)
+      ""
+      (list-ref xs (modulo (+ (edsl-index xs (if (string? current) current "")) 1) (length xs))))))
+
+(define (edsl-join-nums xs)
+  (let loop ((ys xs) (acc ""))
+    (if (or (not (pair? ys)) (null? ys))
+      acc
+      (loop (cdr ys)
+            (if (string=? acc "")
+              (edsl-num (car ys))
+              (string-append acc " " (edsl-num (car ys))))))))
+
+(define (edsl-join-syms xs)
+  (let loop ((ys xs) (acc ""))
+    (if (or (not (pair? ys)) (null? ys))
+      acc
+      (loop (cdr ys)
+            (if (string=? acc "")
+              (car ys)
+              (string-append acc " " (car ys)))))))
+
+(define (edsl-form spec)
+  (string-append
+    "(biome " (hash-ref spec "id" "visit-world")
+    " (sky " (edsl-join-nums (hash-ref spec "sky")) ")"
+    " (sky1 " (edsl-join-nums (hash-ref spec "sky1")) ")"
+    " (fog " (edsl-join-nums (append (hash-ref spec "fog") (list (hash-ref spec "fog-amt")))) ")"
+    " (sun " (edsl-join-nums (hash-ref spec "sun")) ")"
+    " (path " (edsl-join-nums (hash-ref spec "path")) ")"
+    " (curb " (edsl-join-nums (hash-ref spec "curb")) ")"
+    " (ground " (edsl-join-nums (hash-ref spec "ground")) ")"
+    " (hill " (edsl-join-nums (hash-ref spec "hill")) ")"
+    " (hill2 " (edsl-join-nums (hash-ref spec "hill2")) ")"
+    " (water " (edsl-join-nums (hash-ref spec "water")) ")"
+    " (build " (edsl-join-nums (hash-ref spec "build")) ")"
+    " (roof " (edsl-join-nums (hash-ref spec "roof")) ")"
+    " (mote " (edsl-join-nums (hash-ref spec "mote")) ")"
+    " (light " (edsl-num (hash-ref spec "light")) ")"
+    " (mood " (hash-ref spec "mood" "day") ")"
+    " (style " (hash-ref spec "style" "stone") ")"
+    " (part " (hash-ref spec "part" "none") ")"
+    " (props " (edsl-join-syms (hash-ref spec "props" (list))) "))"))
+
+(define (edsl-clause form name)
+  (let loop ((xs (if (and (pair? form) (pair? (cdr form))) (cdr (cdr form)) (list))))
+    (if (or (not (pair? xs)) (null? xs))
+      #f
+      (let ((sp (car xs)))
+        (if (and (pair? sp) (string? (car sp)) (string=? (car sp) name))
+          sp
+          (loop (cdr xs)))))))
+
+(define (edsl-heads-ok? form)
+  (let loop ((xs (cdr (cdr form))))
+    (if (or (not (pair? xs)) (null? xs))
+      #t
+      (let ((sp (car xs)))
+        (if (or (not (pair? sp)) (not (string? (car sp))) (not (edsl-member? edsl-heads (car sp))))
+          #f
+          (loop (cdr xs)))))))
+
+(define (edsl-nums sp n)
+  (let loop ((xs (if (pair? sp) (cdr sp) (list))) (k 0) (acc (list)))
+    (if (= k n)
+      (if (null? xs) (reverse acc) #f)
+      (if (or (null? xs) (not (number? (car xs))))
+        #f
+        (loop (cdr xs) (+ k 1) (cons (exact->inexact (car xs)) acc))))))
+
+(define (edsl-syms sp)
+  (let loop ((xs (if (pair? sp) (cdr sp) (list))) (acc (list)))
+    (if (or (not (pair? xs)) (null? xs))
+      (reverse acc)
+      (if (string? (car xs))
+        (loop (cdr xs) (cons (car xs) acc))
+        #f))))
+
+(define (edsl-chan? n)
+  (and (number? n) (>= n 0.0) (<= n 1.0)))
+
+(define (edsl-rgb? xs)
+  (and (pair? xs) (= (length xs) 3)
+       (edsl-chan? (car xs))
+       (edsl-chan? (car (cdr xs)))
+       (edsl-chan? (car (cdr (cdr xs))))))
+
+(define (edsl-gap a b)
+  (max (edsl-abs (- (car a) (car b)))
+       (edsl-abs (- (car (cdr a)) (car (cdr b))))
+       (edsl-abs (- (car (cdr (cdr a))) (car (cdr (cdr b)))))))
+
+(define (edsl-sum xs)
+  (+ (car xs) (car (cdr xs)) (car (cdr (cdr xs)))))
+
+(define (edsl-props-ok? xs)
+  (and (pair? xs) (<= (length xs) 3)
+       (let loop ((ys xs))
+         (if (or (not (pair? ys)) (null? ys))
+           #t
+           (if (edsl-member? edsl-props (car ys))
+             (loop (cdr ys))
+             #f)))))
+
+(define (edsl-safe-id? s)
+  (and (string? s) (> (string-length s) 0) (<= (string-length s) 16)
+       (let ((c0 (string-ref s 0)))
+         (and (>= c0 97) (<= c0 122)
+              (let loop ((i 1))
+                (if (>= i (string-length s))
+                  #t
+                  (let ((c (string-ref s i)))
+                    (if (or (and (>= c 97) (<= c 122))
+                            (and (>= c 48) (<= c 57))
+                            (= c 45))
+                      (loop (+ i 1))
+                      #f))))))))
+
+(define (edsl-fail why)
+  (hash "ok" #f "why" why "id" "" "title" "" "title-en" ""
+        "mood" "" "style" "" "part" "" "light" 0.0 "fog-amt" 0.0
+        "props" (list) "instances" 0
+        "violations" (hash "budget" 1.0 "geometry" 0.0 "reachable" 1.0 "safe" 0.0)))
+
+(define (edsl-cut text)
+  (if (not (string? text))
+    #f
+    (let ((i (string-index text "(biome" 0)))
+      (if (< i 0)
+        #f
+        (let loop ((k i) (depth 0))
+          (if (>= k (string-length text))
+            #f
+            (let ((c (string-ref text k)))
+              (cond
+                ((= c 40) (loop (+ k 1) (+ depth 1)))
+                ((= c 41)
+                 (if (= depth 1)
+                   (substring text i (+ k 1))
+                   (if (<= depth 1) #f (loop (+ k 1) (- depth 1)))))
+                (else (loop (+ k 1) depth))))))))))
+
+(define (edsl-check text)
+  (let ((src (if (and (string? text) (edsl-has? text "(biome")) (edsl-cut text) text)))
+    (if (or (not (string? src)) (> (string-length src) 690))
+      (edsl-fail "long")
+      (let ((form (sexp-parse src)))
+        (if (or (not form) (not (edsl-safe-id? (let ((id (if (and (pair? form) (pair? (cdr form)) (string? (car (cdr form)))) (car (cdr form)) ""))) id)))
+                (not (edsl-heads-ok? form)))
+          (edsl-fail "form")
+          (let ((id (car (cdr form))))
+            (let ((bad
+                    (let loop ((hs edsl-heads))
+                      (if (null? hs)
+                        ""
+                        (if (not (edsl-clause form (car hs)))
+                          (car hs)
+                          (loop (cdr hs)))))))
+              (if (not (string=? bad ""))
+                (edsl-fail bad)
+                (let ((sky (edsl-nums (edsl-clause form "sky") 3))
+                      (sky1 (edsl-nums (edsl-clause form "sky1") 3))
+                      (fog4 (edsl-nums (edsl-clause form "fog") 4))
+                      (sun (edsl-nums (edsl-clause form "sun") 3))
+                      (path (edsl-nums (edsl-clause form "path") 3))
+                      (curb (edsl-nums (edsl-clause form "curb") 3))
+                      (ground (edsl-nums (edsl-clause form "ground") 3))
+                      (hill (edsl-nums (edsl-clause form "hill") 3))
+                      (hill2 (edsl-nums (edsl-clause form "hill2") 3))
+                      (water (edsl-nums (edsl-clause form "water") 3))
+                      (build (edsl-nums (edsl-clause form "build") 3))
+                      (roof (edsl-nums (edsl-clause form "roof") 3))
+                      (mote (edsl-nums (edsl-clause form "mote") 3))
+                      (light (edsl-nums (edsl-clause form "light") 1))
+                      (mood (edsl-syms (edsl-clause form "mood")))
+                      (style (edsl-syms (edsl-clause form "style")))
+                      (part (edsl-syms (edsl-clause form "part")))
+                      (props (edsl-syms (edsl-clause form "props"))))
+                  (cond
+                    ((not (and sky sky1 sun path curb ground hill hill2 water build roof mote))
+                     (edsl-fail "channel"))
+                    ((not fog4) (edsl-fail "fog"))
+                    ((not (and (edsl-rgb? sky) (edsl-rgb? sky1) (edsl-rgb? sun) (edsl-rgb? path)
+                               (edsl-rgb? curb) (edsl-rgb? ground) (edsl-rgb? hill) (edsl-rgb? hill2)
+                               (edsl-rgb? water) (edsl-rgb? build) (edsl-rgb? roof) (edsl-rgb? mote)
+                               (edsl-chan? (car fog4)) (edsl-chan? (car (cdr fog4))) (edsl-chan? (car (cdr (cdr fog4))))))
+                     (edsl-fail "channel"))
+                    ((not light) (edsl-fail "light"))
+                    ((or (< (car (cdr (cdr (cdr fog4)))) 0.0) (> (car (cdr (cdr (cdr fog4)))) 0.30))
+                     (edsl-fail "fog"))
+                    ((or (< (car light) 0.74) (> (car light) 1.0)) (edsl-fail "light"))
+                    ((or (not mood) (not (= (length mood) 1)) (not (edsl-member? edsl-moods (car mood))))
+                     (edsl-fail "mood"))
+                    ((or (not style) (not (= (length style) 1)) (not (edsl-member? edsl-styles (car style))))
+                     (edsl-fail "style"))
+                    ((or (not part) (not (= (length part) 1)) (not (edsl-member? edsl-parts (car part))))
+                     (edsl-fail "part"))
+                    ((not (edsl-props-ok? props)) (edsl-fail "props"))
+                    ((not (> (edsl-sum path) 0.45)) (edsl-fail "path"))
+                    ((or (< (edsl-gap path edsl-hurdle) 0.18) (< (edsl-gap path edsl-gate) 0.18))
+                     (edsl-fail "contrast"))
+                    (else
+                     (let ((n (edsl-budget props (car style))))
+                       (if (> n edsl-cap)
+                         (edsl-fail "budget")
+                         (hash "ok" #t "why" "fair" "src" src "id" id
+                               "title" (edsl-title id "zh") "title-en" (edsl-title id "en")
+                               "region" "" "mood" (car mood) "style" (car style) "part" (car part)
+                               "light" (car light)
+                               "fog-amt" (car (cdr (cdr (cdr fog4))))
+                               "sky" sky "sky1" sky1
+                               "fog" (list (car fog4) (car (cdr fog4)) (car (cdr (cdr fog4))))
+                               "sun" sun "path" path "curb" curb "ground" ground
+                               "hill" hill "hill2" hill2 "water" water "build" build "roof" roof
+                               "mote" mote "props" props "instances" n
+                               "violations" (hash "budget" 0.0 "geometry" 0.0 "reachable" 0.0 "safe" 0.0)))))))))))))))
+
+(define (edsl-public spec)
+  (if (not (and (hash? spec) (hash-ref spec "ok" #t)))
+    #f
+    (hash "id" (hash-ref spec "id" "")
+          "title" (hash-ref spec "title" "")
+          "titleEn" (hash-ref spec "title-en" "")
+          "region" (hash-ref spec "region" "")
+          "mood" (hash-ref spec "mood" "day")
+          "style" (hash-ref spec "style" "")
+          "part" (hash-ref spec "part" "")
+          "light" (hash-ref spec "light" 0.8)
+          "fogAmt" (hash-ref spec "fog-amt" 0.2)
+          "sky" (hash-ref spec "sky")
+          "sky1" (hash-ref spec "sky1")
+          "fog" (hash-ref spec "fog")
+          "sun" (hash-ref spec "sun")
+          "path" (hash-ref spec "path")
+          "curb" (hash-ref spec "curb")
+          "ground" (hash-ref spec "ground")
+          "hill" (hash-ref spec "hill")
+          "hill2" (hash-ref spec "hill2")
+          "water" (hash-ref spec "water")
+          "build" (hash-ref spec "build")
+          "roof" (hash-ref spec "roof")
+          "mote" (hash-ref spec "mote")
+          "props" (hash-ref spec "props" (list)))))
+
+(define (edsl-named spec name)
+  (let ((t (if (and (string? name) (> (string-length name) 0))
+             (if (> (string-length name) 16) (substring name 0 16) name)
+             (hash-ref spec "title" ""))))
+    (hash-set (hash-set spec "title" t) "title-en" t)))
+
+(define (edsl-cjk? s)
+  (let ((n (if (string? s) (string-length s) 0)))
+    (let loop ((i 0))
+      (if (>= i n)
+        #f
+        (let ((c (string-ref s i)))
+          (if (and (>= c 19968) (<= c 40895))
+            #t
+            (loop (+ i 1))))))))
+
+(define (edsl-hash s)
+  (let ((n (if (string? s) (string-length s) 0)))
+    (let loop ((i 0) (h 0))
+      (if (>= i n)
+        h
+        (loop (+ i 1) (modulo (+ (* h 33) (string-ref s i)) 997))))))
+
+(define (edsl-key name)
+  (let ((s (if (string? name) name ""))
+        (low (if (string? name) (string-downcase name) "")))
+    (cond
+      ((or (edsl-has? s "拉萨") (edsl-has? s "藏") (edsl-has? s "疆")
+           (edsl-has? low "lhasa") (edsl-has? low "tibet")) "china-high")
+      ((or (edsl-has? s "大理") (edsl-has? s "洱") (edsl-has? low "dali")) "china-lake")
+      ((or (edsl-has? s "桂林") (edsl-has? s "漓") (edsl-has? low "guilin")) "china-mist")
+      ((or (edsl-has? s "阿姆斯特丹") (edsl-has? s "运河") (edsl-has? low "amsterdam")) "europe-canal")
+      ((or (edsl-has? s "布拉格") (edsl-has? s "维也纳") (edsl-has? s "柏林")
+           (edsl-has? low "prague") (edsl-has? low "vienna") (edsl-has? low "berlin")) "europe-stone")
+      ((or (edsl-has? s "芝加哥") (edsl-has? s "波士顿") (edsl-has? s "西雅图")
+           (edsl-has? low "chicago") (edsl-has? low "boston") (edsl-has? low "seattle")) "us-brick")
+      ((or (edsl-has? s "京都") (edsl-has? s "大阪") (edsl-has? s "首尔")
+           (edsl-has? s "新加坡") (edsl-has? s "曼谷")
+           (edsl-has? low "kyoto") (edsl-has? low "osaka") (edsl-has? low "seoul")
+           (edsl-has? low "singapore") (edsl-has? low "bangkok")) "asia-neon")
+      ((edsl-cjk? s)
+       (list-ref (list "china-mist" "china-high" "china-lake") (modulo (edsl-hash s) 3)))
+      (else
+       (list-ref (list "europe-stone" "us-brick" "asia-neon" "world-palm") (modulo (edsl-hash low) 4))))))
+
+(define (edsl-fallback name)
+  (let ((row (edsl-find-key edsl-templates (edsl-key name))))
+    (if (not row)
+      #f
+      (edsl-named row (if (string? name) name "")))))
+
+(define (edsl-copy-title spec)
+  spec)
+
+(define (edsl-say spec lang)
+  (let ((zh (string=? lang "zh"))
+        (t (if (hash? spec)
+             (if (string=? lang "zh") (hash-ref spec "title" "") (hash-ref spec "title-en" ""))
+             "")))
+    (if (or (not (string? t)) (= (string-length t) 0))
+      ""
+      (if zh (string-append "来到" t "了") (string-append t " is here")))))
+
+(define (edsl-row act name)
+  (hash "act" act "name" name "dir" 1
+        "zh" "" "en" ""))
+
+(define (edsl-remove? text low)
+  (or (edsl-has? text "去掉") (edsl-has? text "拿掉") (edsl-has? text "不要")
+      (edsl-has? text "删除") (edsl-has? text "移除")
+      (edsl-has? low "remove") (edsl-has? low "take away")))
+
+(define (edsl-soft? text low)
+  (or (edsl-has? low "sunny") (edsl-has? low "pink") (edsl-has? low "paint")
+      (edsl-has? low "flower") (edsl-has? low "golden")
+      (edsl-has? text "粉色") (edsl-has? text "金色") (edsl-has? text "花朵")))
+
+(define (edsl-han text i)
+  (let ((n (string-length text)))
+    (let loop ((k i) (s "") (c 0))
+      (if (or (>= k n) (>= c 8))
+        s
+        (let ((code (string-ref text k)))
+          (if (and (>= code 19968) (<= code 40895))
+            (loop (+ k 1) (string-append s (substring text k (+ k 1))) (+ c 1))
+            s))))))
+
+(define (edsl-skip? name)
+  (edsl-member?
+    (list "花园" "草地" "城市" "都市" "太空" "星空" "宇宙" "海边" "海岸" "海洋" "沙滩"
+          "夜晚" "夜景" "黑夜" "晚上" "日落" "黄昏" "霓虹" "赛博" "白天" "晴天"
+          "那里" "这里" "前面" "后面" "家里" "快点" "慢点" "左边" "右边"
+          "garden" "city" "space" "universe" "coast" "ocean" "beach"
+          "night" "day" "sunset" "dusk" "neon" "cyber"
+          "there" "here" "home" "faster" "slower" "the city" "the garden")
+    name))
+
+(define (edsl-drop-the s)
+  (if (and (string? s) (>= (string-length s) 4) (string=? (substring s 0 4) "the "))
+    (substring s 4 (string-length s))
+    s))
+
+(define (edsl-ask text low)
+  (if (edsl-remove? text low)
+    ""
+    (let ((go (string-index text "去" 0))
+          (to (string-index text "前往" 0)))
+      (let ((name
+              (cond
+                ((>= to 0) (edsl-han text (+ to 2)))
+                ((>= go 0) (edsl-han text (+ go 1)))
+                ((and (> (string-length text) 0) (= (string-ref text 0) (string-ref "到" 0)))
+                 (edsl-han text 1))
+                (else ""))))
+        (if (and (string? name) (>= (string-length name) 2) (not (edsl-skip? name)))
+          name
+          (let ((mark (cond
+                        ((>= (string-index low "take me to " 0) 0) "take me to ")
+                        ((>= (string-index low "go to " 0) 0) "go to ")
+                        ((>= (string-index low "goto " 0) 0) "goto ")
+                        (else ""))))
+            (if (string=? mark "")
+              ""
+              (let ((i (string-index low mark 0)))
+                (let ((rest (edsl-drop-the (substring text (+ i (string-length mark)) (string-length text)))))
+                  (let ((trim (if (> (string-length rest) 24) (substring rest 0 24) rest)))
+                    (if (and (>= (string-length trim) 2) (not (edsl-skip? (string-downcase trim))))
+                      trim
+                      "")))))))))))
+
+(define (edsl-city text low)
+  (cond
+    ((or (edsl-has? text "北京") (edsl-word? low "beijing") (edsl-word? low "peking")) "beijing")
+    ((or (edsl-has? text "上海") (edsl-word? low "shanghai")) "shanghai")
+    ((or (edsl-has? text "杭州") (edsl-has? text "西湖") (edsl-word? low "hangzhou")) "hangzhou")
+    ((or (edsl-has? text "成都") (edsl-word? low "chengdu")) "chengdu")
+    ((or (edsl-has? text "西安") (edsl-has? low "xi'an") (edsl-has? low "xi an") (edsl-word? low "xian")) "xian")
+    ((or (edsl-has? text "重庆") (edsl-word? low "chongqing")) "chongqing")
+    ((or (edsl-has? text "香港") (edsl-has? low "hong kong") (edsl-word? low "hongkong")) "hongkong")
+    ((or (edsl-has? text "纽约") (edsl-has? low "new york") (edsl-word? low "newyork") (edsl-word? low "nyc")) "newyork")
+    ((or (edsl-has? text "旧金山") (edsl-has? low "san francisco") (edsl-word? low "sanfrancisco")) "sanfrancisco")
+    ((or (edsl-has? text "洛杉矶") (edsl-has? low "los angeles") (edsl-word? low "losangeles")) "losangeles")
+    ((or (edsl-has? text "巴黎") (edsl-word? low "paris")) "paris")
+    ((or (edsl-has? text "伦敦") (edsl-word? low "london")) "london")
+    ((or (edsl-has? text "罗马") (edsl-word? low "rome")) "rome")
+    ((or (edsl-has? text "威尼斯") (edsl-word? low "venice")) "venice")
+    ((or (edsl-has? text "东京") (edsl-has? text "東京") (edsl-word? low "tokyo")) "tokyo")
+    (else "")))
+
+; A known city, a regional tour, or another city name. #f lets the
+; built-in venues and the garden wish answer.
+(define (edsl-hear text low)
+  (if (or (edsl-remove? text low) (not (string? text)))
+    #f
+    (let ((region
+            (cond
+              ((or (edsl-has? text "环球旅行") (edsl-has? text "下一个城市") (edsl-has? text "下个城市")
+                   (edsl-has? low "world tour")
+                   (and (edsl-word? low "next") (edsl-word? low "city")
+                        (not (edsl-word? low "scene")) (not (edsl-word? low "biome"))))
+               "world")
+              ((or (edsl-has? text "中国城市") (edsl-has? text "去中国")
+                   (edsl-has? low "chinese cities") (edsl-has? low "china cities")
+                   (edsl-has? low "go to china") (edsl-word? low "china"))
+               "china")
+              ((or (edsl-has? text "美国城市") (edsl-has? text "去美国")
+                   (edsl-has? low "american cities") (edsl-has? low "go to america")
+                   (edsl-word? low "america"))
+               "us")
+              ((or (edsl-has? text "欧洲城市") (edsl-has? text "去欧洲")
+                   (edsl-has? low "european cities") (edsl-has? low "go to europe")
+                   (edsl-word? low "europe"))
+               "europe")
+              (else ""))))
+      (if (not (string=? region ""))
+        (edsl-row "biome-tour" region)
+        (let ((city (edsl-city text low)))
+          (if (not (string=? city ""))
+            (edsl-row "biome" city)
+            (if (edsl-soft? text low)
+              #f
+              (let ((asked (edsl-ask text low)))
+                (if (string=? asked "")
+                  #f
+                  (edsl-row "biome-ask" asked))))))))))
