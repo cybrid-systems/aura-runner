@@ -126,7 +126,15 @@ function attachSocket(ws) {
       if (line.length) ws.write(encodeFrame(line));
     }
   });
-  aura.on("error", () => { try { ws.end(); } catch { /* closed */ } });
+  // The core accepts one client. Drop that socket as soon as the browser
+  // goes away, including a half-close, so the next page can connect.
+  let dropped = false;
+  function dropAura() {
+    if (dropped) return;
+    dropped = true;
+    try { aura.end(); } catch { /* closed */ }
+  }
+  aura.on("error", () => { try { ws.destroy(); } catch { /* closed */ } });
   aura.on("close", () => { try { ws.end(); } catch { /* closed */ } });
 
   let pending = Buffer.alloc(0);
@@ -154,7 +162,7 @@ function attachSocket(ws) {
       const payload = Buffer.from(pending.subarray(off + maskLen, off + maskLen + len));
       if (masked) for (let i = 0; i < payload.length; i++) payload[i] ^= mask[i & 3];
       pending = pending.subarray(off + maskLen + len);
-      if (op === 8) { aura.end(); ws.end(); return; }
+      if (op === 8) { dropAura(); try { ws.end(); } catch { /* closed */ } return; }
       if (op === 9) { ws.write(Buffer.from([0x8a, payload.length, ...payload])); continue; }
       if (op === 1) {
         const text = payload.toString("utf8");
@@ -162,8 +170,9 @@ function attachSocket(ws) {
       }
     }
   });
-  ws.on("close", () => aura.destroy());
-  ws.on("error", () => aura.destroy());
+  ws.on("end", dropAura);
+  ws.on("close", dropAura);
+  ws.on("error", dropAura);
 }
 
 const server = http.createServer((req, res) => {
@@ -223,6 +232,9 @@ server.on("upgrade", (req, socket) => {
   attachSocket(socket);
 });
 
-server.listen(webPort, "127.0.0.1", () => {
-  console.log(`Lumen Run  http://127.0.0.1:${webPort}`);
+// 127.0.0.1 keeps ./run.sh on this machine. The container sets
+// AURA_RUNNER_BIND=0.0.0.0 so Docker's published port can reach the page.
+const bindHost = process.env.AURA_RUNNER_BIND || "127.0.0.1";
+server.listen(webPort, bindHost, () => {
+  console.log(`Lumen Run  http://${bindHost}:${webPort}`);
 });

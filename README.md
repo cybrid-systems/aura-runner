@@ -16,7 +16,18 @@ Linux x86_64 or arm64, Node.js 22, `bash`, `curl`, and `python3`. No C compiler,
 
 The first run downloads the [Aura nightly](https://github.com/cybrid-systems/aura/releases/tag/nightly) (sha256-checked, cached in `~/.cache/lumen-run`) and prints the version, where it came from (`download`, `cache`, or `offline`), and the URL. Open that URL. The page retries until the core is listening. Ctrl-C stops both. If 8080 or 8765 is taken, `./run.sh` prints the next free port. `AURA_RUNNER_WEB` and `AURA_RUNNER_PORT` pin one.
 
-`AURA_BIN=/path/to/aura` uses a binary you already have. `AURA_VERSION=v0.2.7` pins a release instead of `nightly`. `AURA_OFFLINE=1` uses the cache and does not touch the network. The nightly release publishes Linux x86_64 and arm64. On a Mac, install [OrbStack](https://orbstack.dev) or Docker Desktop and run `./run.sh` again: it uses the prebuilt image `ghcr.io/cybrid-systems/aura:nightly` and does not compile.
+`AURA_BIN=/path/to/aura` uses a binary you already have. `AURA_VERSION=v0.2.7` pins a release instead of `nightly`. `AURA_OFFLINE=1` uses the cache and does not touch the network. The nightly release publishes Linux x86_64 and arm64. On a Mac, install [OrbStack](https://orbstack.dev) or Docker Desktop and run `./run.sh` again: it uses the prebuilt image `ghcr.io/cybrid-systems/aura:nightly` and does not compile. To play without installing Node, use [Run it with Docker](#run-it-with-docker-easiest).
+
+## Run it with Docker (easiest)
+
+On a Mac this is the short path. Docker Desktop and OrbStack both run the linux/arm64 image on Apple Silicon. You do not need Node or a compiler.
+
+1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) or [OrbStack](https://orbstack.dev) and open it.
+2. Get this folder: `git clone https://github.com/cybrid-systems/aura-runner.git` and `cd aura-runner`, or download the ZIP from GitHub and unzip it.
+3. Run `./play.sh`. The first question is which AI service; press Enter for MiniMax. The next question is the API key; press Enter to play with AI features off, or paste a key. The key is not shown. It is saved in `.env` (mode 0600, and git ignores it). `./play.sh --setup` asks both questions again.
+4. When the game is ready, it opens in the browser. The script prints the URL and a `docker run` command. If port 8080 is taken, it picks another one.
+
+The image is `ghcr.io/cybrid-systems/aura-runner`. If that download is not available yet, `./play.sh` builds it from the same Aura nightly `./run.sh` downloads, and does not compile Aura. The next start uses that copy and does not build again.
 
 ## Controls
 
@@ -115,6 +126,7 @@ web/       WebGL2 view. Low is one pass; Medium and High add shadow, bloom, grad
 lib/       Biome EDSL, physics, voice, pals, hearts, race
 scripts/   Checks, seeded play-review, LLM probe
 bridge/    Static page and the WebSocket bridge. ./run.sh starts it
+docker/    Container entrypoint. ./play.sh starts the image
 docs/      Demo poster and video
 ```
 
@@ -137,6 +149,8 @@ docs/      Demo poster and video
 | `node scripts/check-voice.mjs` | Soft voice stays on 196 Hz |
 | `bash scripts/check-install.sh` | Install from an empty cache, offline reuse |
 | `bash scripts/check-runsh.sh` | `./run.sh` downloads a prebuilt binary and serves the page |
+| `bash scripts/check-play.sh` | `./play.sh` questions, hidden key, gitignored env |
+| `bash scripts/check-docker.sh` | Image serves the page and the core with no LLM |
 | `node scripts/smoke.mjs` | Seeded end-to-end run |
 | `node scripts/mock-llm-e2e.mjs` | Mock LLM rebind |
 | `node scripts/check-edsl-e2e.mjs` | EDSL gate and voice switch |

@@ -1,0 +1,13 @@
+.git
+.github
+out
+.tools
+.aura
+node_modules
+docs
+perf
+tests
+*.log
+.env
+.env.*
+**/*.md

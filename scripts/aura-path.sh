@@ -261,6 +261,18 @@ container_fallback_ok() {
   docker_ready
 }
 
+# Print CONTAINER and return 0 when this machine should run the image.
+use_container() {
+  local os="$1" arch="$2"
+  if ! container_fallback_ok; then
+    return 1
+  fi
+  echo "No native Aura build for ${os}/${arch}. Using the prebuilt Linux image." >&2
+  write_container_wrapper
+  printf '%s\n' "CONTAINER"
+  return 0
+}
+
 write_container_wrapper() {
   local dest slug
   slug="$(aura_version_slug)"
@@ -275,6 +287,7 @@ exec docker run --rm \\
   -p "127.0.0.1:\${port}:\${port}" \\
   -v "\${work}:/work" -w /work \\
   -e AURA_SANDBOX -e AURA_RUNNER_PORT -e AURA_EVO_LOG -e AURA_HTTP_TIMEOUT \\
+  -e AURA_RUNNER_BIND=0.0.0.0 \\
   -e LLM_API_KEY -e LLM_BASE_URL -e LLM_MODEL -e LLM_TIMEOUT -e LUMEN_LLM \\
   "ghcr.io/cybrid-systems/aura:${slug}" \\
   "\$@"
@@ -312,6 +325,11 @@ pick_asset_from_api() {
       echo "Aura release '${tag}' was not found." >&2
       echo "AURA_VERSION can be nightly or a tag such as v0.2.7." >&2
       return 1
+    fi
+    # A 403 or a dropped connection from the release API used to stop here,
+    # before the Mac container path. Docker can still run the Linux image.
+    if use_container "$os" "$arch"; then
+      return 0
     fi
     # The conventional asset names already failed. A 403 from the release
     # API (common unauthenticated) must not hide the Mac instructions.
@@ -364,15 +382,15 @@ else:
 PY
 )" || {
     rm -f "$body"
+    if use_container "$os" "$arch"; then
+      return 0
+    fi
     echo "Could not read the asset list for Aura release ${tag}." >&2
     return 1
   }
   rm -f "$body"
   if [[ "$chosen" == NONE* || -z "$chosen" ]]; then
-    if container_fallback_ok; then
-      echo "No native Aura build for ${os}/${arch}. Using the prebuilt Linux image." >&2
-      write_container_wrapper
-      printf '%s\n' "CONTAINER"
+    if use_container "$os" "$arch"; then
       return 0
     fi
     explain_no_native "$os" "$arch" "$tag" "$chosen"

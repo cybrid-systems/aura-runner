@@ -4,3 +4,6 @@ out/
 node_modules/
 *.log
 .DS_Store
+# API answers from ./play.sh. Never commit a key.
+.env
+.env.*
