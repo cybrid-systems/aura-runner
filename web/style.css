@@ -158,7 +158,45 @@ html, body {
   background: #ffe08a;
 }
 #meter.full #meter-fill { background: #fff6e8; }
-#score.pop, #grade.pop, #pace.pop { animation: pop 0.28s ease-out; }
+#mult {
+  position: fixed;
+  top: max(8px, env(safe-area-inset-top));
+  left: max(96px, calc(env(safe-area-inset-left) + 78px));
+  margin: 0;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: #ffe08a;
+  color: #8a3414;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+  box-shadow: 0 3px 0 rgba(92, 52, 20, 0.16);
+}
+#score.pop, #grade.pop, #pace.pop, #mult.pop { animation: pop 0.28s ease-out; }
+#evo {
+  position: fixed;
+  top: max(78px, calc(env(safe-area-inset-top) + 66px));
+  right: max(16px, env(safe-area-inset-right));
+  width: min(280px, 34vw);
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 18px;
+  background: rgba(255, 246, 232, 0.96);
+  color: var(--ink);
+  font-size: clamp(16px, 2.1vw, 22px);
+  font-weight: 800;
+  line-height: 1.25;
+  text-align: right;
+  pointer-events: none;
+  box-shadow: 0 10px 24px rgba(92, 52, 20, 0.16);
+}
+#evo[hidden] { display: none; }
+#evo.show { animation: evo-in 0.28s ease both; }
+@keyframes evo-in {
+  0% { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: none; }
+}
 @keyframes pop {
   from { transform: translateY(4px) scale(1.16); }
   to { transform: none; }
@@ -541,5 +579,5 @@ html, body {
 }
 #bench { position: fixed; left: 8px; top: 40%; color: white; }
 @media (prefers-reduced-motion: reduce) {
-  #score, #toast, #gain, #grade, #pace { animation: none; text-shadow: none; }
+  #score, #toast, #gain, #grade, #pace, #mult, #evo { animation: none; text-shadow: none; }
 }

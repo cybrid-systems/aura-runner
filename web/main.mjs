@@ -1,5 +1,6 @@
 import { DT, bodyLane, makePlayer, praiseClear, pressJump, pressLane, pressSlide, rulesOf, step } from "./sim.mjs";
 import { awardPickup, challengeFor, challengeMet, dropGrade, gradeLabel, lootWorth, nearMiss, overtake, praise, skimmed, trackOvertake } from "./score.mjs";
+import { clampMult } from "./runstate.mjs";
 import { createRenderer } from "./render.mjs";
 import { createInput } from "./input.mjs";
 import { createAudio } from "./audio.mjs";
@@ -23,6 +24,8 @@ const saidEl = document.getElementById("said");
 const toastEl = document.getElementById("toast");
 const flashEl = document.getElementById("flash");
 const comboEl = document.getElementById("combo");
+const multEl = document.getElementById("mult");
+const evoEl = document.getElementById("evo");
 const gainEl = document.getElementById("gain");
 const meterEl = document.getElementById("meter");
 const meterFill = document.getElementById("meter-fill");
@@ -83,6 +86,11 @@ let hero = { kind: "keeper", plan: "keeper", r: 0.95, g: 0.72, b: 0.45 };
 let bend = 0.38;
 let loot = "coin";
 let levelN = 1;
+let runMult = 1;
+let biomeName = "garden";
+let moodName = "day";
+let bannerId = 0;
+let bannerUntil = 0;
 let levelGoal = 0;
 let props = [];
 let sunHide = false;
@@ -437,6 +445,17 @@ function resetLocal() {
   rewardUntil = 0;
   document.documentElement.dataset.reward = "0";
   if (wardEl) wardEl.classList.remove("boost");
+  runMult = 1;
+  biomeName = "garden";
+  moodName = "day";
+  bannerId = 0;
+  bannerUntil = 0;
+  if (multEl) multEl.textContent = "×1";
+  if (evoEl) {
+    evoEl.hidden = true;
+    evoEl.textContent = "";
+    evoEl.classList.remove("show");
+  }
   feltSpeed = rules.speed;
   comboEl.hidden = true;
   comboEl.classList.remove("hot");
@@ -523,6 +542,7 @@ function onLevelChange(prev) {
 }
 
 function applyLevel(msg) {
+  // A gate updates the level. The combo and the distance stay.
   const prev = levelN;
   if (typeof msg.level === "number") levelN = msg.level;
   if (typeof msg.goal === "number") levelGoal = msg.goal;
@@ -531,6 +551,30 @@ function applyLevel(msg) {
   if (typeof msg.level === "number" && levelN > prev && serverRun >= 0) onLevelChange(prev);
   noteCardGrants();
   paintChallenge();
+}
+
+const VENUES = new Set(["garden", "city", "space", "coast"]);
+const MOODS = new Set(["day", "night", "sunset", "neon"]);
+
+function showEvo(text) {
+  if (!evoEl || !text) return;
+  evoEl.hidden = false;
+  evoEl.textContent = text;
+  evoEl.classList.remove("show");
+  void evoEl.offsetWidth;
+  evoEl.classList.add("show");
+  bannerUntil = performance.now() + 1700;
+}
+
+function applyVenue(msg) {
+  if (typeof msg.mult === "number") runMult = clampMult(msg.mult);
+  if (typeof msg.biome === "string" && VENUES.has(msg.biome)) biomeName = msg.biome;
+  if (typeof msg.mood === "string" && MOODS.has(msg.mood)) moodName = msg.mood;
+  const id = msg["banner-id"];
+  if (typeof id === "number" && id !== bannerId && typeof msg.banner === "string" && msg.banner) {
+    bannerId = id;
+    showEvo(msg.banner);
+  }
 }
 
 function clampInt(v, lo, hi, fallback) {
@@ -542,7 +586,7 @@ function clampInt(v, lo, hi, fallback) {
 function blankRecord() {
   return {
     level: 1, form: 0, points: 0, grade: 1, bank: 0, bestLevel: 1, bestPoints: 0,
-    bestCombo: 0, cleanRuns: 0, crests: 0,
+    bestCombo: 0, cleanRuns: 0, crests: 0, mult: 1, biome: "garden", mood: "day",
   };
 }
 
@@ -558,7 +602,10 @@ function sanitizeRecord(raw) {
   const bestCombo = clampInt(raw.bestCombo, 0, 99, 0);
   const cleanRuns = clampInt(raw.cleanRuns, 0, 9999, 0);
   const crests = clampInt(raw.crests, 0, 9999, 0);
-  return { level, form, points, grade, bank, bestLevel, bestPoints, bestCombo, cleanRuns, crests };
+  const mult = clampInt(raw.mult, 1, 8, Math.max(1, Math.min(8, level)));
+  const biome = typeof raw.biome === "string" && VENUES.has(raw.biome) ? raw.biome : "garden";
+  const mood = typeof raw.mood === "string" && MOODS.has(raw.mood) ? raw.mood : "day";
+  return { level, form, points, grade, bank, bestLevel, bestPoints, bestCombo, cleanRuns, crests, mult, biome, mood };
 }
 
 function readRecord() {
@@ -622,7 +669,8 @@ function sameRecord(a, b) {
   return a.level === b.level && a.form === b.form && a.points === b.points
     && a.grade === b.grade && a.bank === b.bank
     && a.bestLevel === b.bestLevel && a.bestPoints === b.bestPoints
-    && a.bestCombo === b.bestCombo && a.cleanRuns === b.cleanRuns && a.crests === b.crests;
+    && a.bestCombo === b.bestCombo && a.cleanRuns === b.cleanRuns && a.crests === b.crests
+    && a.mult === b.mult && a.biome === b.biome && a.mood === b.mood;
 }
 
 function syncRecord() {
@@ -640,6 +688,9 @@ function syncRecord() {
     bestCombo: Math.max(record.bestCombo | 0, levelMaxCombo | 0),
     cleanRuns: record.cleanRuns | 0,
     crests: record.crests | 0,
+    mult: clampInt(runMult, 1, 8, 1),
+    biome: biomeName,
+    mood: moodName,
   };
   if (sameRecord(record, next)) return;
   record = next;
@@ -829,9 +880,18 @@ function connect() {
       const seedParam = params.get("seed");
       const hello = { op: "hello", seed: seedParam ? Number(seedParam) : 42 };
       if (record.level > 1 || record.form > 0 || record.points > 0) {
-        hello.resume = { level: record.level, form: record.form, points: record.points };
+        hello.resume = {
+          level: record.level,
+          form: record.form,
+          points: record.points,
+          mult: record.mult,
+          biome: record.biome,
+          mood: record.mood,
+        };
         carry = { grade: record.grade, bank: record.bank, level: record.level };
       }
+      if (params.get("venue")) hello.venue = params.get("venue");
+      if (params.get("mood")) hello.mood = params.get("mood");
       ws.send(JSON.stringify(hello));
     }
   };
@@ -844,6 +904,7 @@ function connect() {
       booted = true;
       seed = msg.seed;
       applyRules(msg);
+      applyVenue(msg);
       feltSpeed = rules.speed;
       if (typeof msg.points === "number" && msg.points >= 0) player[6] = msg.points;
       if (carry && typeof msg.level === "number" && msg.level === carry.level) {
@@ -867,6 +928,7 @@ function connect() {
       booted = true;
     } else if (msg.op === "rules") {
       applyRules(msg);
+      applyVenue(msg);
       window.__lumen = Object.assign(window.__lumen || {}, {
         motif: msg.motif || "",
         scene: msg.scene || "",
@@ -880,6 +942,7 @@ function connect() {
       reconcile(msg);
       applyScene(msg);
       applyLook(msg);
+      applyVenue(msg);
       window.__lumen = Object.assign(window.__lumen || {}, {
         chunks: msg.chunks,
         motif: msg.motif || (window.__lumen && window.__lumen.motif),
@@ -972,6 +1035,33 @@ window.__lumenBenchMark = () => {
   }
 };
 
+// Real elapsed time for one drawn frame, without the vsync gap. Headless
+// Chrome does not deliver animation frames, so the bench calls this.
+window.__lumenTimeFrames = (n) => {
+  const count = Math.max(1, Math.min(60, n | 0));
+  const samples = [];
+  stepping = true;
+  try {
+    for (let i = 0; i < count; i++) {
+      const t0 = performance.now();
+      frame(t0);
+      if (renderer && renderer.gl) renderer.gl.finish();
+      samples.push(performance.now() - t0);
+    }
+  } finally {
+    stepping = false;
+  }
+  samples.sort((a, b) => a - b);
+  const at = (q) => samples[Math.min(samples.length - 1, Math.floor(q * (samples.length - 1)))] || 0;
+  return {
+    n: samples.length,
+    p50: at(0.5),
+    p95: at(0.95),
+    instances: Number(canvas.dataset.instances || 0),
+    biome: canvas.dataset.biome || biomeName,
+  };
+};
+
 window.__lumenFramePeek = () => {
   const n = Math.min(frameN, frames.length);
   if (!n) return { n: 0 };
@@ -1001,6 +1091,9 @@ function restart() {
       bestCombo: record.bestCombo | 0,
       cleanRuns: record.cleanRuns | 0,
       crests: record.crests | 0,
+      mult: 1,
+      biome: params.get("venue") && VENUES.has(params.get("venue")) ? params.get("venue") : "garden",
+      mood: params.get("mood") && MOODS.has(params.get("mood")) ? params.get("mood") : "day",
     };
     writeRecord();
     paintRecord();
@@ -1012,7 +1105,10 @@ function restart() {
   showCue("From the start");
   resetLocal();
   if (connected && ws && ws.readyState === 1) {
-    ws.send(JSON.stringify({ op: "restart", seed }));
+    const again = { op: "restart", seed };
+    if (params.get("venue")) again.venue = params.get("venue");
+    if (params.get("mood")) again.mood = params.get("mood");
+    ws.send(JSON.stringify(again));
   }
 }
 
@@ -1049,6 +1145,10 @@ function publishProbe() {
   root.dataset.bank = String(gradeBank);
   root.dataset.speed = String(rules.speed);
   root.dataset.level = String(levelN);
+  root.dataset.mult = String(runMult);
+  root.dataset.biome = biomeName;
+  root.dataset.mood = moodName;
+  root.dataset.banner = evoEl && !evoEl.hidden ? evoEl.textContent : "";
   root.dataset.goal = Number.isFinite(levelGoal) ? levelGoal.toFixed(1) : "";
   root.dataset.props = props.join(",");
   root.dataset.sun = sunHide ? "off" : props.includes("sun") ? "on" : "soft";
@@ -1139,7 +1239,7 @@ function frame(now) {
         audio.pickup(loot);
         spark = "coin";
         const worth = takeCoinWorth(pieces) || rules.worth;
-        const got = awardPickup(worth, combo, comboUntil, now, grade, gradeBank);
+        const got = awardPickup(worth, combo, comboUntil, now, grade, gradeBank, runMult);
         combo = got.combo;
         comboUntil = got.comboUntil;
         player[6] += got.extra;
@@ -1154,7 +1254,7 @@ function frame(now) {
         if (rose) celebrateGrade();
       }
       if (!ward.held && ev !== "bump" && ev !== "oops" && scanPraise()) {
-        paySkill(praise(grade, gradeBank), false);
+        paySkill(praise(grade, gradeBank, runMult), false);
         audio.nice();
         nearSpark = true;
       }
@@ -1175,14 +1275,14 @@ function frame(now) {
       if (wasY > 0.2 && player[1] <= 0.001 && player[5] > 0) audio.land();
       if (hearPoppers(pieces)) audio.pop();
       if (scanNear(now)) {
-        paySkill(nearMiss(grade, gradeBank), false);
+        paySkill(nearMiss(grade, gradeBank, runMult), false);
         levelNear += 1;
         nearSpark = true;
         audio.near();
       }
       const passes = scanOvertakes();
       for (let pass = 0; pass < passes; pass++) {
-        paySkill(overtake(grade, gradeBank), false);
+        paySkill(overtake(grade, gradeBank, runMult), false);
         levelOvertakes += 1;
         audio.nice();
       }
@@ -1222,6 +1322,8 @@ function frame(now) {
         near: nearSpark, reject: rejectSpark,
         scene: sceneView, stumble: stumble / 1500, pals, hero, bend, loot,
         goal: levelGoal,
+        biome: biomeName,
+        mood: moodName,
         props,
         sunHide,
         shown: shownToys,
@@ -1246,6 +1348,19 @@ function frame(now) {
   } else if (!toastQ.length && toastUntil && now > toastUntil + 200) {
     toastEl.hidden = true;
     toastUntil = 0;
+  }
+  if (bannerUntil && performance.now() > bannerUntil && !window.__lumenHoldBanner) {
+    if (evoEl) evoEl.hidden = true;
+    bannerUntil = 0;
+  }
+  if (multEl) {
+    const multLabel = "×" + runMult;
+    if (multEl.textContent !== multLabel) {
+      multEl.textContent = multLabel;
+      multEl.classList.remove("pop");
+      void multEl.offsetWidth;
+      multEl.classList.add("pop");
+    }
   }
   if (combo >= 2 && now < comboUntil) {
     comboEl.hidden = false;
@@ -1421,6 +1536,8 @@ function finishBench() {
   benchEl.hidden = false;
   benchEl.textContent = JSON.stringify({
     frames: n, p50: p(0.5), p95: p(0.95), hz: 1000 / (p(0.5) || 16),
+    instances: Number(canvas.dataset.instances || 0),
+    biome: canvas.dataset.biome || biomeName,
   });
 }
 
@@ -1516,5 +1633,15 @@ installWish({
     return true;
   },
 });
+window.__lumenSay = (text, lang) => {
+  if (!ws || ws.readyState !== 1) return false;
+  ws.send(JSON.stringify({
+    op: "wish",
+    text: String(text || "").slice(0, 80),
+    lang: lang === "zh" ? "zh-CN" : "en",
+    source: "voice",
+  }));
+  return true;
+};
 connect();
 requestAnimationFrame(frame);
