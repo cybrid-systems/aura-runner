@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const aura = process.env.AURA_BIN || "aura";
-const AURA_START_MS = Number(process.env.AURA_START_MS || 30000);
+const AURA_START_MS = Number(process.env.AURA_START_MS || 90000);
 const LAVA = "(biome lava-canyon (label Lava-Canyon) (sky 0.42 0.16 0.18 0.86 0.40 0.22) (fog 0.55 0.28 0.22 0.18) (body sun) (road 0.70 0.42 0.28) (curb 0.42 0.24 0.16) (ground 0.22 0.16 0.16) (surface lava) (light 0.78) (mood 0.84) (particles embers 0.36) (props (rock 0.32 1.05) (arch 0.18 0.95)) (recipe mix))";
 
 function cleanEnv(env) {

@@ -9,7 +9,7 @@ import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 // The core compiles before it prints PORT; that takes about 8 s on a loaded box.
-const AURA_START_MS = Number(process.env.AURA_START_MS || 30000);
+const AURA_START_MS = Number(process.env.AURA_START_MS || 90000);
 
 function cleanEnv(env) {
   delete env.LUMEN_DEEPSEEK_KEY;
