@@ -1,5 +1,6 @@
 ; Pickup strings follow the next move and the pace. Hazards stay put.
 (require "lib/gen")
+(require "lib/coins")
 
 (define (show k v)
   (display k)

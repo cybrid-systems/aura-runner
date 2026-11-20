@@ -18,7 +18,6 @@
 (require "lib/edsl")
 (require "lib/thing")
 (require "lib/chase")
-(require "lib/coins")
 (require "lib/hearts")
 (require "lib/race")
 (require "lib/world")
@@ -238,7 +237,21 @@
 ; The rival's pace. One knob at a time, after a level, on its own arm.
 ; A miss puts the previous numbers back. It is not the band policy.
 (define chase (chase-blank))
-(define coin-params (coin-blank))
+; Blank until the first chunk or the first trial. lib/coins is compiled
+; on that call, not while the core is still opening the port.
+(define coin-params #f)
+(define coins-on #f)
+(define (load-coins!)
+  (if coins-on
+    coin-params
+    (begin
+      (require "lib/coins")
+      (set! coins-on #t)
+      (if (hash? coin-params)
+        coin-params
+        (begin
+          (set! coin-params (coin-blank))
+          coin-params)))))
 (define level-coins 0)
 (define level-swaps 0)
 (define chase-recent (list))
@@ -1118,6 +1131,7 @@
   (set! level-overtakes 0)
   (set! level-coins 0)
   (set! level-swaps 0)
+  (load-coins!)
   (set! coin-params (coin-blank))
   (set! level-streak 0)
   (set! pressure-now 1)
@@ -2187,6 +2201,7 @@
 ; the same evo:trial the other arms use. A collapsed lane weight, or a
 ; coin sitting in an obstacle, rolls back.
 (define (consider-coins! played bumps coins swaps near)
+  (load-coins!)
   (let ((step (coin-step coin-params played bumps coins swaps near speed-now)))
     (if (not (hash-ref step "moved" #f))
       #f
@@ -3848,6 +3863,7 @@
   (set! band (hash-ref saved "band"))
   (set! chase (hash-ref saved "chase"))
   (set! chase-recent (hash-ref saved "recent"))
+  (load-coins!)
   (set! coin-params (let ((row (hash-ref saved "spread" #f)))
                       (if (and (hash? row) (coin-bounds? row)) row (coin-blank))))
   (set! card-phase (hash-ref saved "card-phase"))
