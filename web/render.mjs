@@ -46,6 +46,7 @@ export function palette(h, scene) {
   const bloom = flowerPair(scene && scene.flower);
   const skyLift = 0.78 + 0.22 * light;
   return {
+    sky,
     sky0: mul(sky, skyLift),
     sky1: mix3(mul(sky, skyLift), [1.0, 0.72, 0.48], 0.42),
     fog: mix3(mix3(mul(sky, 0.92), [1, 1, 1], 0.42), [1.0, 0.86, 0.72], 0.18),
@@ -415,13 +416,22 @@ void main() {
   float h2 = 0.22 + 0.035 * sin(x * 15.0 + 1.4 + parallax * 1.7);
   if (uv.y < h1) c = mix(c, uHill, smoothstep(h1, h1 - 0.08, uv.y));
   if (uv.y < h2) c = mix(c, uHill2, 0.9);
-  float cloud = sin(x * 5.0 + parallax);
-  c = mix(c, vec3(1.0, 0.95, 0.88), smoothstep(0.2, 0.9, cloud) * smoothstep(0.4, 0.75, uv.y) * 0.22);
+  // Two slow sine sheets. uTime is seconds; no FBM, just a drift.
+  float drift = uTime * 0.08;
+  float cloudA = sin(x * 5.0 + parallax + drift);
+  float cloudB = sin(x * 10.5 - drift * 1.5 + 1.4);
+  float cloudC = sin(x * 2.3 + drift * 0.45 + uv.y * 3.2);
+  float band = smoothstep(0.4, 0.75, uv.y);
+  float puff = smoothstep(0.2, 0.9, cloudA) * 0.62 + smoothstep(0.3, 0.92, cloudB) * 0.38;
+  c = mix(c, vec3(1.0, 0.95, 0.88), puff * band * 0.24);
+  c = mix(c, vec3(1.0, 0.97, 0.93), smoothstep(0.5, 0.98, cloudC) * smoothstep(0.62, 0.9, uv.y) * 0.12);
   vec2 sun = vec2(x, uv.y) - uSun;
   float sd = length(sun);
   float sunAmt = max(uSunAmt, 0.0);
   c += uSunCol * smoothstep(0.14, 0.0, sd) * 0.5 * sunAmt;
   c += vec3(1.0, 0.97, 0.9) * smoothstep(0.035, 0.0, sd) * sunAmt;
+  c = max(c, vec3(0.0));
+  c = clamp((c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14), 0.0, 1.0);
   o = vec4(c, 1.0);
 }`;
 
@@ -445,6 +455,9 @@ flat out float vShape;
 flat out float vRough;
 flat out float vEmit;
 flat out float vYaw;
+flat out float vMetal;
+flat out float vSheen;
+flat out float vKind;
 void main() {
   // Yaw is roadPoint psi. Local +Z becomes the road tangent (sin ψ, 0, cos ψ).
   float c = cos(iYaw.x);
@@ -462,6 +475,9 @@ void main() {
   vRough = iSize.w;
   vEmit = iColor.a;
   vYaw = iYaw.x;
+  vMetal = iYaw.y;
+  vSheen = iYaw.z;
+  vKind = iYaw.w;
   gl_Position = uProj * uView * vec4(world, 1.0);
 }`;
 
@@ -470,7 +486,9 @@ precision highp float;
 in vec3 vN; in vec3 vW; in vec3 vC; in vec3 vL;
 flat in vec3 vCenter; flat in vec3 vHalf; flat in float vShape;
 flat in float vRough; flat in float vEmit; flat in float vYaw;
-uniform vec3 uEye; uniform vec3 uFog; uniform float uFogAmt; uniform vec3 uLight; uniform float uTime;
+flat in float vMetal; flat in float vSheen; flat in float vKind;
+uniform vec3 uEye; uniform vec3 uFog; uniform float uFogAmt;
+uniform vec3 uLight; uniform float uLightAmt; uniform vec3 uSkyAmb; uniform vec3 uSoil; uniform float uTime;
 out vec4 o;
 // Cylinder, cone and torus live in the unit box of the instance and are
 // marched in that box, so any part a generated thing names is drawn by
@@ -481,10 +499,26 @@ float unitSdf(vec3 p, float shape) {
   if (shape < 4.5) return max((rr - 0.5 * (0.5 - p.y)) * 0.894, abs(p.y) - 0.5);
   return length(vec2(rr - 0.32, p.y * 0.36)) - 0.18;
 }
+vec3 aces(vec3 x) {
+  x = max(x, vec3(0.0));
+  return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+}
 void main() {
   vec3 n = normalize(vN);
   vec3 rd = normalize(vW - uEye);
-  if (vShape > 2.5) {
+  float cov = 1.0;
+  float eyeD = length(vCenter - uEye);
+  bool asBox = vShape < 0.5;
+  if (vShape > 2.5 && eyeD > 32.0) {
+    // Very far: the bounding cube is enough. Skip the march.
+    asBox = true;
+    float edge = min(min(0.5 - abs(vL.x), 0.5 - abs(vL.y)), 0.5 - abs(vL.z));
+    n = normalize(vN + vL * smoothstep(0.16, 0.0, edge) * 0.85);
+  } else if (vShape > 2.5) {
+    int budget = 40;
+    float minStep = 0.004;
+    if (eyeD > 20.0) { budget = 8; minStep = 0.018; }
+    else if (eyeD > 13.0) { budget = 16; minStep = 0.009; }
     float cy = cos(vYaw);
     float sy = sin(vYaw);
     vec3 size = max(vHalf * 2.0, vec3(1e-3));
@@ -492,15 +526,24 @@ void main() {
     rl = normalize(rl);
     vec3 p0 = vL;
     float t = 0.0;
+    float closest = 1e3;
+    vec3 cq = p0;
     bool hit = false;
     for (int i = 0; i < 40; i++) {
-      float d = unitSdf(p0 + rl * t, vShape);
-      if (d < 0.002) { hit = true; break; }
-      t += max(d * 0.85, 0.004);
+      if (i >= budget) break;
+      vec3 q = p0 + rl * t;
+      float d = unitSdf(q, vShape);
+      if (d < closest) { closest = d; cq = q; }
+      if (d < 0.01) { hit = true; break; }
+      t += max(d * 0.88, minStep);
       if (t > 1.8) break;
     }
-    if (!hit) discard;
-    vec3 q = p0 + rl * t;
+    if (!hit) {
+      float w = max(fwidth(closest), 0.004);
+      cov = smoothstep(w, -w, closest);
+      if (cov < 0.04) discard;
+    }
+    vec3 q = cq;
     vec2 e = vec2(0.003, 0.0);
     vec3 g = vec3(unitSdf(q + e.xyy, vShape) - unitSdf(q - e.xyy, vShape),
                   unitSdf(q + e.yxy, vShape) - unitSdf(q - e.yxy, vShape),
@@ -512,33 +555,61 @@ void main() {
     vec3 oc = uEye - vCenter;
     float b = dot(oc, rd);
     float h = b * b - (dot(oc, oc) - r * r);
-    if (h < 0.0) discard;
-    vec3 hit = uEye + rd * (-b - sqrt(h));
+    float w = max(fwidth(h), 1e-4);
+    cov = smoothstep(-w, w, h);
+    if (cov < 0.02) discard;
+    vec3 hit = uEye + rd * (-b - sqrt(max(h, 0.0)));
     n = normalize(hit - vCenter);
   } else if (vShape > 1.5 && vShape < 2.5) {
-    if (abs(vL.x) + abs(vL.y) + abs(vL.z) > 0.82) discard;
-    n = normalize(vec3(sign(vL.x), sign(vL.y), sign(vL.z)));
-  } else if (vShape < 0.5) {
+    float d = abs(vL.x) + abs(vL.y) + abs(vL.z) - 0.82;
+    float w = max(fwidth(d), 1e-4);
+    cov = smoothstep(w, -w, d);
+    if (cov < 0.02) discard;
+    vec3 sn = vec3(sign(vL.x), sign(vL.y), sign(vL.z));
+    n = normalize(sn + vec3(0.0001));
+  } else if (asBox) {
     float edge = min(min(0.5 - abs(vL.x), 0.5 - abs(vL.y)), 0.5 - abs(vL.z));
     n = normalize(vN + vL * smoothstep(0.16, 0.0, edge) * 0.85);
   }
   vec3 viewDir = normalize(uEye - vW);
-  float ndl = max(dot(n, uLight), 0.0);
+  vec3 L = normalize(uLight);
+  float ndl = max(dot(n, L), 0.0);
   float hemi = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);
-  float wrap = clamp(dot(n, uLight) * 0.5 + 0.5, 0.0, 1.0);
-  vec3 col = vC * (0.22 + 0.28 * hemi + 0.55 * ndl + 0.12 * wrap);
+  float wrap = clamp(dot(n, L) * 0.5 + 0.5, 0.0, 1.0);
+  float metal = clamp(vMetal, 0.0, 1.0);
+  float sheen = clamp(vSheen, 0.0, 1.0);
+  float rough = clamp(vRough, 0.0, 1.0);
+  vec3 ambient = mix(vec3(0.20, 0.19, 0.17), uSkyAmb, 0.32);
+  vec3 albedo = mix(vC, vC * (0.42 + 0.58 * ndl), metal * 0.55);
+  vec3 col = albedo * (ambient * (0.75 + 0.25 * hemi) + uLightAmt * ndl + 0.10 * wrap);
   float rim = pow(1.0 - max(dot(n, viewDir), 0.0), 2.2);
-  col += vec3(1.0, 0.93, 0.82) * rim * (0.18 + vEmit * 0.25);
-  float specPow = mix(56.0, 10.0, clamp(vRough, 0.0, 1.0));
-  float spec = pow(max(dot(n, normalize(uLight + viewDir)), 0.0), specPow);
-  col += vec3(1.0, 0.96, 0.88) * spec * mix(0.55, 0.08, clamp(vRough, 0.0, 1.0));
-  if (vShape < 0.5) {
+  col += vec3(1.0, 0.93, 0.82) * rim * (0.16 + vEmit * 0.28);
+  float specPow = mix(64.0, 9.0, rough);
+  float spec = pow(max(dot(n, normalize(L + viewDir)), 0.0), specPow);
+  vec3 specCol = mix(vec3(1.0, 0.96, 0.88), vC, metal);
+  col += specCol * spec * mix(0.55, 0.08, rough) * (1.0 + sheen * 0.9);
+  if (asBox) {
     float edge = min(min(0.5 - abs(vL.x), 0.5 - abs(vL.y)), 0.5 - abs(vL.z));
     col *= 0.76 + 0.24 * smoothstep(0.0, 0.16, edge);
     if (vHalf.y < 0.12) col *= 1.0 - 0.22 * smoothstep(0.32, 0.48, abs(vL.x));
+    // Path slabs are the wide, mid-rough tiles. Curbs and the dashed
+    // centre line reuse those pixels instead of extra instances.
+    if (vHalf.y < 0.1 && vHalf.x > 0.7 && rough > 0.4 && rough < 0.7 && vKind < 0.5) {
+      float side = abs(vL.x);
+      if (side > 0.39) {
+        vec3 soilLit = uSoil * (0.55 + 0.45 * ndl + 0.2 * hemi);
+        col = mix(col, soilLit, smoothstep(0.39, 0.44, side));
+      } else if (side < 0.04 && abs(vL.z) < 0.22) {
+        col = mix(col, vec3(0.99, 0.97, 0.86), 0.92);
+      }
+    }
   }
   float under = smoothstep(-0.15, -0.48, vL.y);
   col *= 1.0 - 0.32 * under * (1.0 - vEmit);
+  if (vKind > 0.5) {
+    float rip = sin(vW.x * 5.4 + uTime * 1.6) * sin(vW.z * 4.1 - uTime * 1.2);
+    col += vec3(0.35, 0.58, 0.6) * rip * 0.16;
+  }
   float pulse = 0.85 + 0.15 * sin(uTime * 3.0 + vCenter.z);
   col += vC * vEmit * pulse;
   float dist = length(vW - uEye);
@@ -546,7 +617,69 @@ void main() {
   float fog = 1.0 - exp(-dist * 0.011);
   fog = clamp(fog, 0.0, cap);
   fog *= (1.0 - 0.82 * clamp(vEmit, 0.0, 1.0));
-  o = vec4(mix(col, uFog, fog), 1.0);
+  o = vec4(mix(aces(col), aces(uFog), fog), cov);
+}`;
+
+// Boxes are most of the pixels. This twin has no raymarch and no fwidth,
+// so a software rasterizer does not pay for those on the road and hedges.
+const MESH_FS_BOX = `#version 300 es
+precision highp float;
+in vec3 vN; in vec3 vW; in vec3 vC; in vec3 vL;
+flat in vec3 vCenter; flat in vec3 vHalf; flat in float vShape;
+flat in float vRough; flat in float vEmit; flat in float vYaw;
+flat in float vMetal; flat in float vSheen; flat in float vKind;
+uniform vec3 uEye; uniform vec3 uFog; uniform float uFogAmt;
+uniform vec3 uLight; uniform float uLightAmt; uniform vec3 uSkyAmb; uniform vec3 uSoil; uniform float uTime;
+out vec4 o;
+vec3 aces(vec3 x) {
+  x = max(x, vec3(0.0));
+  return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+}
+void main() {
+  float edge = min(min(0.5 - abs(vL.x), 0.5 - abs(vL.y)), 0.5 - abs(vL.z));
+  vec3 n = normalize(vN + vL * smoothstep(0.16, 0.0, edge) * 0.85);
+  vec3 viewDir = normalize(uEye - vW);
+  vec3 L = normalize(uLight);
+  float ndl = max(dot(n, L), 0.0);
+  float hemi = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);
+  float wrap = clamp(dot(n, L) * 0.5 + 0.5, 0.0, 1.0);
+  float metal = clamp(vMetal, 0.0, 1.0);
+  float sheen = clamp(vSheen, 0.0, 1.0);
+  float rough = clamp(vRough, 0.0, 1.0);
+  vec3 ambient = mix(vec3(0.20, 0.19, 0.17), uSkyAmb, 0.32);
+  vec3 albedo = mix(vC, vC * (0.42 + 0.58 * ndl), metal * 0.55);
+  vec3 col = albedo * (ambient * (0.75 + 0.25 * hemi) + uLightAmt * ndl + 0.10 * wrap);
+  float rim = pow(1.0 - max(dot(n, viewDir), 0.0), 2.2);
+  col += vec3(1.0, 0.93, 0.82) * rim * (0.16 + vEmit * 0.28);
+  float specPow = mix(64.0, 9.0, rough);
+  float spec = pow(max(dot(n, normalize(L + viewDir)), 0.0), specPow);
+  vec3 specCol = mix(vec3(1.0, 0.96, 0.88), vC, metal);
+  col += specCol * spec * mix(0.55, 0.08, rough) * (1.0 + sheen * 0.9);
+  col *= 0.76 + 0.24 * smoothstep(0.0, 0.16, edge);
+  if (vHalf.y < 0.12) col *= 1.0 - 0.22 * smoothstep(0.32, 0.48, abs(vL.x));
+  if (vHalf.y < 0.1 && vHalf.x > 0.7 && rough > 0.4 && rough < 0.7 && vKind < 0.5) {
+    float side = abs(vL.x);
+    if (side > 0.39) {
+      vec3 soilLit = uSoil * (0.55 + 0.45 * ndl + 0.2 * hemi);
+      col = mix(col, soilLit, smoothstep(0.39, 0.44, side));
+    } else if (side < 0.04 && abs(vL.z) < 0.22) {
+      col = mix(col, vec3(0.99, 0.97, 0.86), 0.92);
+    }
+  }
+  float under = smoothstep(-0.15, -0.48, vL.y);
+  col *= 1.0 - 0.32 * under * (1.0 - vEmit);
+  if (vKind > 0.5) {
+    float rip = sin(vW.x * 5.4 + uTime * 1.6) * sin(vW.z * 4.1 - uTime * 1.2);
+    col += vec3(0.35, 0.58, 0.6) * rip * 0.16;
+  }
+  float pulse = 0.85 + 0.15 * sin(uTime * 3.0 + vCenter.z);
+  col += vC * vEmit * pulse;
+  float dist = length(vW - uEye);
+  float cap = min(max(uFogAmt, 0.0), 0.38);
+  float fog = 1.0 - exp(-dist * 0.011);
+  fog = clamp(fog, 0.0, cap);
+  fog *= (1.0 - 0.82 * clamp(vEmit, 0.0, 1.0));
+  o = vec4(mix(aces(col), aces(uFog), fog), 1.0);
 }`;
 
 export const SKY_KINDS = ["sun", "moon", "plane"];
@@ -569,6 +702,22 @@ export function visibleSky(props, sunHide) {
   };
 }
 
+// World direction of the sky disc. sunUv lives in the yaw-shifted sky, so
+// the screen ray includes psi and the road basis rotates by psi too. Those
+// cancel: the key light stays on the same world ray as the disc while the
+// road bends. Y stays a high garden key; uLightAmt carries intensity.
+function sunAim(psi, fov, aspect, sunUv, pitch) {
+  const span = Math.max(fov * Math.max(aspect, 0.3), 0.3);
+  const hAng = ((sunUv && sunUv[0]) || 0.74) - 0.5;
+  const ang = hAng * span + psi;
+  const elev = pitch + (((sunUv && sunUv[1]) || 0.78) - 0.5) * fov;
+  const ce = Math.cos(elev);
+  const lx = Math.sin(psi) * Math.cos(ang) * ce - Math.cos(psi) * Math.sin(ang) * ce;
+  const lz = Math.cos(psi) * Math.cos(ang) * ce + Math.sin(psi) * Math.sin(ang) * ce;
+  const h = Math.hypot(lx, lz) || 1;
+  return [lx / h * 0.48, 0.78, lz / h * 0.48];
+}
+
 export function createRenderer(canvas) {
   const gl = canvas.getContext("webgl2", {
     alpha: false,
@@ -580,6 +729,7 @@ export function createRenderer(canvas) {
   if (!gl) return null;
   const sky = link(gl, SKY_VS, SKY_FS);
   const mesh = link(gl, MESH_VS, MESH_FS);
+  const meshBox = link(gl, MESH_VS, MESH_FS_BOX);
   const tri = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, tri);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
@@ -620,14 +770,29 @@ export function createRenderer(canvas) {
     yaw: gl.getUniformLocation(sky, "uYaw"),
     fov: gl.getUniformLocation(sky, "uFov"),
     sunAmt: gl.getUniformLocation(sky, "uSunAmt"),
-    proj: gl.getUniformLocation(mesh, "uProj"),
-    view: gl.getUniformLocation(mesh, "uView"),
-    eye: gl.getUniformLocation(mesh, "uEye"),
-    fog: gl.getUniformLocation(mesh, "uFog"),
-    fogAmt: gl.getUniformLocation(mesh, "uFogAmt"),
-    light: gl.getUniformLocation(mesh, "uLight"),
-    mtime: gl.getUniformLocation(mesh, "uTime"),
   };
+  function meshLocs(prog) {
+    return {
+      proj: gl.getUniformLocation(prog, "uProj"),
+      view: gl.getUniformLocation(prog, "uView"),
+      eye: gl.getUniformLocation(prog, "uEye"),
+      fog: gl.getUniformLocation(prog, "uFog"),
+      fogAmt: gl.getUniformLocation(prog, "uFogAmt"),
+      light: gl.getUniformLocation(prog, "uLight"),
+      lightAmt: gl.getUniformLocation(prog, "uLightAmt"),
+      skyAmb: gl.getUniformLocation(prog, "uSkyAmb"),
+      soil: gl.getUniformLocation(prog, "uSoil"),
+      mtime: gl.getUniformLocation(prog, "uTime"),
+    };
+  }
+  const um = meshLocs(mesh);
+  const ub = meshLocs(meshBox);
+  const gpuInfo = gl.getExtension("WEBGL_debug_renderer_info");
+  const gpuName = gpuInfo
+    ? `${gl.getParameter(gpuInfo.UNMASKED_VENDOR_WEBGL) || ""} ${gl.getParameter(gpuInfo.UNMASKED_RENDERER_WEBGL) || ""}`
+    : "";
+  let dprCap = /swiftshader|llvmpipe|softpipe|software/i.test(gpuName) ? 1 : 2;
+  const msaa = gl.getParameter(gl.SAMPLES) || 0;
   let w = 1;
   let h = 1;
   let camS = 0;
@@ -672,7 +837,7 @@ export function createRenderer(canvas) {
   const sparks = new Float32Array(36 * 8);
 
   function resize() {
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const dpr = Math.min(dprCap, window.devicePixelRatio || 1);
     w = Math.max(1, Math.floor(canvas.clientWidth * dpr));
     h = Math.max(1, Math.floor(canvas.clientHeight * dpr));
     if (canvas.width !== w || canvas.height !== h) {
@@ -680,19 +845,55 @@ export function createRenderer(canvas) {
       canvas.height = h;
     }
     gl.viewport(0, 0, w, h);
+    canvas.dataset.dpr = String(dpr);
+  }
+
+  // Same ring the page already keeps for the fps readout. A p95 past ~20 ms
+  // drops the backing store from 2x to 1x and leaves it there.
+  function noteFrameTime(buf, count) {
+    if (dprCap <= 1 || !buf) return;
+    const n = Math.min(count | 0, buf.length);
+    if (n < 48) return;
+    const copy = [];
+    for (let i = 0; i < n; i++) {
+      const v = buf[i];
+      if (v > 0.4 && v < 250) copy.push(v);
+    }
+    if (copy.length < 40) return;
+    copy.sort((a, b) => a - b);
+    const p95 = copy[Math.min(copy.length - 1, Math.floor(0.95 * (copy.length - 1)))];
+    if (p95 > 20) dprCap = 1;
   }
 
   let n = 0;
   // Default yaw for a group (the runner, a companion). Explicit yaw wins.
   let spin = 0;
-  function push(x, y, z, sx, sy, sz, shape, rgb, rough = 0.62, emit = 0, yaw = spin) {
+  function push(x, y, z, sx, sy, sz, shape, rgb, rough = 0.62, emit = 0, yaw = spin, metal = 0, sheen = 0, kind = 0) {
     if (n >= MAX) return;
     const o = n * STRIDE;
     data[o] = x; data[o + 1] = y; data[o + 2] = z; data[o + 3] = shape;
     data[o + 4] = sx; data[o + 5] = sy; data[o + 6] = sz; data[o + 7] = rough;
     data[o + 8] = rgb[0]; data[o + 9] = rgb[1]; data[o + 10] = rgb[2]; data[o + 11] = emit;
-    data[o + 12] = yaw; data[o + 13] = 0; data[o + 14] = 0; data[o + 15] = 0;
+    data[o + 12] = yaw; data[o + 13] = metal; data[o + 14] = sheen; data[o + 15] = kind;
     n++;
+  }
+
+  // Flat blot, same falloff as the popper: wider when the body is near the
+  // ground, smaller as it rises. The road slab tops out near y 0.08, so the
+  // blot sits just above it. Leaves room for the runner if the buffer fills.
+  const SHADOW = [0.2, 0.14, 0.08];
+  function contactShadow(x, z, yaw, height, radius) {
+    if (n >= MAX - 96) return;
+    const s = Math.max(0.12, radius) / (1 + Math.max(0, height) * 0.45);
+    push(x, 0.108, z, s * 1.6, 0.02, s, 0, SHADOW, 1, 0, yaw);
+  }
+
+  function placeThing(thing, box, opts) {
+    const drawn = drawThing(push, thing, box, opts || {});
+    const grow = !opts || opts.grow === undefined ? 1 : opts.grow;
+    const span = Math.max(box.w || 0, box.d || 0) * (grow || 0);
+    contactShadow(box.x, box.z, box.psi || 0, box.y || 0, Math.min(0.9, Math.max(0.18, span * 0.42)));
+    return drawn;
   }
 
   // tint 0 keeps the garden mix. 1 blossom, 2 apple, 3 star, 4 gem.
@@ -930,7 +1131,7 @@ export function createRenderer(canvas) {
       const z = pz - 0.8 + i * 1.45 + (reduced ? 0 : Math.sin(t * 0.8 + i) * 0.25);
       const at = sample(z, lat);
       spin = at.psi;
-      push(at.x, 0.02, at.z, 0.55, 0.02, 0.4, 0, [0.18, 0.12, 0.08], 1, 0);
+      contactShadow(at.x, at.z, at.psi, hop, 0.46);
       const plan = pal.plan || pal.kind;
       const look = carLook(plan, t, i, reduced);
       looks.push(look);
@@ -1127,6 +1328,8 @@ export function createRenderer(canvas) {
       const leaf = mix3(pal.leaf, pal.leaf2, kind === 2 ? 0.2 : 0.62);
       const trunk = mix3(pal.trunk, [0.32, 0.2, 0.13], kind === 1 ? 0.15 : 0.4);
       const top = [at.x + swayX, at.z + swayZ];
+      const canopy = kind === 3 ? 0.72 : kind === 2 ? 0.62 : kind === 1 ? 0.4 : 0.52;
+      contactShadow(at.x, at.z, at.psi, 0, canopy * scale);
       if (kind === 1) {
         push(at.x, 0.72 * scale, at.z, 0.11 * scale, 1.45 * scale, 0.11 * scale, 0, trunk, 0.8, 0, at.psi);
         push(top[0], 1.62 * scale, top[1], 0.38 * scale, 1.2 * scale, 0.38 * scale, 1, leaf, 0.7, 0.02, at.psi);
@@ -1158,14 +1361,17 @@ export function createRenderer(canvas) {
       for (let lane = 0; lane < 3; lane++) {
         const lat = laneX(lane);
         const spans = gapSpans(pieces, s0, s1, lane);
-        const top = lane === 1 ? pal.path : lane === 0 ? pal.grassL : pal.grassR;
+        const baseTop = lane === 1 ? pal.path : lane === 0 ? pal.grassL : pal.grassR;
         let cursor = s0;
         for (let i = 0; i <= spans.length; i++) {
           const end = i < spans.length ? spans[i][0] : s1;
           if (end - cursor > 0.04) {
             const mid = (cursor + end) / 2;
             const tile = onRoad(mid, lat);
-            push(tile.x, 0.02, tile.z, 1.74, 0.12, end - cursor + 0.02, 0, top, lane === 1 ? 0.55 : 0.8, 0, tile.psi);
+            const vary = (laneHash(mid * 0.23 + lane * 17.2) - 0.5) * 0.09;
+            const top = vary >= 0 ? mix3(baseTop, [1, 1, 1], vary) : mix3(baseTop, [0.16, 0.18, 0.1], -vary);
+            const len = end - cursor;
+            push(tile.x, 0.02, tile.z, 1.74, 0.12, len + 0.02, 0, top, lane === 1 ? 0.55 : 0.8, 0, tile.psi);
           }
           if (i < spans.length) cursor = spans[i][1];
         }
@@ -1174,14 +1380,30 @@ export function createRenderer(canvas) {
           const b = spans[i][1];
           const mid = (a + b) / 2;
           const tile = onRoad(mid, lat);
-          push(tile.x, -0.06, tile.z, 1.72, 0.1, b - a + 0.04, 0, pal.water, 0.12, 0.1, tile.psi);
+          push(tile.x, -0.06, tile.z, 1.72, 0.1, b - a + 0.04, 0, pal.water, 0.12, 0.1, tile.psi, 0, 0, 1);
+          const spanLen = b - a;
+          if (spanLen > 0.8 && laneHash(mid * 0.27 + lane * 5.1) > 0.38 && n < MAX - 160) {
+            const off = (laneHash(mid * 0.53 + lane) - 0.5) * 0.7;
+            const along = mid + (laneHash(mid * 0.91) - 0.5) * Math.min(0.6, spanLen * 0.3);
+            const lily = onRoad(along, lat + off);
+            const pad = 0.22 + laneHash(mid * 1.3 + lane) * 0.14;
+            push(lily.x, 0.03, lily.z, pad, 0.04, pad * 0.86, 0, pal.lily, 0.5, 0.06, lily.psi);
+            if (laneHash(mid * 1.7 + 3) > 0.62) {
+              push(lily.x, 0.07, lily.z, 0.08, 0.08, 0.08, 1, pal.flower, 0.3, 0.35, lily.psi);
+            }
+          }
         }
       }
       if (dist < 36 && ((z / 2) | 0) % 2 === 0) {
+        const hv = laneHash(z * 0.19 + 4.2);
+        const hedgeH = 0.42 + hv * 0.5;
+        const hedgeW = 0.56 + hv * 0.22;
+        const hedgeD = 3.5 + laneHash(z * 0.07) * 0.7;
+        const tint = mix3(pal.hedge, hv > 0.5 ? pal.leaf : [0.08, 0.12, 0.06], Math.abs(hv - 0.5) * 0.35);
         const hedgeL = onRoad(cz, -3.35);
         const hedgeR = onRoad(cz, 3.35);
-        push(hedgeL.x, 0.1, hedgeL.z, 0.72, 0.22, 4.06, 0, pal.hedge, 0.8, 0, hedgeL.psi);
-        push(hedgeR.x, 0.1, hedgeR.z, 0.72, 0.22, 4.06, 0, pal.hedge, 0.8, 0, hedgeR.psi);
+        push(hedgeL.x, hedgeH * 0.5, hedgeL.z, hedgeW, hedgeH, hedgeD, 0, tint, 0.8, 0, hedgeL.psi);
+        push(hedgeR.x, hedgeH * 0.5, hedgeR.z, hedgeW, hedgeH, hedgeD, 0, tint, 0.8, 0, hedgeR.psi);
       }
       if (dist < 34) {
         const sway = reduced ? 0 : Math.sin(st.time * 1.15 + z * 0.17) * 0.06;
@@ -1199,15 +1421,21 @@ export function createRenderer(canvas) {
         const bloom = ((z / 2) | 0) % 4 === 0 ? pal.flower : pal.flower2;
         const side = ((z / 2) | 0) % 8 === 0 ? -1 : 1;
         const flower = onRoad(cz, side * 2.55);
-        push(flower.x, 0.22, flower.z, 0.22, 0.22, 0.22, 1, bloom, 0.35, 0.35);
+        const stemH = 0.2 + laneHash(cz * 0.41 + side * 2.2) * 0.32;
+        const stem = mix3(pal.leaf, pal.soil, 0.42);
+        push(flower.x, stemH * 0.5, flower.z, 0.045, stemH, 0.045, 0, stem, 0.78, 0, flower.psi);
+        push(flower.x, stemH + 0.1, flower.z, 0.2, 0.2, 0.2, 1, bloom, 0.35, 0.35, flower.psi);
         if (pal.density >= 0.75) {
           const extra = onRoad(cz + 0.4, -side * 2.15);
-          push(extra.x, 0.18, extra.z, 0.16, 0.28, 0.16, 1, pal.flower2, 0.3, 0.4);
+          const stem2 = 0.16 + laneHash(cz * 0.63 - side) * 0.2;
+          push(extra.x, stem2 * 0.5, extra.z, 0.04, stem2, 0.04, 0, stem, 0.78, 0, extra.psi);
+          push(extra.x, stem2 + 0.08, extra.z, 0.16, 0.16, 0.16, 1, pal.flower2, 0.3, 0.4, extra.psi);
         }
       }
     }
 
     function drawLoot(at, y, s, kind) {
+      contactShadow(at.x, at.z, spin, Math.max(0, y - s * 0.45), Math.max(0.22, s * 1.15));
       if (kind === "star") {
         push(at.x, y, at.z, s * 1.15, s * 0.42, s * 1.15, 2, [1, 0.86, 0.28], 0.12, 0.95);
         push(at.x, y, at.z, s * 0.42, s * 1.15, s * 0.42, 2, [1, 0.95, 0.55], 0.12, 0.9);
@@ -1379,8 +1607,7 @@ export function createRenderer(canvas) {
       paintLane(q, laneX(popLane), [1, 0.55, 0.12]);
       const cy = q[4] + q[3] * 0.5;
       const rad = 0.32;
-      const shadow = 0.42 / (1 + cy * 0.45);
-      push(here.x, 0.03, here.z, shadow * 1.6, 0.02, shadow, 0, [0.2, 0.14, 0.08], 1, 0, yaw);
+      contactShadow(here.x, here.z, yaw, cy, 0.42);
       push(here.x, cy, here.z, rad * 2, rad * 2, rad * 2, 1, [0.95, 0.42, 0.16], 0.3, 0.22, yaw);
       push(here.x, cy, here.z, rad * 2.05, 0.08, rad * 2.05, 0, [1, 0.86, 0.42], 0.25, 0.35, yaw);
       push(here.x, cy + rad + 0.08, here.z, 0.05, 0.16, 0.05, 0, [0.35, 0.22, 0.12], 0.5, 0.05, yaw);
@@ -1401,6 +1628,7 @@ export function createRenderer(canvas) {
       const toZ = -Math.cos(here.psi);
       const at = (ahead, y) => [here.x + toX * ahead, y, here.z + toZ * ahead];
       paintLane(q, lat, [1, 0.38, 0.22], 22);
+      contactShadow(here.x, here.z, here.psi, 0, 0.4);
       if (look === 1) {
         const flap = q.length > 10 && q[10] > 0 && q[10] < 0.36 ? 12 : 9;
         const wing = reduced ? 0.16 : 0.1 + Math.abs(Math.sin((st.time || 0) * flap)) * 0.14;
@@ -1527,7 +1755,7 @@ export function createRenderer(canvas) {
       for (let t = 0; t < tiles; t++) {
         const lat = wide ? -span / 2 + tw * (t + 0.5) : laneX(lane);
         const at = onRoad(zc, lat);
-        drawThing(push, th, { x: at.x, y: 0, z: at.z, psi: at.psi, w: tw * 0.96, h: hh, d: thick },
+        placeThing(th, { x: at.x, y: 0, z: at.z, psi: at.psi, w: tw * 0.96, h: hh, d: thick },
           { grow, anim: thingAnim(th, q[1] + t) });
       }
     }
@@ -1548,14 +1776,14 @@ export function createRenderer(canvas) {
       const grow = growOf(th.id, nowMs, reduced);
       for (let t = 0; t < tiles; t++) {
         const at = onRoad(zc, -span / 2 + tw * (t + 0.5));
-        drawThing(push, th, { x: at.x, y: bottom, z: at.z, psi: at.psi, w: tw * 0.96, h: th2, d: depth },
+        placeThing(th, { x: at.x, y: bottom, z: at.z, psi: at.psi, w: tw * 0.96, h: th2, d: depth },
           { grow, anim: thingAnim(th, t) });
       }
     }
     function thingPickup(q, th, here, sc) {
       const box = 0.72 * sc;
       const grow = growOf(th.id, nowMs, reduced);
-      drawThing(push, th, { x: here.x, y: q[4] * sc - box * 0.5, z: here.z, psi: here.psi, w: box, h: box, d: box },
+      placeThing(th, { x: here.x, y: q[4] * sc - box * 0.5, z: here.z, psi: here.psi, w: box, h: box, d: box },
         { grow, anim: thingAnim(th, q[1] * 1.7), glow: 0.1 });
     }
     const thingChunks = Array.isArray(st.thingChunks) ? st.thingChunks : [];
@@ -1570,14 +1798,14 @@ export function createRenderer(canvas) {
           if (spots[j] < z0 || spots[j] > z1) continue;
           const side = (j + Math.floor(tc.x0)) % 2 ? 1 : -1;
           const at = onRoad(spots[j], side * 3.9);
-          drawThing(push, th, { x: at.x, y: 0, z: at.z, psi: at.psi, w: 1.3 * sz, h: 1.7 * sz, d: 1.3 * sz },
+          placeThing(th, { x: at.x, y: 0, z: at.z, psi: at.psi, w: 1.3 * sz, h: 1.7 * sz, d: 1.3 * sz },
             { grow, anim: thingAnim(th, spots[j]) });
         }
       } else if (th.role === "pal" && pz >= tc.x0 && pz < tc.x1) {
         const grow = growOf(th.id, nowMs, reduced);
         const sz = th.size;
         const at = onRoad(pz + 1.6, 2.7);
-        drawThing(push, th, { x: at.x, y: 0.05, z: at.z, psi: at.psi, w: 0.9 * sz, h: 0.9 * sz, d: 0.9 * sz },
+        placeThing(th, { x: at.x, y: 0.05, z: at.z, psi: at.psi, w: 0.9 * sz, h: 0.9 * sz, d: 0.9 * sz },
           { grow, anim: thingAnim(th, 0) });
       }
     }
@@ -1659,7 +1887,7 @@ export function createRenderer(canvas) {
       if (!toy || !toy.parts) continue;
       const box = showBox(toy, i);
       const at = onRoad(pz + box.ahead, box.lat);
-      drawThing(push, toy, {
+      placeThing(toy, {
         x: at.x, y: box.y, z: at.z, psi: at.psi,
         w: box.w, h: box.h, d: box.d,
       }, { grow: growOf(toy.id, nowMs, reduced), anim: thingAnim(toy, i * 0.7) });
@@ -1808,22 +2036,59 @@ export function createRenderer(canvas) {
       push(petalB.x, 2.1 + reject * 0.5, petalB.z, 0.1, 0.07, 0.1, 1, pal.flower2, 0.3, 0.35);
     }
 
-    gl.useProgram(mesh);
-    gl.uniformMatrix4fv(u.proj, false, proj);
-    gl.uniformMatrix4fv(u.view, false, view);
-    gl.uniform3f(u.eye, eye[0], eye[1], eye[2]);
-    gl.uniform3fv(u.fog, pal.fog);
-    gl.uniform1f(u.fogAmt, pal.fogAmt);
     const lift = floaty + pulse * 0.15;
-    const sun = 0.55 + 0.55 * pal.lightAmt;
-    gl.uniform3f(u.light, 0.42 * sun + pulse * 0.1, (0.78 + lift) * sun, 0.28 * sun);
-    gl.uniform1f(u.mtime, st.time || 0);
+    const ahead = Math.hypot(at[0] - eye[0], at[2] - eye[2]) || 1;
+    const pitch = Math.atan2(at[1] - eye[1], ahead);
+    const aim = sunAim(psi, camFov, w / Math.max(1, h), pal.sunUv, pitch);
+    const lightAmt = (0.55 + 0.45 * pal.lightAmt) * (0.82 + lift * 0.12 + pulse * 0.1);
+    let boxN = 0;
+    let hi = n - 1;
+    while (boxN <= hi) {
+      if (data[boxN * STRIDE + 3] < 0.5) boxN++;
+      else {
+        const a = boxN * STRIDE;
+        const b = hi * STRIDE;
+        for (let k = 0; k < STRIDE; k++) {
+          const tmp = data[a + k];
+          data[a + k] = data[b + k];
+          data[b + k] = tmp;
+        }
+        hi--;
+      }
+    }
     gl.bindVertexArray(vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, inst);
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, data.subarray(0, n * STRIDE));
-    gl.drawArraysInstanced(gl.TRIANGLES, 0, 36, n);
+    const bindMesh = (prog, locs) => {
+      gl.useProgram(prog);
+      gl.uniformMatrix4fv(locs.proj, false, proj);
+      gl.uniformMatrix4fv(locs.view, false, view);
+      gl.uniform3f(locs.eye, eye[0], eye[1], eye[2]);
+      gl.uniform3fv(locs.fog, pal.fog);
+      gl.uniform1f(locs.fogAmt, pal.fogAmt);
+      gl.uniform3f(locs.light, aim[0], aim[1], aim[2]);
+      gl.uniform1f(locs.lightAmt, lightAmt);
+      gl.uniform3fv(locs.skyAmb, pal.sky);
+      gl.uniform3fv(locs.soil, pal.soil);
+      gl.uniform1f(locs.mtime, st.time || 0);
+    };
+    const drawSpan = (prog, locs, first, count, coverage) => {
+      if (!count) return;
+      bindMesh(prog, locs);
+      const base = first * STRIDE * 4;
+      for (let i = 0; i < 4; i++) {
+        gl.vertexAttribPointer(2 + i, 4, gl.FLOAT, false, STRIDE * 4, base + i * 16);
+      }
+      if (coverage && msaa > 1) gl.enable(gl.SAMPLE_ALPHA_TO_COVERAGE);
+      else gl.disable(gl.SAMPLE_ALPHA_TO_COVERAGE);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 36, count);
+    };
+    drawSpan(meshBox, ub, 0, boxN, false);
+    drawSpan(mesh, um, boxN, n - boxN, true);
+    gl.disable(gl.SAMPLE_ALPHA_TO_COVERAGE);
+    canvas.dataset.instances = String(n);
     return n;
   }
 
-  return { gl, resize, frame };
+  return { gl, resize, frame, noteFrameTime };
 }
