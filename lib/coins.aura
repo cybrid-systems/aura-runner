@@ -581,41 +581,120 @@
     ((string=? name "single") start)
     (else start)))
 
+; weight * (placed + 1) - count. The lane furthest under its share wins.
+; A tie goes to the centre, then the left, so a centre crate does not
+; leave the rest of the line stuck on a side.
+(define (coin-score weights counts total lane)
+  (- (* (list-ref-weights weights lane) (+ total 1.0))
+     (exact->inexact (list-ref-counts counts lane))))
+
+(define (list-ref-weights w lane)
+  (cond
+    ((< lane 0.5) (car w))
+    ((< lane 1.5) (car (cdr w)))
+    (else (car (cdr (cdr w))))))
+
+(define (list-ref-counts c lane)
+  (cond
+    ((< lane 0.5) (car c))
+    ((< lane 1.5) (car (cdr c)))
+    (else (car (cdr (cdr c))))))
+
+(define (coin-bump counts lane)
+  (cond
+    ((< lane 0.5) (list (+ (car counts) 1) (car (cdr counts)) (car (cdr (cdr counts)))))
+    ((< lane 1.5) (list (car counts) (+ (car (cdr counts)) 1) (car (cdr (cdr counts)))))
+    (else (list (car counts) (car (cdr counts)) (+ (car (cdr (cdr counts))) 1)))))
+
+(define (coin-open-lanes pieces pace table x y name)
+  (list (if (coin-spot-ok? pieces pace table x 0.0 y name) #t #f)
+        (if (coin-spot-ok? pieces pace table x 1.0 y name) #t #f)
+        (if (coin-spot-ok? pieces pace table x 2.0 y name) #t #f)))
+
+(define (coin-lane-on? open lane)
+  (cond
+    ((< lane -0.1) #f)
+    ((< lane 0.5) (car open))
+    ((< lane 1.5) (car (cdr open)))
+    (else (car (cdr (cdr open))))))
+
+(define (coin-best-deficit weights counts open prefer)
+  (let ((total (+ (car counts) (car (cdr counts)) (car (cdr (cdr counts))))))
+    (let loop ((lane 0) (best -1.0) (best-s -1000.0))
+      (if (> lane 2)
+        best
+        (if (not (coin-lane-on? open (exact->inexact lane)))
+          (loop (+ lane 1) best best-s)
+          (let ((s (coin-score weights counts total (exact->inexact lane))))
+            (if (or (< best -0.1)
+                    (> s (+ best-s 0.0001))
+                    (and (< (coin-abs (- s best-s)) 0.0001)
+                         (or (< (coin-abs (- lane prefer)) 0.1)
+                             (and (>= (coin-abs (- best prefer)) 0.1) (= lane 1)))))
+              (loop (+ lane 1) (exact->inexact lane) s)
+              (loop (+ lane 1) best best-s))))))))
+
+; Keep a zig or a switch while the lanes are even. Once a lane is a
+; coin behind, the chain fills that lane instead of following the shape.
+(define (coin-want weights counts open planned)
+  (let ((best (coin-best-deficit weights counts open planned)))
+    (if (or (< planned -0.1) (not (coin-lane-on? open planned)) (< best -0.1))
+      best
+      (let ((total (+ (car counts) (car (cdr counts)) (car (cdr (cdr counts))))))
+        (if (>= (coin-score weights counts total planned)
+                (- (coin-score weights counts total best) 0.08))
+          planned
+          best)))))
+
 (define (coin-make x lane y)
   (piece 5.0 x 0.42 0.42 y lane))
 
-(define (coin-emit hazards pace table params rng name x0 n step base)
+; A slide or a jump used to lock onto the first open lane. That lane is
+; a side while the centre crate is in the way, so the rest of the chain
+; never came back. Each coin now takes the open lane furthest under its
+; share. A zig and a switch keep their shape, and fall back the same way
+; when the planned lane is blocked.
+(define (coin-spread? name)
+  (and (not (string=? name "zig"))
+       (not (string=? name "switch"))
+       (not (string=? name "single"))))
+
+(define (coin-emit hazards pace table params rng name x0 n step base counts0)
   (let* ((y0 (coin-y name 0 n base))
+         (weights (coin-lane-weights params))
+         (spread (coin-spread? name))
          (start-pick (coin-choose-lane params rng hazards pace table x0 y0 name))
          (start (car start-pick))
          (rng1 (cadr start-pick)))
-    (if (< start -0.1)
+    (if (and (not spread) (< start -0.1))
       (list (list) rng1)
       (let ((end-pick (if (string=? name "switch")
                         (coin-other params rng1 start)
                         (list start rng1))))
         (let ((end (car end-pick))
               (rng2 (cadr end-pick)))
-          (let loop ((i 0) (acc (list)) (rg rng2) (hold start))
+          (let loop ((i 0) (acc (list)) (rg rng2) (hold start) (counts counts0))
             (if (or (>= i n) (and (string=? name "single") (>= i 1)))
-              (list (reverse acc) rg)
+              (list (reverse acc) rg counts)
               (let* ((x (+ x0 (* step (exact->inexact i))))
                      (y (coin-y name i n base))
-                     (want (coin-plan-lane name hold end i n))
-                     (use (if (coin-spot-ok? hazards pace table x want y name)
-                            want
-                            -1.0)))
-                (if (>= use -0.1)
-                  (loop (+ i 1) (cons (coin-make x use y) acc) rg use)
+                     (planned (if spread
+                                -1.0
+                                (coin-plan-lane name hold end i n)))
+                     (open (coin-open-lanes hazards pace table x y name))
+                     (want (coin-want weights counts open planned)))
+                (if (>= want -0.1)
+                  (loop (+ i 1) (cons (coin-make x want y) acc) rg want (coin-bump counts want))
                   (let ((alt (coin-choose-lane params rg hazards pace table x y name)))
                     (if (< (car alt) -0.1)
-                      (loop (+ i 1) acc (cadr alt) hold)
+                      (loop (+ i 1) acc (cadr alt) hold counts)
                       (loop (+ i 1)
                             (cons (coin-make x (car alt) y) acc)
                             (cadr alt)
-                            (car alt)))))))))))))
+                            (car alt)
+                            (coin-bump counts (car alt))))))))))))))
 
-(define (coin-one hazards pace span step cap params table rng group)
+(define (coin-one hazards pace span step cap params table rng group counts)
   (let* ((head (car group))
          (x0 (piece-x head))
          (base (piece-y head))
@@ -625,7 +704,7 @@
          (limit (coin-limit mover name0 x0 pace span))
          (n (coin-fit x0 limit step cap))
          (chosen (coin-choose mover x0 pace params rng n))
-         (made (coin-emit hazards pace table params (cadr chosen) (car chosen) x0 n step base)))
+         (made (coin-emit hazards pace table params (cadr chosen) (car chosen) x0 n step base counts)))
     made))
 
 (define (coin-lay pieces pace span step cap params seed)
@@ -638,11 +717,11 @@
            (rng (make-random (if (and (number? seed) (> seed 0)) (floor seed) 1))))
       (if (null? groups)
         pieces
-        (let loop ((gs groups) (acc hazards) (rg rng))
+        (let loop ((gs groups) (acc hazards) (rg rng) (counts (list 0 0 0)))
           (if (null? gs)
             acc
-            (let ((made (coin-one hazards pace span step cap params table rg (car gs))))
-              (loop (cdr gs) (append acc (car made)) (cadr made)))))))))
+            (let ((made (coin-one hazards pace span step cap params table rg (car gs) counts)))
+              (loop (cdr gs) (append acc (car made)) (cadr made) (car (cdr (cdr made)))))))))))
 
 (define (coin-near? pieces q)
   (let ((x (piece-x q))
