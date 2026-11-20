@@ -1020,13 +1020,29 @@
                       (list (piece 3.0 1.2 0.7 0.45 0.0))
                       8.0 band hue-now 9.0))))))
 
-(define (ensure-ahead!)
-  (let loop ((guard 0))
-    (if (or (>= guard 8) (> next-x (+ (player-x player) 42.0)))
-      #t
-      (begin
-        (spawn-chunk!)
-        (loop (+ guard 1))))))
+; Seconds of road in front of the runner. A fixed 42 m is only a few
+; seconds once the pace is up, and a slow tick used to let the picture
+; run off the end of it.
+(define (road-horizon)
+  (let ((v (if (and (number? speed-now) (> speed-now 0.1)) speed-now 8.0)))
+    (min 160.0 (max 72.0 (* v 6.0)))))
+
+; hint is where the picture already is. Fill past that, not only past
+; the server body, or the picture reaches the last ground and waits
+; in an empty tail while a level gate is still working.
+(define (ensure-ahead! . rest)
+  (let ((hint (if (and (pair? rest) (number? (car rest)) (> (car rest) 0.0))
+                (exact->inexact (car rest))
+                0.0))
+        (px (player-x player))
+        (want (road-horizon)))
+    (let ((from (min (+ px 80.0) (max px hint))))
+      (let loop ((guard 0))
+        (if (or (>= guard 12) (> next-x (+ from want)))
+          #t
+          (begin
+            (spawn-chunk!)
+            (loop (+ guard 1))))))))
 
 (define (sync-rules!)
   (publish-named! "rule-gravity" g-now)
@@ -1458,6 +1474,19 @@
         (let ((d (if (= last-ms 0) 16 (- now last-ms))))
           (set! last-ms now)
           (if (> d 80) 80 (if (< d 0) 0 d)))))))
+
+; The page says how much of its own clock this tick covers. A burst of
+; queued ticks used to see a near-zero wall gap and simulate nothing,
+; while the picture kept running, so the road ahead went empty.
+; LUMEN_TICK_MS still wins, so a fast-forwarded check stays on that clock.
+(define (tick-slice msg)
+  (let ((forced (tick-force-ms)))
+    (if (> forced 0.0)
+      forced
+      (let ((n (if (hash? msg) (hash-ref msg "dt" #f) #f)))
+        (if (and (number? n) (> n 5.0))
+          (min 200.0 (exact->inexact n))
+          (elapsed-ms))))))
 
 ; The kept string is compared against the live binding. rebind is tried
 ; first; if persist-reject aborts it, set-code installs the same source.
@@ -4050,7 +4079,7 @@
   (if (or scene-busy motif-busy pals-busy edsl-busy)
     (try (fiber:yield) (catch (e) #f))
     #f)
-  (let ((ev (pump! (elapsed-ms))))
+  (let ((ev (pump! (tick-slice msg))))
     (if (or (string=? ev "bump") (string=? ev "oops"))
       (note! "BUMP" ev "run"
              (if (string=? ev "oops") "Back on the path" "Oops! Keep going"))
@@ -4064,7 +4093,7 @@
     (maybe-dream!)
     (maybe-primer!)
     (maybe-guests!)
-    (ensure-ahead!)
+    (ensure-ahead! (hash-ref msg "x" 0))
     (poll-llm! c)
     (send-new-chunks c)
     (if rules-dirty
