@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { DT, makePlayer, rulesOf, step } from "../web/sim.mjs";
 import { litAnchorsOk, litFragment, litSky, LIGHT_LINE } from "../web/lit.mjs";
 import { meshSources } from "../web/render.mjs";
+import { blurAmount, fovKick, laneEase, sceneGrade, shakeOffset, sunScreen } from "../web/feel.mjs";
 import {
   DEFAULT_POLICY,
   POLICY_TEXT,
@@ -84,6 +85,44 @@ assert(med.shadow && med.bloom && med.hdr === false && med.chain === "quarter" &
 const high = tierProfile("high", DEFAULT_POLICY, gpuCaps);
 assert(high.chain === "half" && high.shadowSize === 2048 && high.pcf === 9 && high.hdr === true, "high profile");
 assert(tierProfile("high", DEFAULT_POLICY, noFbo).tier === "low", "profile follows fbo failure");
+assert(lowProfile.fxaa === false && lowProfile.ssao === 0 && lowProfile.blur === 0 && lowProfile.shaft === 0, "low skips the new passes");
+assert(lowProfile.trail === 0 && lowProfile.dust === 12 && lowProfile.spark === 36 && lowProfile.fovKick === 0, "low keeps the old particle budget");
+assert(lowProfile.grade === 0 && lowProfile.sky === 0 && lowProfile.keep === 0 && lowProfile.back === 0, "low has no grade or evolution cue");
+assert(med.fxaa === true && med.blur === 0 && med.shaft === 0 && med.ssao === 0 && med.hdr === false, "medium is grade and fxaa, not the heavy passes");
+assert(med.fovKick === 0.045 && med.dust === 18 && med.spark === 42 && med.trail === 4 && med.grade === 0.4, "medium budgets");
+assert(high.fxaa === true && high.blur === 0.34 && high.shaft === 0.22 && high.ssao === 0.8, "high atmosphere budgets");
+assert(high.dust === 28 && high.spark === 56 && high.trail === 7 && high.sky === 1 && high.exposure === 1.02, "high counts");
+assert(high.keep === 0.62 && high.back === 0.34, "evolution cue budgets");
+assert(fovKick(8, 0.07) === 0 && Math.abs(fovKick(16, 0.07) - 0.07) < 1e-9, "fov kick waits for speed");
+assert(Math.abs(fovKick(12, 0.07) - 0.035) < 1e-9, "fov kick is half at 12 m/s");
+const eased = laneEase(0, 0, 1.8, 1 / 60, "high");
+assert(eased.lat > 0 && eased.lat < 0.5, "a lane ease does not snap, " + eased.lat);
+let lat = 0;
+let vel = 0;
+for (let i = 0; i < 48; i++) {
+  const step = laneEase(lat, vel, 1.8, 1 / 60, "medium");
+  lat = step.lat;
+  vel = step.vel;
+}
+assert(Math.abs(lat - 1.8) < 0.08, "lane ease arrives, " + lat);
+assert(shakeOffset(0, 1).every((v) => v === 0), "no shake without an amplitude");
+const kick = shakeOffset(0.04, 0.2);
+assert(kick.some((v) => Math.abs(v) > 0) && kick.every((v) => Math.abs(v) <= 0.04), "shake stays inside its budget");
+assert(blurAmount(8, 0.34) === 0 && Math.abs(blurAmount(18, 0.34) - 0.34) < 1e-9, "blur waits for pace");
+const sunAt = sunScreen(0, 0.95, 16 / 9, [0.74, 0.78]);
+assert(sunAt[0] >= 0 && sunAt[0] <= 1 && sunAt[1] >= 0 && sunAt[1] <= 1, "sun stays on screen");
+const gardenGrade = sceneGrade({ biome: "garden", sky: [0.55, 0.72, 0.95], fog: [0.9, 0.85, 0.75] });
+const spaceGrade = sceneGrade({ biome: "space", sky: [0.1, 0.1, 0.22], fog: [0.08, 0.07, 0.16] });
+const iceGrade = sceneGrade({ biome: "aurora-ice", sky: [0.16, 0.28, 0.48], fog: [0.7, 0.86, 0.92], surface: "ice", particles: "snow" });
+const evolved = sceneGrade({ biome: "candy", sky: [0.95, 0.4, 0.7], fog: [1, 0.6, 0.8] });
+assert(gardenGrade.family === "garden" && spaceGrade.family === "space" && iceGrade.family === "ice", "grade families");
+const ratio = (g) => g.gain[2] / g.gain[0];
+assert(ratio(spaceGrade) > ratio(gardenGrade), "space keeps a cooler blue gain");
+assert(iceGrade.sat < gardenGrade.sat, "ice is less saturated");
+assert(evolved.family === "garden" && Math.abs(evolved.gain[0] - gardenGrade.gain[0]) > 0.02, "an evolved sky tints the grade");
+const renderText = readFileSync(new URL("../web/render.mjs", import.meta.url), "utf8");
+const skySrc = renderText.slice(renderText.indexOf("const SKY_FS"), renderText.indexOf("const MESH_VS"));
+assert(skySrc.includes("SKY_FS") && !skySrc.includes("uSkyAnim"), "the low sky source has no animated-sky uniform");
 
 function feed(state, n, workMs, gapMs, t0) {
   let snap = null;
@@ -350,6 +389,9 @@ const sky = `void main() {
 }`;
 assert(litSky(sky).includes("max(c, vec3(0.0))"), "sky lit path");
 assert(sky.includes("vec3(0.9)"), "sky source stays knee'd");
+const animated = litSky("uniform float uFlash;\n" + sky);
+assert(animated.includes("uniform float uSkyAnim") && animated.includes("uSkyAnim > 0.01"), "lit sky animates");
+assert(!sky.includes("uSkyAnim"), "the knee sample stays plain");
 assert(litAnchorsOk(meshSources()), "live mesh shaders accept the lit variant");
 assert(clampTier("high", "medium") === "medium", "clamp");
 

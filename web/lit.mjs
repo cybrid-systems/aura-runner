@@ -47,6 +47,23 @@ const SKY_KNEE = `  vec3 over = max(c - vec3(0.9), vec3(0.0));
   c = min(max(c, vec3(0.0)), vec3(0.9)) + over / (vec3(1.0) + over * 10.0);
   o = vec4(c, 1.0);`;
 
+const RIM_LINE = "col += vec3(1.0, 0.93, 0.82) * rim * (0.16 + vEmit * 0.22);";
+const RIM_LIT = "col += vec3(1.0, 0.97, 0.90) * rim * (0.34 + vEmit * 0.55);";
+const FOG_LINE = "fog *= (1.0 - 0.82 * clamp(vEmit, 0.0, 1.0));";
+const FOG_LIT = `fog *= (1.0 - 0.82 * clamp(vEmit, 0.0, 1.0));
+  fog *= mix(1.0, 0.42, clamp(vW.y * 0.18, 0.0, 1.0));`;
+
+// A slow sheet on the lit sky only. The low sky source does not carry it,
+// so a software rasterizer keeps compiling the shader it already had.
+const SKY_ANIM = `  if (uSkyAnim > 0.01) {
+    float sheet = smoothstep(0.52, 0.9, uv.y) * (0.5 + 0.5 * sin(x * 3.2 + uTime * 0.35));
+    vec3 wash = mix(uSky0, uNebula + vec3(0.15, 0.35, 0.25), 0.55);
+    c = mix(c, wash, sheet * 0.14 * uSkyAnim);
+    float veil = sin(x * 8.0 + uTime * 0.22 + uv.y * 4.0);
+    c += vec3(0.55, 0.86, 0.72) * smoothstep(0.55, 0.95, veil) * smoothstep(0.48, 0.82, uv.y) * 0.05 * uSkyAnim;
+  }
+`;
+
 export const DEPTH_FS = `#version 300 es
 precision highp float;
 void main() {}`;
@@ -57,12 +74,16 @@ export function litFragment(src) {
   let out = src.replace("out vec4 o;", PCF + "\nout vec4 o;");
   out = out.replace(LIGHT_LINE, LIGHT_LIT);
   out = out.replace(/softKnee\(mix\(col, uFog, fog\)\)/g, "mix(col, uFog, fog)");
+  if (out.includes(RIM_LINE)) out = out.replaceAll(RIM_LINE, RIM_LIT);
+  if (out.includes(FOG_LINE)) out = out.replaceAll(FOG_LINE, FOG_LIT);
   return out;
 }
 
 export function litSky(src) {
   if (!src.includes(SKY_KNEE)) throw new Error("sky knee missing");
-  return src.replace(SKY_KNEE, "  o = vec4(max(c, vec3(0.0)), 1.0);");
+  let out = src.replace("uniform float uFlash;", "uniform float uFlash;\nuniform float uSkyAnim;");
+  out = out.replace(SKY_KNEE, SKY_ANIM + "  o = vec4(max(c, vec3(0.0)), 1.0);");
+  return out;
 }
 
 export function litAnchorsOk(sources) {
@@ -74,6 +95,9 @@ export function litAnchorsOk(sources) {
     if (!lit.includes("shadeShadow")) return false;
     if (lit.includes("softKnee(mix(col, uFog, fog))")) return false;
     if (!src.includes("softKnee(mix(col, uFog, fog))")) return false;
+    if (!src.includes(RIM_LINE) || !lit.includes("0.34 + vEmit * 0.55")) return false;
+    if (!src.includes(FOG_LINE) || src.includes("vW.y * 0.18")) return false;
+    if (!lit.includes("vW.y * 0.18")) return false;
   }
   return true;
 }

@@ -155,6 +155,7 @@ let latency = 0;
 let lastShown = "0";
 let spark = "";
 let nearSpark = false;
+let evoCue = "";
 let rejectSpark = false;
 let combo = 0;
 let comboUntil = 0;
@@ -1088,6 +1089,9 @@ function connect() {
       if (window.__lumenOnDecision) window.__lumenOnDecision(msg);
       if (msg.kind === "KEEP" && (msg.arm === "motif" || msg.arm === "scene" || msg.arm === "pals")) audio.keep();
       if (msg.kind === "ROLLBACK") rejectSpark = true;
+      if ((msg.arm === "scene" || msg.arm === "pals") && (msg.kind === "KEEP" || msg.kind === "ROLLBACK")) {
+        evoCue = msg.kind === "KEEP" ? "keep" : "rollback";
+      }
     } else if (msg.op === "thing") {
       thingHud.show(msg);
     } else if (msg.op === "primer" && msg.status === "same") {
@@ -1176,15 +1180,19 @@ window.__lumenBenchMark = () => {
 
 // Real elapsed time for one drawn frame, without the vsync gap. Headless
 // Chrome does not deliver animation frames, so the bench calls this.
-window.__lumenTimeFrames = (n) => {
+window.__lumenTimeFrames = (n, sync) => {
   const count = Math.max(1, Math.min(60, n | 0));
   const samples = [];
+  const pix = sync ? new Uint8Array(4) : null;
   stepping = true;
   try {
     for (let i = 0; i < count; i++) {
       const t0 = performance.now();
       frame(t0);
-      if (renderer && renderer.gl) renderer.gl.finish();
+      if (renderer && renderer.gl) {
+        if (pix) renderer.gl.readPixels(0, 0, 1, 1, renderer.gl.RGBA, renderer.gl.UNSIGNED_BYTE, pix);
+        else renderer.gl.finish();
+      }
       samples.push(performance.now() - t0);
     }
   } finally {
@@ -1192,12 +1200,25 @@ window.__lumenTimeFrames = (n) => {
   }
   samples.sort((a, b) => a - b);
   const at = (q) => samples[Math.min(samples.length - 1, Math.floor(q * (samples.length - 1)))] || 0;
+  const picture = renderer && renderer.timing ? renderer.timing() : {};
   return {
     n: samples.length,
     p50: at(0.5),
     p95: at(0.95),
     instances: Number(canvas.dataset.instances || 0),
     biome: canvas.dataset.biome || biomeName,
+    tier: picture.tier || (canvas.dataset.tier || ""),
+    work: picture.work,
+    gpu: picture.gpu,
+    gpuP50: picture.gpuP50,
+    gpuP95: picture.gpuP95,
+    gpuN: picture.gpuN,
+    gpuExt: picture.ext ? 1 : 0,
+    fxaa: canvas.dataset.fxaa || "0",
+    ao: canvas.dataset.ao || "0",
+    grade: canvas.dataset.grade || "0",
+    blur: canvas.dataset.blur || "0",
+    hdr: canvas.dataset.hdr || "0",
   };
 };
 
@@ -1507,7 +1528,7 @@ function frame(now) {
         gapMs: dt * 1000,
         visible: document.visibilityState !== "hidden",
         event: spark, alive: true, speed: rules.speed, g: rules.g,
-        near: nearSpark, reject: rejectSpark,
+        near: nearSpark, reject: rejectSpark, evo: evoCue,
         blink: now < hurtUntil ? 1 : 0,
         duel,
         scene: sceneView, stumble: stumble / 1500, pals, hero, bend, loot,
@@ -1529,6 +1550,7 @@ function frame(now) {
     spark = "";
     nearSpark = false;
     rejectSpark = false;
+    evoCue = "";
     duel = "";
   }
   if (toastQ.length && now >= toastUntil) {

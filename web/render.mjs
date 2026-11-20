@@ -1,6 +1,7 @@
 import { drawThing, growOf, animOf, showBox } from "./thing.mjs";
 import { DEPTH_FS, litFragment, litSky } from "./lit.mjs";
 import { createPost, probeFloat } from "./post.mjs";
+import { blurAmount, fovKick, laneEase, sceneGrade, shakeOffset, sunScreen } from "./feel.mjs";
 import {
   DEFAULT_POLICY, bindContextLoss, contextPlan, createQuality, noteFbo,
   noteReduced, noteRefresh, noteVisibility, observe, probeCaps, resolutionScale, setMode,
@@ -1337,7 +1338,48 @@ export function createRenderer(canvas, hooks) {
       stars: gl.getUniformLocation(prog, "uStars"),
       nebula: gl.getUniformLocation(prog, "uNebula"),
       flash: gl.getUniformLocation(prog, "uFlash"),
+      skyAnim: gl.getUniformLocation(prog, "uSkyAnim"),
     };
+  }
+  let timerExt = null;
+  try { timerExt = gl.getExtension("EXT_disjoint_timer_query_webgl2"); } catch { timerExt = null; }
+  let gpuQuery = null;
+  let gpuOpen = false;
+  let gpuMs = -1;
+  const gpuSamples = [];
+  let lastWork = 0;
+  function pollGpu() {
+    if (!timerExt || !gpuQuery || gpuOpen) return;
+    let available = false;
+    try { available = !!gl.getQueryParameter(gpuQuery, gl.QUERY_RESULT_AVAILABLE); }
+    catch { return; }
+    if (!available) return;
+    let disjoint = false;
+    try { disjoint = !!gl.getParameter(timerExt.GPU_DISJOINT_EXT); } catch { disjoint = true; }
+    if (!disjoint) {
+      const ns = gl.getQueryParameter(gpuQuery, gl.QUERY_RESULT);
+      if (ns > 0) {
+        gpuMs = ns / 1e6;
+        gpuSamples.push(gpuMs);
+        if (gpuSamples.length > 64) gpuSamples.shift();
+      }
+    }
+    gl.deleteQuery(gpuQuery);
+    gpuQuery = null;
+  }
+  function beginGpu() {
+    const forced = typeof window !== "undefined" && window.__lumenGpuTimer;
+    if ((software && !forced) || !timerExt || gpuQuery || gpuOpen) return;
+    const q = gl.createQuery();
+    if (!q) return;
+    gpuQuery = q;
+    gl.beginQuery(timerExt.TIME_ELAPSED_EXT, q);
+    gpuOpen = true;
+  }
+  function endGpu() {
+    if (!gpuOpen) return;
+    gpuOpen = false;
+    try { gl.endQuery(timerExt.TIME_ELAPSED_EXT); } catch { /* context already gone */ }
   }
   bootGL();
 
@@ -1470,6 +1512,13 @@ export function createRenderer(canvas, hooks) {
   }
   let camY = 2.15;
   let camFov = 0.92;
+  let camLatVel = 0;
+  let shakeAmp = 0;
+  let hitStop = 0;
+  let heldHit = false;
+  let keepT = 0;
+  let backT = 0;
+  let drawFov = 0.92;
   let prevY = 0;
   let prevLx = 0;
   let lean = 0;
@@ -1478,11 +1527,16 @@ export function createRenderer(canvas, hooks) {
   let prevSpeed = 5;
   let prevG = 32;
   let reject = 0;
-  const sparks = new Float32Array(36 * 8);
-  // Short-lived foot puffs. Kept apart from sparks so a coin burst cannot
-  // crowd them out, and the pool stays far under the instance cap.
-  const DUST_N = 12;
-  const dust = new Float32Array(DUST_N * 8);
+  // Low keeps the original 36 sparks and 12 puffs. Medium and High may
+  // fill the extra slots; the low loops never walk them.
+  const SPARK_BASE = 36;
+  const SPARK_MAX = 64;
+  const DUST_BASE = 12;
+  const DUST_MAX = 32;
+  const sparks = new Float32Array(SPARK_MAX * 8);
+  const dust = new Float32Array(DUST_MAX * 8);
+  let prevSparkLim = SPARK_BASE;
+  let prevDustLim = DUST_BASE;
   let dustStep = 0;
 
   function resize() {
@@ -1551,10 +1605,27 @@ export function createRenderer(canvas, hooks) {
     return drawn;
   }
 
+  function sparkLimit() {
+    if (!usePost) return SPARK_BASE;
+    const n = activeProfile.spark | 0;
+    if (n <= SPARK_BASE) return SPARK_BASE;
+    return n > SPARK_MAX ? SPARK_MAX : n;
+  }
+  function dustLimit() {
+    if (!usePost) return DUST_BASE;
+    const n = activeProfile.dust | 0;
+    if (n <= DUST_BASE) return DUST_BASE;
+    return n > DUST_MAX ? DUST_MAX : n;
+  }
+
   // tint 0 keeps the garden mix. 1 blossom, 2 apple, 3 star, 4 gem.
   function burst(x, y, z, rgb, count, lift, tint = 0, psi = 0) {
+    const slots = sparkLimit();
     let left = count;
-    for (let i = 0; i < 36 && left > 0; i++) {
+    if (usePost && slots > SPARK_BASE) {
+      left = Math.min(slots, Math.max(count, Math.round(count * (slots / SPARK_BASE))));
+    }
+    for (let i = 0; i < slots && left > 0; i++) {
       const o = i * 8;
       if (sparks[o + 6] > 0) continue;
       const a = (i / 36) * Math.PI * 2;
@@ -1576,8 +1647,12 @@ export function createRenderer(canvas, hooks) {
   function puffDust(x, y, z, psi, count, kick) {
     if (n >= MAX - 48) return;
     const ax = roadAxes(psi);
+    const slots = dustLimit();
     let left = count;
-    for (let i = 0; i < DUST_N && left > 0; i++) {
+    if (usePost && slots > DUST_BASE) {
+      left = Math.min(slots, Math.max(count, Math.round(count * (slots / DUST_BASE))));
+    }
+    for (let i = 0; i < slots && left > 0; i++) {
       const o = i * 8;
       if (dust[o + 6] > 0) continue;
       const side = ((i % 5) - 2) * 0.22;
@@ -1885,6 +1960,8 @@ export function createRenderer(canvas, hooks) {
       return 0;
     }
     try {
+    pollGpu();
+    beginGpu();
     const arrived = dressPalette(palette(st.hue || 0, st.scene), st.biome, st.mood, st.spec);
     const px = st.lx || 0;
     const py = st.y || 0;
@@ -1932,6 +2009,7 @@ export function createRenderer(canvas, hooks) {
       shownS = glide.s;
       camS = shownS;
       camLat = px;
+      camLatVel = 0;
     } else {
       shownS = glide.s;
       noteBend(shownS, bend);
@@ -1955,14 +2033,51 @@ export function createRenderer(canvas, hooks) {
     pulse = Math.max(0, pulse - (reduced ? 1 : 0.015));
     if (st.reject) reject = 1;
     reject = Math.max(0, reject - 0.01);
+    activeProfile = tierProfile(quality.tier, quality.policy, quality.caps);
+    usePost = false;
+    wantShadow = false;
+    if (activeProfile.tier !== "low" && w > 2 && h > 2) {
+      if (ensurePasses(activeProfile)) {
+        usePost = true;
+        wantShadow = !!(activeProfile.shadow && post && post.shadowFb());
+      } else {
+        activeProfile = tierProfile(quality.tier, quality.policy, quality.caps);
+      }
+    }
+    const gpuFeel = usePost && !reduced;
     const followL = reduced ? 1 : 0.12;
     const followS = reduced ? 1 : 0.18;
-    camLat += (px - camLat) * followL;
+    if (gpuFeel) {
+      const eased = laneEase(camLat, camLatVel, px, frameDt, activeProfile.tier);
+      camLat = eased.lat;
+      camLatVel = eased.vel;
+      const struck = (st.stumble || 0) > 0.92;
+      if (st.near || (struck && !heldHit)) {
+        shakeAmp = Math.max(shakeAmp, activeProfile.shake || 0);
+        hitStop = 0.07;
+      }
+      heldHit = struck;
+      if (st.evo === "keep") keepT = 1;
+      if (st.evo === "rollback") backT = 1;
+    } else {
+      camLat += (px - camLat) * followL;
+      camLatVel = 0;
+      shakeAmp = 0;
+      hitStop = 0;
+      heldHit = false;
+      keepT = 0;
+      backT = 0;
+    }
+    shakeAmp = Math.max(0, shakeAmp - frameDt * 1.8);
+    hitStop = Math.max(0, hitStop - frameDt);
+    keepT = Math.max(0, keepT - frameDt / 0.7);
+    backT = Math.max(0, backT - frameDt / 0.55);
     camS += (drawS - camS) * followS;
     const floaty = Math.max(0, (32 - grav) * 0.03);
     const wantY = 2.25 + floaty + (py > 0.4 ? 0.18 : 0) - land * 0.16;
     camY += (wantY - camY) * (reduced ? 1 : 0.08);
-    const wantFov = (py > 0.35 ? 1.04 : 0.9) + Math.min(0.1, Math.max(0, speed - 5) * 0.025) + pulse * 0.04;
+    const wantFov = (py > 0.35 ? 1.04 : 0.9) + Math.min(0.1, Math.max(0, speed - 5) * 0.025) + pulse * 0.04
+      + (gpuFeel ? fovKick(speed, activeProfile.fovKick) : 0);
     camFov += (wantFov - camFov) * (reduced ? 1 : 0.08);
     const bob = reduced || !alive ? 0 : Math.sin(st.time * (8 + speed * 0.25)) * 0.02;
     const basis = sample(camS, 0);
@@ -1976,6 +2091,13 @@ export function createRenderer(canvas, hooks) {
       camY + bob,
       basis.z + oz * 0.62 - Math.cos(psi) * 4.7 - leanWorld * Math.sin(psi),
     ];
+    if (shakeAmp > 0) {
+      const off = shakeOffset(shakeAmp, st.time || 0);
+      eye[0] += off[0];
+      eye[1] += off[1];
+      eye[2] += off[2];
+    }
+    drawFov = camFov - (hitStop > 0 ? (activeProfile.shake || 0.04) * (hitStop / 0.07) * 1.4 : 0);
     // One beat ahead, so the next move sits in the view. The eye stays
     // 4.7 m behind, and a bend still rebases only past 8 m.
     const lookAhead = speed * 1.3;
@@ -1984,20 +2106,8 @@ export function createRenderer(canvas, hooks) {
       0.95 + py * 0.18 + floaty * 0.4,
       basis.z + oz * 0.22 + Math.cos(psi) * lookAhead,
     ];
-    perspective(proj, camFov, w / h, 0.08, 96);
+    perspective(proj, drawFov, w / h, 0.08, 96);
     lookAt(view, eye, at, [0, 1, 0]);
-
-    activeProfile = tierProfile(quality.tier, quality.policy, quality.caps);
-    usePost = false;
-    wantShadow = false;
-    if (activeProfile.tier !== "low" && w > 2 && h > 2) {
-      if (ensurePasses(activeProfile)) {
-        usePost = true;
-        wantShadow = !!(activeProfile.shadow && post && post.shadowFb());
-      } else {
-        activeProfile = tierProfile(quality.tier, quality.policy, quality.caps);
-      }
-    }
 
     function paintSky(prog, locs) {
       gl.disable(gl.DEPTH_TEST);
@@ -2013,7 +2123,7 @@ export function createRenderer(canvas, hooks) {
       gl.uniform1f(locs.time, st.time || 0);
       gl.uniform1f(locs.camZ, camS);
       gl.uniform1f(locs.yaw, psi);
-      gl.uniform1f(locs.fov, camFov);
+      gl.uniform1f(locs.fov, drawFov);
       const skyShow = visibleSky(st.props, st.sunHide);
       gl.uniform1f(locs.sunAmt, skyShow.shader * (pal.disc == null ? 1 : pal.disc));
       // The full-screen streak is a real-GPU extra. SwiftShader keeps the
@@ -2023,6 +2133,7 @@ export function createRenderer(canvas, hooks) {
       gl.uniform1f(locs.stars, pal.stars || 0);
       gl.uniform3fv(locs.nebula, pal.nebula || [0, 0, 0]);
       gl.uniform1f(locs.flash, worldFlash || 0);
+      if (locs.skyAnim) gl.uniform1f(locs.skyAnim, usePost && !reduced ? (activeProfile.sky || 0) : 0);
       gl.uniform2f(locs.res, w, h);
       gl.bindVertexArray(null);
       gl.bindBuffer(gl.ARRAY_BUFFER, tri);
@@ -3084,6 +3195,14 @@ export function createRenderer(canvas, hooks) {
         const puff = spot(-0.45 - t * (0.28 + speed * 0.02), lean * 0.1 * t);
         push(puff.x, 0.35 + fade * 0.15, puff.z, s, s, s, 2, pal.cape, 0.15, 0.35 + fade * 0.5);
       }
+      if (usePost && !reduced) {
+        const extra = activeProfile.trail | 0;
+        for (let t = 1; t <= extra; t++) {
+          const fade = 1 - t / (extra + 1);
+          const ribbon = spot(-0.7 - t * 0.24, leanLat * 0.15);
+          push(ribbon.x, 0.28 + fade * 0.22, ribbon.z, 0.05, 0.04 + fade * 0.06, 0.34 * fade + 0.12, 0, pal.cape, 0.18, 0.55 + fade * 0.4, feet.psi);
+        }
+      }
       }
     } else if (!alive) {
       const rest = 0.22 + (reduced ? 0 : Math.sin(st.time * 2) * 0.03);
@@ -3093,7 +3212,12 @@ export function createRenderer(canvas, hooks) {
     }
     spin = 0;
 
-    for (let i = 0; i < 36; i++) {
+    const sparkSlots = sparkLimit();
+    if (sparkSlots !== prevSparkLim) {
+      for (let i = sparkSlots; i < SPARK_MAX; i++) sparks[i * 8 + 6] = 0;
+      prevSparkLim = sparkSlots;
+    }
+    for (let i = 0; i < sparkSlots; i++) {
       const o = i * 8;
       const life = sparks[o + 6];
       if (life <= 0) continue;
@@ -3113,7 +3237,12 @@ export function createRenderer(canvas, hooks) {
       push(sparks[o], sparks[o + 1], sparks[o + 2], s, s, s, 1, tint, 0.2, tintId >= 3 ? 0.9 : 0.7);
     }
     let dustN = 0;
-    for (let i = 0; i < DUST_N; i++) {
+    const dustSlots = dustLimit();
+    if (dustSlots !== prevDustLim) {
+      for (let i = dustSlots; i < DUST_MAX; i++) dust[i * 8 + 6] = 0;
+      prevDustLim = dustSlots;
+    }
+    for (let i = 0; i < dustSlots; i++) {
       const o = i * 8;
       const life = dust[o + 6];
       if (life <= 0) continue;
@@ -3285,10 +3414,28 @@ export function createRenderer(canvas, hooks) {
     drawSpan(marchProg, marchLoc, mid, n - mid, !usePost, 0);
     gl.disable(gl.SAMPLE_ALPHA_TO_COVERAGE);
     if (usePost && post) {
-      post.present(w, h, activeProfile);
+      const graded = sceneGrade(pal);
+      post.present(w, h, activeProfile, {
+        exposure: activeProfile.exposure || 1,
+        grade: activeProfile.grade || 0,
+        sat: graded.sat,
+        contrast: graded.contrast,
+        lift: graded.lift,
+        gain: graded.gain,
+        shaftCol: graded.shaft,
+        sun: sunScreen(psi, drawFov, w / Math.max(1, h), pal.sunUv),
+        shaft: activeProfile.shaft || 0,
+        ao: activeProfile.ssao || 0,
+        keep: keepT * (activeProfile.keep || 0),
+        back: backT * (activeProfile.back || 0),
+        hit: hitStop > 0 ? hitStop / 0.07 : 0,
+        blur: reduced ? 0 : blurAmount(speed, activeProfile.blur || 0),
+      });
       wasPost = true;
     }
+    endGpu();
     const work = performance.now() - t0;
+    lastWork = work;
     const stamp = nowMs || performance.now();
     if (st.visible === false) noteVisibility(quality, false, stamp);
     else {
@@ -3306,9 +3453,17 @@ export function createRenderer(canvas, hooks) {
     canvas.dataset.shadow = usePost && wantShadow ? "1" : "0";
     canvas.dataset.bloom = usePost ? "1" : "0";
     canvas.dataset.hdr = usePost && activeProfile.hdr ? "1" : "0";
+    canvas.dataset.fxaa = usePost && activeProfile.fxaa ? "1" : "0";
+    canvas.dataset.ao = usePost && post && post.aoOn && post.aoOn() ? "1" : "0";
+    canvas.dataset.grade = usePost && activeProfile.grade > 0 ? "1" : "0";
+    canvas.dataset.blur = usePost && activeProfile.blur > 0 ? "1" : "0";
+    canvas.dataset.work = lastWork.toFixed(2);
+    canvas.dataset.gpu = gpuMs >= 0 ? gpuMs.toFixed(2) : "";
+    canvas.dataset.gpuExt = timerExt ? "1" : "0";
     canvas.dataset.renderer = "webgl2";
     return n;
     } catch (err) {
+      try { endGpu(); } catch { /* query already closed */ }
       if (lost || (gl.isContextLost && gl.isContextLost())) {
         lost = true;
         tell("failed", { message: contextPlan("restore-failed").message });
@@ -3316,6 +3471,22 @@ export function createRenderer(canvas, hooks) {
       }
       throw err;
     }
+  }
+
+  function timing() {
+    pollGpu();
+    const copy = gpuSamples.slice().sort((a, b) => a - b);
+    const at = (q) => (copy.length ? copy[Math.min(copy.length - 1, Math.floor(q * (copy.length - 1)))] : -1);
+    return {
+      work: lastWork,
+      gpu: gpuMs,
+      gpuP50: at(0.5),
+      gpuP95: at(0.95),
+      gpuN: copy.length,
+      tier: quality.tier,
+      ext: !!timerExt,
+      software: !!software,
+    };
   }
 
   function qualitySnapshot() {
@@ -3336,6 +3507,7 @@ export function createRenderer(canvas, hooks) {
     gl,
     resize,
     frame,
+    timing,
     noteFrameTime,
     setQualityMode(mode) { setMode(quality, mode, performance.now()); },
     setReduced(v) { noteReduced(quality, v, performance.now()); },
