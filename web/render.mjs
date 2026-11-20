@@ -91,8 +91,15 @@ function knownName(name, list, fallback) {
   return list.includes(name) ? name : fallback;
 }
 
-const PROP_KINDS = new Set(["tree", "tower", "arch", "crystal", "rock", "coral", "ring"]);
-const PROP_CUBES = { tree: 4, tower: 5, arch: 4, crystal: 3, rock: 3, coral: 4, ring: 4 };
+const PROP_KINDS = new Set(["tree", "tower", "arch", "crystal", "rock", "coral", "ring",
+  "pagoda", "palace-gate", "pearl-tower", "spire", "bridge-tower", "eiffel-tower",
+  "clock-tower", "colonnade", "bamboo", "palm", "stone-bridge", "battlement", "willow", "cypress", "sakura"]);
+const PROP_CUBES = {
+  tree: 4, tower: 5, arch: 4, crystal: 3, rock: 3, coral: 4, ring: 4,
+  pagoda: 8, "palace-gate": 6, "pearl-tower": 6, spire: 5, "bridge-tower": 6,
+  "eiffel-tower": 7, "clock-tower": 5, colonnade: 6, bamboo: 5, palm: 6,
+  "stone-bridge": 5, battlement: 5, willow: 4, cypress: 2, sakura: 4,
+};
 const SPEC_BODIES = new Set(["sun", "moon", "stars", "aurora", "none"]);
 
 function color3(v) {
@@ -1799,6 +1806,126 @@ export function createRenderer(canvas) {
         if (near) push(top[0] + 0.16, 1.22 * scale, top[1], 0.11, 0.11, 0.11, 1, [0.95, 0.34, 0.3], 0.32, 0.16, at.psi);
       }
     }
+    function drawCityMark(at, kind, scale, pal) {
+      const s = scale;
+      const red = [0.78, 0.14, 0.12];
+      const roof = [0.16, 0.1, 0.08];
+      const gold = [0.95, 0.78, 0.32];
+      const iron = [0.28, 0.24, 0.22];
+      const psi = at.psi;
+      const x = at.x;
+      const z = at.z;
+      if (kind === "pagoda") {
+        push(x, 0.55 * s, z, 1.05 * s, 1.1 * s, 1.05 * s, 0, red, 0.48, 0.04, psi);
+        push(x, 1.15 * s, z, 1.55 * s, 0.1 * s, 1.55 * s, 0, roof, 0.4, 0.06, psi);
+        push(x, 1.7 * s, z, 0.78 * s, 0.9 * s, 0.78 * s, 0, red, 0.46, 0.05, psi);
+        push(x, 2.2 * s, z, 1.15 * s, 0.09 * s, 1.15 * s, 0, roof, 0.4, 0.07, psi);
+        push(x, 2.65 * s, z, 0.5 * s, 0.72 * s, 0.5 * s, 0, red, 0.44, 0.06, psi);
+        push(x, 3.05 * s, z, 0.8 * s, 0.08 * s, 0.8 * s, 0, roof, 0.38, 0.1, psi);
+        push(x, 3.4 * s, z, 0.07 * s, 0.55 * s, 0.07 * s, 0, gold, 0.25, 0.5, psi);
+        push(x + 0.55 * s, 0.9 * s, z, 0.12 * s, 0.18 * s, 0.12 * s, 1, [0.95, 0.22, 0.14], 0.2, 0.9, psi);
+      } else if (kind === "palace-gate") {
+        push(x - 0.7 * s, 1.05 * s, z, 0.28 * s, 2.1 * s, 0.28 * s, 0, red, 0.45, 0.04, psi);
+        push(x + 0.7 * s, 1.05 * s, z, 0.28 * s, 2.1 * s, 0.28 * s, 0, red, 0.45, 0.04, psi);
+        push(x, 2.2 * s, z, 1.8 * s, 0.22 * s, 0.4 * s, 0, gold, 0.35, 0.16, psi);
+        push(x, 2.45 * s, z, 2.1 * s, 0.14 * s, 0.62 * s, 0, roof, 0.4, 0.05, psi);
+        push(x - 0.95 * s, 2.58 * s, z, 0.22 * s, 0.16 * s, 0.22 * s, 0, gold, 0.3, 0.3, psi);
+        push(x, 1.4 * s, z, 0.12 * s, 0.16 * s, 0.12 * s, 1, [0.95, 0.22, 0.14], 0.2, 0.9, psi);
+      } else if (kind === "pearl-tower") {
+        const glow = [0.55, 0.9, 1];
+        push(x, 1.8 * s, z, 0.32 * s, 3.6 * s, 0.32 * s, 0, [0.15, 0.22, 0.4], 0.32, 0.12, psi);
+        push(x, 1.2 * s, z, 0.9 * s, 0.9 * s, 0.9 * s, 1, glow, 0.18, 0.7, psi);
+        push(x, 2.3 * s, z, 0.62 * s, 0.62 * s, 0.62 * s, 1, glow, 0.16, 0.8, psi);
+        push(x, 3.15 * s, z, 0.4 * s, 0.4 * s, 0.4 * s, 1, [0.8, 0.95, 1], 0.14, 0.9, psi);
+        push(x, 3.7 * s, z, 0.07 * s, 0.7 * s, 0.07 * s, 0, glow, 0.2, 0.65, psi);
+        push(x, 2.3 * s, z, 1.05 * s, 0.05 * s, 1.05 * s, 1, glow, 0.2, 0.75, psi);
+      } else if (kind === "spire") {
+        const shaft = mix3(pal.trunk, pal.flower, 0.35);
+        const cap = mix3(pal.flower2, [1, 1, 1], 0.25);
+        push(x, 1.0 * s, z, 0.75 * s, 2.0 * s, 0.75 * s, 0, shaft, 0.4, 0.08, psi, 0, 0, 6);
+        push(x, 2.3 * s, z, 0.5 * s, 1.15 * s, 0.5 * s, 0, cap, 0.34, 0.18, psi);
+        push(x, 3.15 * s, z, 0.28 * s, 0.8 * s, 0.28 * s, 0, shaft, 0.32, 0.25, psi);
+        push(x, 3.75 * s, z, 0.07 * s, 0.55 * s, 0.07 * s, 0, cap, 0.24, 0.6, psi);
+        push(x, 1.85 * s, z, 0.82 * s, 0.1 * s, 0.82 * s, 0, cap, 0.2, 0.75, psi);
+      } else if (kind === "bridge-tower") {
+        const vermilion = [0.8, 0.16, 0.1];
+        push(x - 0.7 * s, 1.5 * s, z, 0.26 * s, 3.0 * s, 0.26 * s, 0, vermilion, 0.4, 0.05, psi);
+        push(x + 0.7 * s, 1.5 * s, z, 0.26 * s, 3.0 * s, 0.26 * s, 0, vermilion, 0.4, 0.05, psi);
+        push(x, 2.9 * s, z, 1.7 * s, 0.14 * s, 0.2 * s, 0, vermilion, 0.35, 0.1, psi);
+        push(x, 2.1 * s, z, 1.4 * s, 0.04 * s, 0.04 * s, 0, [0.16, 0.15, 0.18], 0.3, 0.04, psi);
+        push(x, 1.2 * s, z, 1.4 * s, 0.04 * s, 0.04 * s, 0, [0.16, 0.15, 0.18], 0.3, 0.04, psi);
+        push(x, 3.15 * s, z, 0.14 * s, 0.14 * s, 0.14 * s, 1, [1, 0.86, 0.42], 0.2, 0.9, psi);
+      } else if (kind === "eiffel-tower") {
+        push(x - 0.85 * s, 1.0 * s, z, 0.16 * s, 2.0 * s, 0.16 * s, 0, iron, 0.42, 0.04, psi);
+        push(x + 0.85 * s, 1.0 * s, z, 0.16 * s, 2.0 * s, 0.16 * s, 0, iron, 0.42, 0.04, psi);
+        push(x - 0.32 * s, 1.15 * s, z, 0.12 * s, 1.8 * s, 0.12 * s, 0, iron, 0.42, 0.04, psi);
+        push(x + 0.32 * s, 1.15 * s, z, 0.12 * s, 1.8 * s, 0.12 * s, 0, iron, 0.42, 0.04, psi);
+        push(x, 2.05 * s, z, 1.9 * s, 0.12 * s, 0.45 * s, 0, iron, 0.4, 0.08, psi);
+        push(x, 2.75 * s, z, 0.28 * s, 1.15 * s, 0.28 * s, 0, iron, 0.35, 0.1, psi);
+        push(x, 3.45 * s, z, 0.07 * s, 0.5 * s, 0.07 * s, 0, [0.62, 0.5, 0.32], 0.25, 0.45, psi);
+      } else if (kind === "clock-tower") {
+        const stone = mix3(pal.trunk, [0.75, 0.7, 0.62], 0.55);
+        push(x, 1.5 * s, z, 0.62 * s, 3.0 * s, 0.62 * s, 0, stone, 0.5, 0.03, psi);
+        push(x, 3.15 * s, z, 0.72 * s, 0.5 * s, 0.72 * s, 0, mix3(stone, [0.3, 0.22, 0.16], 0.3), 0.42, 0.05, psi);
+        push(x, 2.1 * s, z, 0.32 * s, 0.32 * s, 0.08 * s, 1, [0.96, 0.9, 0.62], 0.2, 0.45, psi);
+        push(x, 3.5 * s, z, 0.8 * s, 0.18 * s, 0.8 * s, 0, stone, 0.4, 0.06, psi);
+        push(x, 3.85 * s, z, 0.07 * s, 0.55 * s, 0.07 * s, 0, [0.35, 0.32, 0.3], 0.3, 0.15, psi);
+      } else if (kind === "colonnade") {
+        const stone = mix3(pal.flower, [0.9, 0.84, 0.7], 0.45);
+        push(x - 0.7 * s, 0.75 * s, z, 0.14 * s, 1.5 * s, 0.14 * s, 0, stone, 0.45, 0.03, psi);
+        push(x - 0.23 * s, 0.75 * s, z, 0.14 * s, 1.5 * s, 0.14 * s, 0, stone, 0.45, 0.03, psi);
+        push(x + 0.23 * s, 0.75 * s, z, 0.14 * s, 1.5 * s, 0.14 * s, 0, stone, 0.45, 0.03, psi);
+        push(x + 0.7 * s, 0.75 * s, z, 0.14 * s, 1.5 * s, 0.14 * s, 0, stone, 0.45, 0.03, psi);
+        push(x, 1.58 * s, z, 1.7 * s, 0.14 * s, 0.32 * s, 0, stone, 0.42, 0.04, psi);
+        push(x, 1.78 * s, z, 1.15 * s, 0.22 * s, 0.22 * s, 0, mix3(stone, [0.55, 0.4, 0.28], 0.25), 0.4, 0.05, psi);
+      } else if (kind === "bamboo") {
+        const g = [0.22, 0.62, 0.32];
+        const g2 = [0.45, 0.78, 0.42];
+        push(x - 0.12 * s, 1.05 * s, z, 0.07 * s, 2.1 * s, 0.07 * s, 0, g, 0.4, 0.03, psi);
+        push(x + 0.1 * s, 1.25 * s, z, 0.06 * s, 2.5 * s, 0.06 * s, 0, g2, 0.4, 0.04, psi);
+        push(x, 0.9 * s, z, 0.06 * s, 1.8 * s, 0.06 * s, 0, g, 0.4, 0.03, psi);
+        push(x + 0.1 * s, 2.15 * s, z, 0.4 * s, 0.22 * s, 0.4 * s, 1, g2, 0.35, 0.05, psi);
+        push(x - 0.08 * s, 1.6 * s, z, 0.3 * s, 0.18 * s, 0.3 * s, 1, g, 0.35, 0.04, psi);
+      } else if (kind === "palm") {
+        const trunk = [0.55, 0.38, 0.2];
+        const leaf = [0.16, 0.55, 0.26];
+        push(x, 0.65 * s, z, 0.16 * s, 1.3 * s, 0.16 * s, 0, trunk, 0.55, 0, psi);
+        push(x + 0.08 * s, 1.45 * s, z, 0.12 * s, 1.1 * s, 0.12 * s, 0, trunk, 0.5, 0, psi);
+        push(x + 0.4 * s, 2.0 * s, z, 0.7 * s, 0.07 * s, 0.14 * s, 0, leaf, 0.4, 0.05, psi);
+        push(x - 0.38 * s, 1.95 * s, z, 0.62 * s, 0.07 * s, 0.14 * s, 0, leaf, 0.4, 0.05, psi);
+        push(x, 2.05 * s, z, 0.14 * s, 0.07 * s, 0.62 * s, 0, leaf, 0.4, 0.05, psi);
+        push(x + 0.05 * s, 2.02 * s, z, 0.14 * s, 0.07 * s, 0.55 * s, 0, leaf, 0.4, 0.06, psi);
+      } else if (kind === "stone-bridge") {
+        const stone = [0.66, 0.64, 0.6];
+        push(x - 0.7 * s, 0.4 * s, z, 0.3 * s, 0.8 * s, 0.45 * s, 0, stone, 0.55, 0.02, psi);
+        push(x + 0.7 * s, 0.4 * s, z, 0.3 * s, 0.8 * s, 0.45 * s, 0, stone, 0.55, 0.02, psi);
+        push(x, 0.78 * s, z, 1.5 * s, 0.14 * s, 0.5 * s, 0, stone, 0.5, 0.03, psi);
+        push(x - 0.4 * s, 0.95 * s, z, 0.7 * s, 0.07 * s, 0.08 * s, 0, [0.4, 0.38, 0.36], 0.45, 0, psi);
+        push(x + 0.4 * s, 0.95 * s, z, 0.7 * s, 0.07 * s, 0.08 * s, 0, [0.4, 0.38, 0.36], 0.45, 0, psi);
+      } else if (kind === "battlement") {
+        const wall = mix3(pal.trunk, [0.55, 0.32, 0.18], 0.4);
+        push(x, 0.6 * s, z, 2.0 * s, 1.2 * s, 0.4 * s, 0, wall, 0.55, 0.03, psi);
+        push(x - 0.7 * s, 1.3 * s, z, 0.26 * s, 0.28 * s, 0.4 * s, 0, wall, 0.5, 0.03, psi);
+        push(x - 0.2 * s, 1.3 * s, z, 0.26 * s, 0.28 * s, 0.4 * s, 0, wall, 0.5, 0.03, psi);
+        push(x + 0.25 * s, 1.3 * s, z, 0.26 * s, 0.28 * s, 0.4 * s, 0, wall, 0.5, 0.03, psi);
+        push(x + 0.7 * s, 1.3 * s, z, 0.26 * s, 0.28 * s, 0.4 * s, 0, wall, 0.5, 0.03, psi);
+      } else if (kind === "willow") {
+        const leaf = [0.32, 0.62, 0.32];
+        push(x, 0.55 * s, z, 0.12 * s, 1.1 * s, 0.12 * s, 0, [0.42, 0.3, 0.18], 0.55, 0, psi);
+        push(x + 0.12 * s, 1.2 * s, z, 0.08 * s, 0.7 * s, 0.45 * s, 0, leaf, 0.4, 0.04, psi);
+        push(x - 0.14 * s, 1.1 * s, z, 0.08 * s, 0.75 * s, 0.4 * s, 0, leaf, 0.4, 0.04, psi);
+        push(x, 0.95 * s, z, 0.42 * s, 0.08 * s, 0.08 * s, 0, leaf, 0.4, 0.05, psi);
+      } else if (kind === "cypress") {
+        push(x, 0.25 * s, z, 0.1 * s, 0.5 * s, 0.1 * s, 0, [0.32, 0.22, 0.14], 0.55, 0, psi);
+        push(x, 1.35 * s, z, 0.32 * s, 2.0 * s, 0.32 * s, 0, [0.1, 0.28, 0.16], 0.45, 0.03, psi);
+      } else if (kind === "sakura") {
+        const pink = [0.98, 0.62, 0.74];
+        push(x, 0.45 * s, z, 0.12 * s, 0.9 * s, 0.12 * s, 0, [0.4, 0.28, 0.2], 0.55, 0, psi);
+        push(x, 1.15 * s, z, 0.62 * s, 0.45 * s, 0.62 * s, 1, pink, 0.3, 0.1, psi);
+        push(x + 0.22 * s, 1.4 * s, z, 0.34 * s, 0.28 * s, 0.34 * s, 1, [1, 0.8, 0.86], 0.28, 0.12, psi);
+        push(x - 0.18 * s, 1.0 * s, z, 0.3 * s, 0.26 * s, 0.3 * s, 1, pink, 0.28, 0.1, psi);
+      }
+    }
     function drawMix(cz, dist) {
       const props = Array.isArray(pal.props) ? pal.props : [];
       const sway = reduced ? 0 : Math.sin((st.time || 0) * 1.1 + cz * 0.13) * 0.05;
@@ -1849,6 +1976,8 @@ export function createRenderer(canvas) {
             const ring = mix3(pal.flower2, [1, 1, 1], 0.2);
             push(at.x, y, at.z, 0.95 * scale, 0.08 * scale, 0.95 * scale, 1, ring, 0.2, 0.65, at.psi);
             push(at.x, y, at.z, 0.28 * scale, 0.28 * scale, 0.28 * scale, 1, glow, 0.2, 0.8, at.psi);
+          } else {
+            drawCityMark(at, prop.kind, scale, pal);
           }
         }
       }

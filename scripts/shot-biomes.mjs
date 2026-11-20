@@ -177,7 +177,7 @@ try {
     }
     if (!sent) throw new Error("wish did not send " + word);
     let probe = {};
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 80; i++) {
       await pump(cdp, 2);
       probe = await evalJson(cdp, `({
         biome: document.documentElement.dataset.biome || "",
@@ -213,6 +213,11 @@ try {
     await sayAndShoot("花园", "zh", "garden", path.join(outDir, "garden.png"));
     await sayAndShoot("城市", "zh", "city", path.join(outDir, "city.png"));
     await sayAndShoot("太空", "zh", "space", path.join(outDir, "space.png"));
+    if (process.env.SHOT_CITIES !== "0") {
+      await sayAndShoot("北京", "zh", "beijing", path.join(outDir, "beijing.png"));
+      await sayAndShoot("旧金山", "zh", "sanfrancisco", path.join(outDir, "sanfrancisco.png"));
+      await sayAndShoot("巴黎", "zh", "paris", path.join(outDir, "paris.png"));
+    }
   }
 
   async function bench(venue) {
@@ -236,7 +241,9 @@ try {
 
   if (process.env.BENCH_SKIP !== "1") {
     const rows = {};
-    for (const venue of ["garden", "city", "space"]) rows[venue] = await bench(venue);
+    const venues = ["garden", "city", "space"];
+    if (process.env.SHOT_CITIES !== "0") venues.push("beijing", "sanfrancisco", "paris");
+    for (const venue of venues) rows[venue] = await bench(venue);
     fs.writeFileSync(path.join(outDir, "frame-times.json"), JSON.stringify(rows, null, 2));
     console.log("frame-times", JSON.stringify(rows));
   }

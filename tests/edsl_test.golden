@@ -27,3 +27,15 @@ theme-candy candy-clouds
 theme-en aurora-ice
 theme-garden 0
 theme-cyber-word 0
+beijing KEEP fair beijing Beijing ok
+shanghai KEEP fair shanghai Shanghai ok
+hangzhou KEEP fair hangzhou Hangzhou ok
+paris KEEP fair paris Paris ok
+sanfrancisco KEEP fair sanfrancisco San Francisco ok
+theme-beijing beijing
+theme-paris paris
+theme-west hangzhou
+place-next london
+place-china beijing
+place-guilin visit-china
+place-prague visit-stone
