@@ -79,11 +79,17 @@ Wished-object calls with no provider selected fill an empty `LLM_BASE_URL` with 
 
 With no `LLM_API_KEY`, `./run.sh` fills those three from `~/code/keys/deepseek` (`DEEPSEEK_KEY_FILE`) or `~/code/keys/minimax` (`MINIMAX_KEY_FILE`). `./run.sh minimax` prefers MiniMax when that key is usable. The key-file defaults are DeepSeek `deepseek-flash` and MiniMax `MiniMax-M3.1-Flash`.
 
+## Picture
+
+Auto starts on Low and moves to Medium or High only after frames stay under budget, then steps back if they miss. Low is the original single pass, with the round contact shadows. Medium and High add one sun shadow and a small bloom. The score stays in the page, so it stays sharp. A browser without WebGL2 draws a flat garden and says so.
+
+The budgets live in [`lib/quality.aura`](lib/quality.aura). The page carries the same numbers, because it does not ask Aura to run them. Quality is not an `evo:trial`. A world, the runner, and a phrase still are. Pick Auto, Low, Medium, or High from the corner control. The browser remembers the choice.
+
 ## Layout
 
 ```
 core/      Aura entry (core/main.aura): simulation, wishes, evo:trial
-web/       Single-pass WebGL2 view
+web/       WebGL2 view. Low is one pass; Medium and High add shadow and bloom
 lib/       Biome EDSL, physics, voice, pals, hearts, race
 scripts/   Checks, seeded play-review, LLM probe
 bridge/    Static page and the WebSocket bridge. ./run.sh starts it
@@ -101,6 +107,7 @@ Aura commands need `AURA_SANDBOX=off` and a nightly binary on `PATH`. CI runs th
 | `node scripts/check-sim.mjs` | Physics golden |
 | `node scripts/check-lanes.mjs` | Screen-left lanes |
 | `node scripts/check-contrast.mjs` | Obstacle contrast |
+| `node scripts/check-quality.mjs` | Quality tiers, fallbacks, sim step |
 | `node scripts/check-edsl.mjs` | Biome EDSL view |
 | `node scripts/check-run.mjs` | Multiplier, venues, voice |
 | `node scripts/check-probe.mjs` | Startup model probe |

@@ -23,15 +23,21 @@ html, body {
 #nogpu[hidden] { display: none; }
 #nogpu {
   position: fixed;
-  inset: 0;
-  display: grid;
-  place-items: center;
+  z-index: 7;
+  left: 50%;
+  top: auto;
+  bottom: max(76px, calc(env(safe-area-inset-bottom) + 68px));
+  transform: translateX(-50%);
+  width: min(440px, 92vw);
   margin: 0;
-  padding: 2rem;
+  padding: 12px 16px;
+  border-radius: 14px;
   text-align: center;
-  font-size: 1.4rem;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.35;
   color: var(--cream);
-  background: #5c3414;
+  background: rgba(36, 18, 8, 0.88);
 }
 #kicker {
   position: fixed;
@@ -145,7 +151,7 @@ html, body {
   font-size: 28px;
   letter-spacing: 0.14em;
   color: #ff5d6c;
-  text-shadow: 0 2px 0 rgba(92, 52, 20, 0.28);
+  text-shadow: 0 1px 0 #3a2412, 0 0 2px rgba(36, 18, 8, 0.85);
   pointer-events: none;
   line-height: 1;
 }
@@ -505,6 +511,41 @@ html, body {
 #motion { right: max(16px, env(safe-area-inset-right)); }
 #mute { right: max(78px, calc(env(safe-area-inset-right) + 62px)); }
 #motion[aria-pressed="true"], #mute[aria-pressed="true"] { background: #ffe08a; }
+#quality { position: fixed; z-index: 6; top: max(74px, calc(env(safe-area-inset-top) + 62px)); right: max(16px, env(safe-area-inset-right)); }
+#quality-btn {
+  height: 32px;
+  margin: 0;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(36, 18, 8, 0.78);
+  color: #fff6e8;
+  font: 800 13px/1 ui-rounded, "Segoe UI", system-ui, sans-serif;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(36, 18, 8, 0.2);
+}
+#quality-menu {
+  display: grid;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 6px;
+  border-radius: 14px;
+  background: rgba(255, 246, 232, 0.96);
+  box-shadow: 0 8px 22px rgba(36, 18, 8, 0.18);
+}
+#quality-menu[hidden] { display: none; }
+#quality-menu button {
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: transparent;
+  color: var(--ink);
+  font: 800 13px/1 ui-rounded, "Segoe UI", system-ui, sans-serif;
+  text-align: left;
+  cursor: pointer;
+}
+#quality-menu button:hover, #quality-menu button:focus-visible { background: #ffe08a; }
 #mark {
   position: fixed;
   right: max(16px, env(safe-area-inset-right));
@@ -659,7 +700,7 @@ html, body {
   color: #8a5a32;
 }
 #card-share[hidden] { display: none; }
-#motion:focus-visible, #mute:focus-visible, #badge:focus-visible, #model:focus-visible, #again:focus-visible, #play-again:focus-visible, #cards-open:focus-visible, #cards-use:focus-visible, #cards-share:focus-visible, .card:focus-visible, #note-list button:focus-visible, .primer-open:focus-visible, #primer-try:focus-visible, #primer-text:focus-visible {
+#motion:focus-visible, #mute:focus-visible, #quality-btn:focus-visible, #quality-menu button:focus-visible, #badge:focus-visible, #model:focus-visible, #again:focus-visible, #play-again:focus-visible, #cards-open:focus-visible, #cards-use:focus-visible, #cards-share:focus-visible, .card:focus-visible, #note-list button:focus-visible, .primer-open:focus-visible, #primer-try:focus-visible, #primer-text:focus-visible {
   outline: 3px solid white;
   outline-offset: 3px;
 }
@@ -694,7 +735,7 @@ html, body {
 }
 #bench { position: fixed; left: 8px; top: 40%; color: white; }
 @media (prefers-reduced-motion: reduce) {
-  #score, #toast, #gain, #grade, #pace, #mult, #evo { animation: none; text-shadow: none; }
+  #score, #toast, #gain, #grade, #pace, #mult, #evo { animation: none; }
 }
 
 /* The left readout is one column. A hot combo used to be pinned on top
@@ -722,6 +763,10 @@ html, body {
 #hud #challenge,
 #hud #combo {
   position: static;
+  text-shadow:
+    0 1px 0 #3a2412,
+    0 0 2px rgba(36, 18, 8, 0.9),
+    0 2px 8px rgba(36, 18, 8, 0.45);
   top: auto;
   left: auto;
   right: auto;
