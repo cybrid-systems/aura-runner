@@ -1,6 +1,8 @@
 import { DT, bodyLane, makePlayer, praiseClear, pressJump, pressLane, pressSlide, rulesOf, step } from "./sim.mjs";
 import { awardPickup, challengeFor, challengeMet, dropGrade, gradeLabel, lootWorth, nearMiss, overtake, praise, skimmed, trackOvertake } from "./score.mjs";
 import { clampMult } from "./runstate.mjs";
+import { COMBO_HEART, HEART_IFRAME, HEARTS_MAX, heartsBlank, heartsHit, heartsRecover, heartsTick } from "./hearts.mjs";
+import { raceGate, raceRead } from "./race.mjs";
 import { createRenderer } from "./render.mjs";
 import { createInput } from "./input.mjs";
 import { createAudio } from "./audio.mjs";
@@ -38,6 +40,15 @@ const wardEl = document.getElementById("ward");
 const recordEl = document.getElementById("record");
 const challengeEl = document.getElementById("challenge");
 const againBtn = document.getElementById("again");
+const heartsEl = document.getElementById("hearts");
+const raceEl = document.getElementById("race");
+const overEl = document.getElementById("over");
+const overScoreEl = document.getElementById("over-score");
+const overLevelEl = document.getElementById("over-level");
+const overMultEl = document.getElementById("over-mult");
+const overRaceEl = document.getElementById("over-race");
+const overBestEl = document.getElementById("over-best");
+const playAgainBtn = document.getElementById("play-again");
 
 const params = new URLSearchParams(location.search);
 const reducedPref = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -141,6 +152,19 @@ let levelOvertakes = 0;
 let levelBumps = 0;
 let challengeDone = false;
 let rewardUntil = 0;
+let hearts = heartsBlank();
+let heartsShown = -1;
+let hurtUntil = 0;
+let runOver = false;
+let runBestCombo = 1;
+let levelComboHeart = false;
+let playerWins = 0;
+let rivalWins = 0;
+let winStreak = 0;
+let lastPlace = 0;
+let duel = "";
+let poseHold = false;
+let bestAtStart = { points: 0, level: 1, combo: 0 };
 const nearSeen = new Set();
 const toastQ = [];
 let toastUntil = 0;
@@ -443,11 +467,23 @@ function resetLocal() {
   levelBumps = 0;
   challengeDone = false;
   rewardUntil = 0;
+  hearts = heartsBlank();
+  heartsShown = -1;
+  hurtUntil = 0;
+  runOver = false;
+  runBestCombo = 1;
+  levelComboHeart = false;
+  playerWins = 0;
+  rivalWins = 0;
+  winStreak = 0;
+  lastPlace = 0;
+  duel = "";
+  if (overEl) overEl.hidden = true;
   document.documentElement.dataset.reward = "0";
   if (wardEl) wardEl.classList.remove("boost");
   runMult = 1;
-  biomeName = "garden";
-  moodName = "day";
+  biomeName = params.get("venue") && VENUES.has(params.get("venue")) ? params.get("venue") : "garden";
+  moodName = params.get("mood") && MOODS.has(params.get("mood")) ? params.get("mood") : "day";
   bannerId = 0;
   bannerUntil = 0;
   if (multEl) multEl.textContent = "×1";
@@ -493,7 +529,8 @@ function reconcile(st) {
   // snap forward so the body meets the obstacles that are actually there.
   // A new run rewinds the server clock (reset-run!, restart, a process
   // that is back at the opening). That one still snaps to the start.
-  if (st.alive !== false && typeof st.x === "number") {
+  if (st.over === true && !runOver) settleOver();
+  if (!runOver && st.alive !== false && typeof st.x === "number") {
     const lead = player[0] - st.x;
     const run = typeof st.run === "number" ? st.run : null;
     const restarted = run !== null && serverRun >= 0 && run + 800 < serverRun;
@@ -527,15 +564,43 @@ function maybeClearChallenge() {
   paintChallenge();
 }
 
-function onLevelChange(prev) {
+function noteRace(goal) {
+  const q = nearestRival();
+  const race = q ? raceGate(player[0], q[1] + q[2] * 0.5, goal) : "";
+  if (race === "player") {
+    playerWins += 1;
+    winStreak = winStreak > 0 ? winStreak + 1 : 1;
+    record.playerWins = (record.playerWins | 0) + 1;
+  } else if (race === "rival") {
+    rivalWins += 1;
+    winStreak = winStreak < 0 ? winStreak - 1 : -1;
+    record.rivalWins = (record.rivalWins | 0) + 1;
+  }
+  if (winStreak > (record.bestStreak | 0)) record.bestStreak = winStreak;
+  lastPlace = 0;
+}
+
+function onLevelChange(prev, goal) {
   const ch = challengeFor(prev);
-  if (levelBumps === 0) record.cleanRuns = (record.cleanRuns | 0) + 1;
+  noteRace(goal);
+  if (levelBumps === 0) {
+    record.cleanRuns = (record.cleanRuns | 0) + 1;
+    const healed = heartsRecover(hearts, "clean");
+    if (healed.recovered) {
+      hearts = healed;
+      pulseHearts();
+      showCue("Heart back");
+      audio.rise();
+    }
+  }
   if (levelMaxCombo > (record.bestCombo | 0)) record.bestCombo = levelMaxCombo;
+  if (levelMaxCombo > runBestCombo) runBestCombo = levelMaxCombo;
   if (!challengeDone && ch.id === "clean" && challengeMet("clean", { bumps: 0 })) grantReward(ch);
   levelBumps = 0;
   levelMaxCombo = 0;
   levelNear = 0;
   levelOvertakes = 0;
+  levelComboHeart = false;
   challengeDone = false;
   writeRecord();
   paintRecord();
@@ -544,11 +609,12 @@ function onLevelChange(prev) {
 function applyLevel(msg) {
   // A gate updates the level. The combo and the distance stay.
   const prev = levelN;
+  const prevGoal = levelGoal;
   if (typeof msg.level === "number") levelN = msg.level;
   if (typeof msg.goal === "number") levelGoal = msg.goal;
   if (typeof msg.level0 === "number") levelStart = msg.level0;
   if (typeof msg.pace === "number") formN = Math.max(0, Math.min(4, Math.round(msg.pace)));
-  if (typeof msg.level === "number" && levelN > prev && serverRun >= 0) onLevelChange(prev);
+  if (typeof msg.level === "number" && levelN > prev && serverRun >= 0 && !runOver) onLevelChange(prev, prevGoal);
   noteCardGrants();
   paintChallenge();
 }
@@ -587,6 +653,7 @@ function blankRecord() {
   return {
     level: 1, form: 0, points: 0, grade: 1, bank: 0, bestLevel: 1, bestPoints: 0,
     bestCombo: 0, cleanRuns: 0, crests: 0, mult: 1, biome: "garden", mood: "day",
+    playerWins: 0, rivalWins: 0, bestStreak: 0,
   };
 }
 
@@ -605,7 +672,13 @@ function sanitizeRecord(raw) {
   const mult = clampInt(raw.mult, 1, 8, Math.max(1, Math.min(8, level)));
   const biome = typeof raw.biome === "string" && VENUES.has(raw.biome) ? raw.biome : "garden";
   const mood = typeof raw.mood === "string" && MOODS.has(raw.mood) ? raw.mood : "day";
-  return { level, form, points, grade, bank, bestLevel, bestPoints, bestCombo, cleanRuns, crests, mult, biome, mood };
+  const playerWinsN = clampInt(raw.playerWins, 0, 9999, 0);
+  const rivalWinsN = clampInt(raw.rivalWins, 0, 9999, 0);
+  const bestStreak = clampInt(raw.bestStreak, 0, 999, 0);
+  return {
+    level, form, points, grade, bank, bestLevel, bestPoints, bestCombo, cleanRuns, crests,
+    mult, biome, mood, playerWins: playerWinsN, rivalWins: rivalWinsN, bestStreak,
+  };
 }
 
 function readRecord() {
@@ -646,13 +719,17 @@ function recordLine(rec) {
   if (rec.bestCombo > 1) text += " · ×" + rec.bestCombo;
   if (rec.cleanRuns > 0) text += " · " + rec.cleanRuns + " clean";
   if (rec.crests > 0) text += " · crest " + rec.crests;
+  if ((rec.playerWins | 0) + (rec.rivalWins | 0) > 0) {
+    text += " · you " + (rec.playerWins | 0) + "–" + (rec.rivalWins | 0);
+  }
   return text;
 }
 
 function paintRecord() {
   if (!recordEl) return;
   const show = record.bestLevel > 1 || record.bestPoints > 0 || record.bestCombo > 1
-    || record.cleanRuns > 0 || record.crests > 0;
+    || record.cleanRuns > 0 || record.crests > 0
+    || (record.playerWins | 0) + (record.rivalWins | 0) > 0;
   recordEl.hidden = !show;
   recordEl.textContent = show ? recordLine(record) : "";
 }
@@ -661,8 +738,10 @@ function paintChallenge() {
   if (!challengeEl) return;
   const ch = challengeFor(levelN);
   challengeEl.hidden = false;
+  const missed = ch.id === "clean" && levelBumps > 0 && !challengeDone;
   challengeEl.classList.toggle("done", challengeDone);
-  challengeEl.textContent = (challengeDone ? "Done · " : "Try · ") + ch.text;
+  challengeEl.classList.toggle("miss", missed);
+  challengeEl.textContent = (challengeDone ? "Done · " : missed ? "Miss · " : "Try · ") + ch.text;
 }
 
 function sameRecord(a, b) {
@@ -670,7 +749,8 @@ function sameRecord(a, b) {
     && a.grade === b.grade && a.bank === b.bank
     && a.bestLevel === b.bestLevel && a.bestPoints === b.bestPoints
     && a.bestCombo === b.bestCombo && a.cleanRuns === b.cleanRuns && a.crests === b.crests
-    && a.mult === b.mult && a.biome === b.biome && a.mood === b.mood;
+    && a.mult === b.mult && a.biome === b.biome && a.mood === b.mood
+    && a.playerWins === b.playerWins && a.rivalWins === b.rivalWins && a.bestStreak === b.bestStreak;
 }
 
 function syncRecord() {
@@ -691,6 +771,9 @@ function syncRecord() {
     mult: clampInt(runMult, 1, 8, 1),
     biome: biomeName,
     mood: moodName,
+    playerWins: record.playerWins | 0,
+    rivalWins: record.rivalWins | 0,
+    bestStreak: Math.max(record.bestStreak | 0, winStreak > 0 ? winStreak : 0),
   };
   if (sameRecord(record, next)) return;
   record = next;
@@ -987,6 +1070,7 @@ function sendTick() {
     near: levelNear | 0,
     overtakes: levelOvertakes | 0,
     level: levelN | 0,
+    hearts: runOver ? 0 : (hearts.hearts | 0),
   }));
   jumpQ = 0;
   slideQ = 0;
@@ -1094,6 +1178,9 @@ function restart() {
       mult: 1,
       biome: params.get("venue") && VENUES.has(params.get("venue")) ? params.get("venue") : "garden",
       mood: params.get("mood") && MOODS.has(params.get("mood")) ? params.get("mood") : "day",
+      playerWins: record.playerWins | 0,
+      rivalWins: record.rivalWins | 0,
+      bestStreak: record.bestStreak | 0,
     };
     writeRecord();
     paintRecord();
@@ -1104,6 +1191,9 @@ function restart() {
   toastUntil = 0;
   showCue("From the start");
   resetLocal();
+  poseHold = false;
+  snapshotBest();
+  paintHearts();
   if (connected && ws && ws.readyState === 1) {
     const again = { op: "restart", seed };
     if (params.get("venue")) again.venue = params.get("venue");
@@ -1184,6 +1274,11 @@ function publishProbe() {
   }
   root.dataset.rivalx = rivalAhead;
   root.dataset.rivallook = rivalLook;
+  root.dataset.hearts = String(hearts.hearts | 0);
+  root.dataset.over = runOver ? "1" : "0";
+  root.dataset.place = raceEl && !raceEl.hidden ? raceEl.dataset.place || "" : "";
+  root.dataset.gap = raceEl && !raceEl.hidden ? raceEl.textContent : "";
+  root.dataset.wins = playerWins + "-" + rivalWins;
 }
 
 let stepping = false;
@@ -1202,10 +1297,10 @@ function frame(now) {
     audio.unlock();
     inputAt = now;
   }
-  if (alive && inp.restart) {
+  if (inp.restart) {
     audio.unlock();
     restart();
-  } else if (alive) {
+  } else if (alive && !runOver && !poseHold) {
     if (inp.jump) { pressJump(player); jumpQ = 1; audio.jump(); }
     if (inp.slide) { pressSlide(player); slideQ = 1; audio.slide(); }
     if (inp.lane) { pressLane(player, inp.lane); laneQ = inp.lane; }
@@ -1215,6 +1310,7 @@ function frame(now) {
       const before = player[2];
       const wasY = player[1];
       const scoreBefore = player[6];
+      hearts = heartsTick(hearts, DT);
       const ev0 = step(player, pieces, rules, DT);
       const wasWard = wardReady;
       const ward = wardStep(wardReady, wardLeft, ev0, DT);
@@ -1245,7 +1341,18 @@ function frame(now) {
         player[6] += got.extra;
         skillBank += got.extra;
         if (got.combo > levelMaxCombo) levelMaxCombo = got.combo;
+        if (got.combo > runBestCombo) runBestCombo = got.combo;
         if (got.combo > (record.bestCombo | 0)) record.bestCombo = got.combo;
+        if (got.combo >= COMBO_HEART && !levelComboHeart && !hearts.over) {
+          levelComboHeart = true;
+          const healed = heartsRecover(hearts, "combo");
+          if (healed.recovered) {
+            hearts = healed;
+            pulseHearts();
+            showCue("Heart back");
+            audio.rise();
+          }
+        }
         const rose = got.grade > grade;
         grade = got.grade;
         gradeBank = got.bank;
@@ -1265,11 +1372,21 @@ function frame(now) {
         showCue(ev === "oops" ? "Back on the path" : "Oops! Keep going");
         audio.near();
         if (ev === "bump") {
+          const next = heartsHit(hearts, false);
+          const lost = next.heart;
+          hearts = next;
           levelBumps += 1;
           grade = dropGrade(grade);
           gradeBank = 0;
           combo = 0;
           comboUntil = 0;
+          paintChallenge();
+          if (lost) hurtUntil = now + HEART_IFRAME * 1000;
+          if (hearts.over) {
+            acc = 0;
+            settleOver();
+            break;
+          }
         }
       }
       if (wasY > 0.2 && player[1] <= 0.001 && player[5] > 0) audio.land();
@@ -1312,6 +1429,9 @@ function frame(now) {
   lerpScene(dt);
   publishProbe();
   audio.music(reduced);
+  markRivalMoments();
+  paintHearts();
+  paintRace();
   if (renderer) {
     try {
       renderer.resize();
@@ -1320,6 +1440,8 @@ function frame(now) {
         slide: player[3], hue, time: now / 1000, now, reduced, pieces,
         event: spark, alive: true, speed: rules.speed, g: rules.g,
         near: nearSpark, reject: rejectSpark,
+        blink: now < hurtUntil ? 1 : 0,
+        duel,
         scene: sceneView, stumble: stumble / 1500, pals, hero, bend, loot,
         goal: levelGoal,
         biome: biomeName,
@@ -1337,6 +1459,7 @@ function frame(now) {
     spark = "";
     nearSpark = false;
     rejectSpark = false;
+    duel = "";
   }
   if (toastQ.length && now >= toastUntil) {
     toastEl.hidden = false;
@@ -1407,6 +1530,152 @@ function frame(now) {
   paintMeter();
   if (showStats && frameN % 20 === 0) paintStats();
   if (benchMode && frameN === 180) finishBench();
+}
+
+function snapshotBest() {
+  bestAtStart = {
+    points: record.bestPoints | 0,
+    level: record.bestLevel | 0,
+    combo: record.bestCombo | 0,
+    mult: record.mult | 1,
+  };
+}
+
+function nearestRival() {
+  let best = null;
+  let dist = 1e9;
+  for (let i = 0; i < pieces.length; i++) {
+    const q = pieces[i];
+    if (q[0] !== 10) continue;
+    const mid = q[1] + (q[2] || 0) * 0.5;
+    const d = Math.abs(mid - player[0]);
+    if (d < dist) {
+      dist = d;
+      best = q;
+    }
+  }
+  return best;
+}
+
+function pulseHearts() {
+  heartsShown = -1;
+  if (!heartsEl) return;
+  heartsEl.classList.remove("back");
+  void heartsEl.offsetWidth;
+  heartsEl.classList.add("back");
+}
+
+function paintHearts() {
+  if (!heartsEl) return;
+  const n = Math.max(0, Math.min(HEARTS_MAX, hearts.hearts | 0));
+  if (n === heartsShown && heartsEl.childElementCount === HEARTS_MAX) return;
+  heartsShown = n;
+  heartsEl.setAttribute("aria-label", n + (n === 1 ? " heart" : " hearts"));
+  heartsEl.replaceChildren();
+  for (let i = 0; i < HEARTS_MAX; i++) {
+    const bit = document.createElement("span");
+    bit.textContent = i < n ? "♥" : "♡";
+    if (i >= n) bit.className = "gone";
+    heartsEl.appendChild(bit);
+  }
+}
+
+function paintRace() {
+  if (!raceEl) return;
+  if (runOver) {
+    raceEl.hidden = true;
+    return;
+  }
+  const q = nearestRival();
+  if (!q) {
+    raceEl.hidden = true;
+    lastPlace = 0;
+    return;
+  }
+  const read = raceRead(player[0], q[1] + (q[2] || 0) * 0.5);
+  raceEl.hidden = false;
+  raceEl.dataset.place = String(read.place);
+  const text = (read.place === 1 ? "1st" : "2nd") + "  " + read.label;
+  if (raceEl.textContent !== text) raceEl.textContent = text;
+  if (read.place === 2 && lastPlace !== 2) {
+    showCue("Rival ahead");
+    duel = "ahead";
+    q.flare = "surge";
+  } else if (read.place === 1 && lastPlace === 2) {
+    showCue("Overtake boost");
+    duel = "pass";
+    q.flare = "pass";
+  }
+  lastPlace = read.place;
+}
+
+function markRivalMoments() {
+  for (let i = 0; i < pieces.length; i++) {
+    const q = pieces[i];
+    if (q[0] !== 10) continue;
+    const lane = q.length > 5 ? q[5] : 1;
+    const x = q[1];
+    const prev = q._x;
+    q._x = x;
+    const prevLane = q._lane;
+    q._lane = lane;
+    let flare = "";
+    if (prevLane !== undefined && prevLane !== lane) flare = "surge";
+    else if ((q[7] || 0) >= 2.4 && !q._surged) {
+      q._surged = 1;
+      flare = "surge";
+    }
+    if (prev !== undefined) {
+      const mid = x + (q[2] || 0) * 0.5;
+      for (let j = 0; j < pieces.length; j++) {
+        const o = pieces[j];
+        const k = o[0];
+        const ol = o.length > 5 ? o[5] : -1;
+        if (ol >= 0 && ol !== lane) continue;
+        const ox = o[1];
+        if (k === 5 && Math.abs(ox + (o[2] || 0) * 0.5 - mid) < 0.7) {
+          const key = ox.toFixed(1);
+          if (q._coin !== key) {
+            q._coin = key;
+            flare = "coin";
+          }
+        }
+        if ((k === 3 || k === 4 || k === 7) && prev >= ox && x < ox) flare = "clear";
+      }
+    }
+    if (flare) q.flare = flare;
+  }
+}
+
+function paintOver(best) {
+  if (!overEl) return;
+  const score = Math.max(0, Math.floor(player[6]));
+  if (overScoreEl) overScoreEl.textContent = "Score " + score;
+  if (overLevelEl) overLevelEl.textContent = "Level " + levelN;
+  if (overMultEl) overMultEl.textContent = "Best ×" + Math.max(1, runMult | 0, runBestCombo | 0);
+  if (overRaceEl) {
+    let line = "You " + playerWins + " · Rival " + rivalWins;
+    if (winStreak >= 2) line += " · streak " + winStreak;
+    overRaceEl.textContent = line;
+  }
+  if (overBestEl) overBestEl.hidden = !best;
+  overEl.hidden = false;
+}
+
+function settleOver() {
+  if (runOver) return;
+  runOver = true;
+  hurtUntil = 0;
+  player[11] = 0;
+  player[12] = 0;
+  audio.die();
+  const score = Math.max(0, Math.floor(player[6]));
+  const best = score > (bestAtStart.points | 0)
+    || levelN > (bestAtStart.level | 0)
+    || runBestCombo > Math.max(1, bestAtStart.combo | 0)
+    || runMult > Math.max(1, bestAtStart.mult | 1);
+  paintOver(best);
+  if (playAgainBtn) playAgainBtn.focus();
 }
 
 function showGain(text, big) {
@@ -1564,9 +1833,63 @@ if (againBtn) {
     restart();
   });
 }
+if (playAgainBtn) {
+  playAgainBtn.addEventListener("click", () => {
+    audio.unlock();
+    restart();
+  });
+}
+window.addEventListener("keydown", (e) => {
+  if (!runOver) return;
+  if (e.repeat) return;
+  if (e.code !== "Space" && e.code !== "Enter" && e.key !== " ") return;
+  const tag = e.target && e.target.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA") return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  audio.unlock();
+  restart();
+}, true);
 window.addEventListener("pagehide", () => syncRecord());
+snapshotBest();
+paintHearts();
 paintRecord();
 paintChallenge();
+window.__lumenPose = (opts) => {
+  const o = opts || {};
+  poseHold = o.hold !== false;
+  if (typeof o.x === "number") player[0] = o.x;
+  if (Array.isArray(o.pieces)) pieces = o.pieces;
+  if (typeof o.hearts === "number") {
+    hearts = { ...heartsBlank(), hearts: Math.max(0, Math.min(HEARTS_MAX, o.hearts | 0)) };
+    heartsShown = -1;
+  }
+  runBestCombo = typeof o.mult === "number" ? o.mult : runBestCombo;
+  playerWins = o.playerWins | 0;
+  rivalWins = o.rivalWins | 0;
+  winStreak = o.streak | 0;
+  levelN = o.level || levelN;
+  if (typeof o.place === "number") lastPlace = o.place;
+  if (typeof o.score === "number") player[6] = o.score;
+  if (o.over) {
+    runOver = false;
+    if (o.best) {
+      bestAtStart = { points: 0, level: 1, combo: 0 };
+    }
+    settleOver();
+    if (!o.best && overBestEl) overBestEl.hidden = true;
+  } else {
+    runOver = false;
+    if (overEl) overEl.hidden = true;
+  }
+  paintHearts();
+  paintRace();
+  return {
+    hearts: hearts.hearts,
+    over: runOver,
+    race: raceEl ? raceEl.textContent : "",
+  };
+};
 badgeEl.addEventListener("click", () => {
   const open = notesEl.hidden;
   notesEl.hidden = !open;

@@ -108,12 +108,20 @@
       (modulo n 3)
       (chase-look level))))
 
-(define (chase-mood form bumps recent)
-  (cond
-    ((>= bumps 2) "gentle")
-    ((>= recent 4) "gentle")
-    ((and (<= bumps 0) (>= form 1) (< recent 2)) "keen")
-    (else "hold")))
+; A race word is optional. "player" means the runner led the gate, so a
+; held rival starts training. "rival" means the rival led, so it eases.
+; Two bumps, or a long recent run of them, still ease. Form 0 stays held.
+; The speed cap and the hit half-width are not touched.
+(define (chase-mood form bumps recent . rest)
+  (let ((race (if (and (pair? rest) (string? (car rest))) (car rest) "")))
+    (cond
+      ((>= bumps 2) "gentle")
+      ((>= recent 4) "gentle")
+      ((< form 1) "hold")
+      ((string=? race "rival") "gentle")
+      ((and (string=? race "player") (< recent 2)) "keen")
+      ((and (<= bumps 0) (< recent 2)) "keen")
+      (else "hold"))))
 
 (define (chase-knob-name k)
   (cond ((= k 0) "speed") ((= k 1) "cool") ((= k 2) "at") (else "look")))
@@ -154,14 +162,15 @@
 
 ; One knob. If that knob is already at its bound, try the next.
 ; The fourth knob is the body. Speed, pause and place stay the other three.
-(define (chase-step state form bumps recent pace)
-  (let ((mood (chase-mood form bumps recent))
+(define (chase-step state form bumps recent pace . rest)
+  (let ((race (if (and (pair? rest) (string? (car rest))) (car rest) ""))
+        (mood (chase-mood form bumps recent race))
         (knob (chase-get state "knob" 0)))
     (if (string=? mood "hold")
-      (hash "moved" #f "why" "hold" "mood" mood "knob" knob "params" state)
+      (hash "moved" #f "why" "hold" "mood" mood "knob" knob "params" state "race" race)
       (let loop ((k 0) (use knob))
         (if (>= k 4)
-          (hash "moved" #f "why" "hold" "mood" mood "knob" knob "params" state)
+          (hash "moved" #f "why" "hold" "mood" mood "knob" knob "params" state "race" race)
           (let* ((speed (chase-get state "speed" 2.1))
                  (cool (chase-get state "cool" 0.42))
                  (at (chase-get state "at" 0.42))
@@ -187,7 +196,8 @@
                     "why" (chase-knob-name use)
                     "mood" mood
                     "knob" (modulo (+ use 1) 4)
-                    "params" params))))))))
+                    "params" params
+                    "race" race))))))))
 
 (define (chase-keep state step)
   (let ((params (hash-ref step "params" state)))
@@ -299,11 +309,17 @@
     (and (not (chase-sealed? pieces))
          (autopilot-clear? pieces rules))))
 
-(define (chase-line kind mood)
-  (cond
-    ((string=? kind "ROLLBACK") "它还是原来的样子")
-    ((string=? mood "gentle") "它放慢了")
-    (else "它跑得更勤了")))
+; A race word names the adaptation on the level-gate banner.
+; Without it, the short lines stay as they were.
+(define (chase-line kind mood . rest)
+  (let ((race (if (and (pair? rest) (string? (car rest))) (car rest) "")))
+    (cond
+      ((string=? kind "ROLLBACK") "它还是原来的样子")
+      ((and (string=? race "player") (string=? mood "keen")) "Rival trains harder")
+      ((and (string=? race "player") (string=? mood "gentle")) "Rival eases off")
+      ((and (string=? race "rival") (string=? mood "gentle")) "Rival eases off")
+      ((string=? mood "gentle") "它放慢了")
+      (else "它跑得更勤了"))))
 
 (define (chase-audit kind why mood state)
   (hash "op" "decision"

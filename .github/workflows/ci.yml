@@ -34,6 +34,8 @@ jobs:
           node --check web/input.mjs
           node --check web/audio.mjs
           node --check web/main.mjs
+          node --check web/hearts.mjs
+          node --check web/race.mjs
           node --check bridge/server.mjs
           node --check scripts/smoke.mjs
           node --check scripts/check-sim.mjs

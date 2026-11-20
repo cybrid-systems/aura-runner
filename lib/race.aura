@@ -1,0 +1,90 @@
+(require "std/string" all:)
+
+; Head-to-head standing against the rival already on the road.
+; Positive gap means the runner is ahead. The gate names whoever
+; reached it first. The hazard hit box is not read here.
+
+(define (race-gap px rx)
+  (- (exact->inexact px) (exact->inexact rx)))
+
+(define (race-meters gap)
+  (let ((n (exact->inexact gap)))
+    (if (>= n 0.0)
+      (floor (+ n 0.5))
+      (- 0.0 (floor (+ (- 0.0 n) 0.5))))))
+
+(define (race-digits k)
+  (if (< k 1)
+    "0"
+    (let loop ((x k) (b ""))
+      (if (< x 1)
+        b
+        (let ((q (floor (/ x 10.0))))
+          (loop q (string-append (substring (number->string (floor (- x (* q 10.0)))) 0 1) b)))))))
+
+(define (race-int n)
+  (let ((k (floor (+ (exact->inexact (if (>= n 0.0) n (- 0.0 n))) 0.0001))))
+    (let ((body (race-digits k)))
+      (if (>= n 0.0) body (string-append "-" body)))))
+
+(define (race-label gap)
+  (let ((m (race-meters gap)))
+    (if (>= m 0.0)
+      (string-append "+" (race-int m) "m")
+      (string-append (race-int m) "m"))))
+
+; place 1 is the runner, 2 is the rival. who matches that.
+(define (race-read px rx)
+  (let ((gap (race-gap px rx)))
+    (let ((place (if (>= gap 0.0) 1 2)))
+      (hash "place" place
+            "gap" gap
+            "label" (race-label gap)
+            "who" (if (= place 1) "player" "rival")))))
+
+; Empty string when nobody has reached the gate, or the rival x is missing.
+; Once the runner is on the gate, the rival wins only if it is already
+; further past that line.
+(define (race-gate px rx gate)
+  (if (or (not (number? px)) (not (number? rx)) (not (number? gate)))
+    ""
+    (cond
+      ((and (>= px gate) (and (> rx px) (>= rx gate))) "rival")
+      ((>= px gate) "player")
+      ((>= rx gate) "rival")
+      (else ""))))
+
+; A short tail for the level-gate banner: who led, and whether the
+; rival will train or ease. Empty when this level had no rival.
+(define (race-aside race mood)
+  (let ((led (cond
+               ((and (string? race) (string=? race "player")) " · You led")
+               ((and (string? race) (string=? race "rival")) " · Rival led")
+               (else "")))
+        (adapt (cond
+                 ((and (string? race) (string=? race "player")
+                       (string? mood) (string=? mood "keen"))
+                  " · Rival trains harder")
+                 ((and (string? race) (not (string=? race ""))
+                       (string? mood) (string=? mood "gentle"))
+                  " · Rival eases off")
+                 (else ""))))
+    (string-append led adapt)))
+
+; The short line at the level gate. base is "Level clear" and the
+; rest names who led and how the rival will adapt.
+(define (gate-line base race mood)
+  (let ((led (cond
+               ((and (string? race) (string=? race "player")) " · You led")
+               ((and (string? race) (string=? race "rival")) " · Rival led")
+               (else "")))
+        (adapt (cond
+                 ((and (string? race) (string=? race "player")
+                       (string? mood) (string=? mood "keen"))
+                  " · Rival trains harder")
+                 ((and (string? race) (not (string=? race ""))
+                       (string? mood) (string=? mood "gentle"))
+                  " · Rival eases off")
+                 (else ""))))
+    (string-append (if (and (string? base) (> (string-length base) 0)) base "Level clear")
+                   led adapt)))
