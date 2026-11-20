@@ -141,7 +141,7 @@
            (world-num-in? (hash-ref snap "density" #f) 0.15 1.0)
            (world-num-in? (hash-ref snap "light" #f) 0.50 1.0)
            (world-num-in? (hash-ref snap "fog" #f) 0.0 0.38)
-           (world-venue-ok? snap "biome" place-names)
+           (world-venue-ok? snap "biome" biome-names)
            (world-venue-ok? snap "mood" mood-names)
            (world-num-in? (hash-ref snap "bend" #f) 0.0 0.65)
            (number? chase)
@@ -189,7 +189,7 @@
           "density" (exact->inexact (hash-ref snap "density" 0.45))
           "light" (exact->inexact (hash-ref snap "light" 0.82))
           "fog" (exact->inexact (hash-ref snap "fog" 0.22))
-          "biome" (place-known (world-str snap "biome"))
+          "biome" (biome-known (world-str snap "biome"))
           "mood" (mood-known (world-str snap "mood")))))
 
 (define (world-accept kind snap)

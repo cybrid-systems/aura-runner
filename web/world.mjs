@@ -1,14 +1,11 @@
 // The badge tree. Layout runs only when the panel is open. A kept node
 // can be asked for again. A turned-away node stays, with its reason.
-import { placeIds } from "./edsl.mjs";
-
 export const WORLD_CAP = 24;
 export const WORLD_KEY = "lumen-world";
 
 const LOOTS = new Set(["coin", "blossom", "apple", "star", "gem"]);
 const FLOWERS = new Set(["daisy", "tulip", "blossom", "buttercup"]);
-
-const BIOMES = new Set(placeIds());
+const BIOMES = new Set(["garden", "city", "space", "coast"]);
 const MOODS = new Set(["day", "night", "sunset", "neon"]);
 
 export function blankWorld() {

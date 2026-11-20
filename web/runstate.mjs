@@ -1,9 +1,5 @@
 // Venue, mood, and the cumulative multiplier. Twins of lib/biome.aura.
 // A level gate keeps the combo. The multiplier resets on a new run only.
-// World cities are pinned on top of that cycle. A voice switch keeps
-// the combo and the distance the camera is following.
-
-import { nextPlace, specFor } from "./edsl.mjs";
 
 export const BIOMES = ["garden", "city", "space", "coast"];
 export const MOODS = ["day", "night", "sunset", "neon"];
@@ -80,8 +76,6 @@ function zhIndex(lang) {
 }
 
 export function biomeTitle(name, lang) {
-  const spec = specFor(name);
-  if (spec) return lang === "zh" ? spec.title : spec.titleEn;
   const row = BIOME_TITLE[name] || BIOME_TITLE.garden;
   return row[zhIndex(lang)];
 }
@@ -100,7 +94,7 @@ export function evoLine(level, biome, mult, gain, what, lang) {
 }
 
 export function venueLine(place, mult, lang) {
-  const title = specFor(place) || BIOME_TITLE[place] ? biomeTitle(place, lang) : moodTitle(place, lang);
+  const title = BIOME_TITLE[place] ? biomeTitle(place, lang) : moodTitle(place, lang);
   return `${title} · ×${clampMult(mult)}`;
 }
 
@@ -139,29 +133,8 @@ export function applyVoice(state, intent) {
     banner: "",
   };
   if (!intent || typeof intent.act !== "string") return next;
-  if (intent.act === "biome" && (BIOMES.includes(intent.name) || specFor(intent.name))) {
+  if (intent.act === "biome" && BIOMES.includes(intent.name)) {
     next.biome = intent.name;
-    next.pinned = true;
-    next.banner = "venue";
-    const spec = specFor(intent.name);
-    if (spec) {
-      next.mood = spec.mood;
-      next.spec = spec;
-    }
-  } else if (intent.act === "biome-tour") {
-    const id = nextPlace(intent.name, state.biome);
-    const spec = specFor(id);
-    if (id && spec) {
-      next.biome = id;
-      next.mood = spec.mood;
-      next.spec = spec;
-      next.pinned = true;
-      next.banner = "venue";
-    }
-  } else if (intent.act === "biome-ask" && intent.spec && intent.spec.id) {
-    next.biome = intent.spec.id;
-    next.mood = intent.spec.mood;
-    next.spec = intent.spec;
     next.pinned = true;
     next.banner = "venue";
   } else if (intent.act === "biome-next") {

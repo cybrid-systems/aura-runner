@@ -1,0 +1,41 @@
+garden KEEP fair garden Garden ok
+city KEEP fair city City ok
+space KEEP fair space Space ok
+coast KEEP fair coast Coast ok
+lava KEEP fair lava-canyon Lava Canyon ok
+ice KEEP fair aurora-ice Aurora Ice ok
+candy KEEP fair candy-clouds Candy Clouds ok
+coral KEEP fair coral-reef Coral Reef ok
+cyber KEEP fair cyber-rain Cyber Rain ok
+dull ROLLBACK contrast 
+coin ROLLBACK contrast 
+packed ROLLBACK budget 
+broken ROLLBACK shape 
+dark ROLLBACK dark 
+pool-lava 1
+pool-garden 1
+pool-same 1
+pool-no-dull 0
+evolve-keep 1
+evolve-new 1
+evolve-id evo-4
+evolve2-keep 1
+evolve2-diff 1
+theme-volcano lava-canyon
+theme-ice aurora-ice
+theme-candy candy-clouds
+theme-en aurora-ice
+theme-garden 0
+theme-cyber-word 0
+beijing KEEP fair beijing Beijing ok
+shanghai KEEP fair shanghai Shanghai ok
+hangzhou KEEP fair hangzhou Hangzhou ok
+paris KEEP fair paris Paris ok
+sanfrancisco KEEP fair sanfrancisco San Francisco ok
+theme-beijing beijing
+theme-paris paris
+theme-west hangzhou
+place-next london
+place-china beijing
+place-guilin visit-china
+place-prague visit-stone

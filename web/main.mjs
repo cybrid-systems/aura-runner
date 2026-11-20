@@ -1,10 +1,9 @@
 import { DT, bodyLane, makePlayer, praiseClear, pressJump, pressLane, pressSlide, rulesOf, step } from "./sim.mjs";
 import { awardPickup, challengeFor, challengeMet, dropGrade, gradeLabel, lootWorth, nearMiss, overtake, praise, skimmed, trackOvertake } from "./score.mjs";
 import { clampMult } from "./runstate.mjs";
-import { isBuiltin, placeIds, resolvePlace, sanitizeSpec, specFor } from "./edsl.mjs";
 import { COMBO_HEART, HEART_IFRAME, HEARTS_MAX, heartsBlank, heartsHit, heartsRecover, heartsTick } from "./hearts.mjs";
 import { raceGate, raceRead } from "./race.mjs";
-import { createRenderer } from "./render.mjs";
+import { acceptSpec, createRenderer } from "./render.mjs";
 import { createInput } from "./input.mjs";
 import { createAudio } from "./audio.mjs";
 import { installWish } from "./wish.mjs";
@@ -100,12 +99,8 @@ let loot = "coin";
 let levelN = 1;
 let runMult = 1;
 let biomeName = "garden";
+let biomeSpec = null;
 let moodName = "day";
-let edslSpec = null;
-// A spoken place paints immediately. State ticks that left the server
-// before that wish must not paint the old venue back over it.
-let placeEpoch = 0;
-let serverPlaceEpoch = 0;
 let bannerId = 0;
 let bannerUntil = 0;
 let levelGoal = 0;
@@ -489,10 +484,8 @@ function resetLocal() {
   if (wardEl) wardEl.classList.remove("boost");
   runMult = 1;
   biomeName = params.get("venue") && VENUES.has(params.get("venue")) ? params.get("venue") : "garden";
-  edslSpec = isBuiltin(biomeName) ? null : specFor(biomeName);
-  moodName = params.get("mood") && MOODS.has(params.get("mood")) ? params.get("mood") : (edslSpec ? edslSpec.mood : "day");
-  placeEpoch = 0;
-  serverPlaceEpoch = 0;
+  biomeSpec = null;
+  moodName = params.get("mood") && MOODS.has(params.get("mood")) ? params.get("mood") : "day";
   bannerId = 0;
   bannerUntil = 0;
   if (multEl) multEl.textContent = "×1";
@@ -628,7 +621,7 @@ function applyLevel(msg) {
   paintChallenge();
 }
 
-const VENUES = new Set(placeIds());
+const VENUES = new Set(["garden", "city", "space", "coast"]);
 const MOODS = new Set(["day", "night", "sunset", "neon"]);
 
 function showEvo(text) {
@@ -643,18 +636,14 @@ function showEvo(text) {
 
 function applyVenue(msg) {
   if (typeof msg.mult === "number") runMult = clampMult(msg.mult);
-  const nextBiome = typeof msg.biome === "string" && VENUES.has(msg.biome) ? msg.biome : biomeName;
-  const nextMood = typeof msg.mood === "string" && MOODS.has(msg.mood) ? msg.mood : moodName;
-  if (placeEpoch !== serverPlaceEpoch) {
-    if (nextBiome === biomeName && nextMood === moodName) serverPlaceEpoch = placeEpoch;
-    else return;
+  if ("spec" in msg) {
+    if (msg.spec && typeof msg.spec === "object") {
+      const next = acceptSpec(msg.spec);
+      biomeSpec = next && next.recipe === "mix" ? next : null;
+      if (biomeSpec) biomeName = biomeSpec.id;
+    } else biomeSpec = null;
   }
-  if (typeof msg.biome === "string" && VENUES.has(msg.biome)) {
-    biomeName = msg.biome;
-    if (isBuiltin(msg.biome)) edslSpec = null;
-    else if (msg.edsl && typeof msg.edsl === "object") edslSpec = sanitizeSpec(msg.edsl) || specFor(msg.biome);
-    else edslSpec = specFor(msg.biome);
-  }
+  if (!biomeSpec && typeof msg.biome === "string" && VENUES.has(msg.biome)) biomeName = msg.biome;
   if (typeof msg.mood === "string" && MOODS.has(msg.mood)) moodName = msg.mood;
   const id = msg["banner-id"];
   if (typeof id === "number" && id !== bannerId && typeof msg.banner === "string" && msg.banner) {
@@ -1110,6 +1099,11 @@ function pumpNet(now) {
 }
 
 window.__lumenPump = () => pumpNet(performance.now());
+window.__lumenSetCombo = (n) => {
+  combo = Math.max(0, n | 0);
+  comboUntil = performance.now() + 8000;
+  comboText = "×" + combo;
+};
 
 // Headless Chrome pauses animation frames. A few calls of the live frame
 // keep the picture moving while a test is the only thing reading the page.
@@ -1256,8 +1250,8 @@ function publishProbe() {
   root.dataset.speed = String(rules.speed);
   root.dataset.level = String(levelN);
   root.dataset.mult = String(runMult);
-  root.dataset.x = Number.isFinite(player[0]) ? player[0].toFixed(2) : "0";
   root.dataset.combo = String(combo);
+  root.dataset.biomeLabel = biomeSpec && biomeSpec.label ? biomeSpec.label : biomeName;
   root.dataset.biome = biomeName;
   root.dataset.mood = moodName;
   root.dataset.banner = evoEl && !evoEl.hidden ? evoEl.textContent : "";
@@ -1448,6 +1442,13 @@ function frame(now) {
     flashEl.hidden = true;
     flashEl.classList.remove("on");
   }
+  if (window.__forceSpec) {
+    const forced = acceptSpec(window.__forceSpec);
+    if (forced && forced.recipe === "mix") {
+      biomeSpec = forced;
+      biomeName = forced.id;
+    }
+  }
   lerpScene(dt);
   publishProbe();
   audio.music(reduced);
@@ -1468,7 +1469,7 @@ function frame(now) {
         goal: levelGoal,
         biome: biomeName,
         mood: moodName,
-        edsl: edslSpec,
+        spec: biomeSpec,
         props,
         sunHide,
         shown: shownToys,
@@ -1477,6 +1478,7 @@ function frame(now) {
         ward: wardReady ? 1 : Math.max(0, (WARD_WAIT - wardLeft) / WARD_WAIT),
       });
     } catch (err) {
+      window.__lumenErr = String(err && err.stack || err);
       console.error(err);
     }
     spark = "";
@@ -1972,23 +1974,8 @@ window.addEventListener("keydown", (e) => {
 
 if (renderer) renderer.resize();
 window.addEventListener("resize", () => renderer && renderer.resize());
-function previewPlace(text, lang) {
-  const hit = resolvePlace(text, biomeName);
-  if (!hit) return false;
-  if (hit.act === "mood") moodName = hit.mood;
-  else {
-    biomeName = hit.biome;
-    edslSpec = isBuiltin(hit.biome) ? null : (hit.spec || specFor(hit.biome));
-    if (hit.mood) moodName = hit.mood;
-  }
-  placeEpoch += 1;
-  const title = lang === "en" ? hit.titleEn : hit.title;
-  if (title) showEvo(`${title} · ×${runMult}`);
-  return true;
-}
 installWish({
   send(payload) {
-    if (payload && payload.op === "wish") previewPlace(payload.text, "zh");
     if (!ws || ws.readyState !== 1) return false;
     ws.send(JSON.stringify(payload));
     return true;
@@ -1996,7 +1983,6 @@ installWish({
 });
 window.__lumenSay = (text, lang) => {
   if (!ws || ws.readyState !== 1) return false;
-  previewPlace(text, lang === "zh" ? "zh" : "en");
   ws.send(JSON.stringify({
     op: "wish",
     text: String(text || "").slice(0, 80),
