@@ -3413,7 +3413,10 @@
          (if same
            (begin
              (raise-banner! (if mood? "mood" "venue")
-                            (venue-line next run-mult wish-locale) 0)
+                            (if mood?
+                              (venue-line next run-mult wish-locale)
+                              (world-banner next))
+                            0)
              (note! "KEEP" "same" "voice"
                     (voice-line act next "same" wish-locale) next))
            (begin
@@ -3424,7 +3427,10 @@
                  (set! biome-now next)
                  (set! biome-pin #t)))
              (raise-banner! (if mood? "mood" "venue")
-                            (venue-line next run-mult wish-locale) 0)
+                            (if mood?
+                              (venue-line next run-mult wish-locale)
+                              (world-banner next))
+                            0)
              (note! "KEEP" "fair" "voice"
                     (voice-line act next "fair" wish-locale) next)))))
       ((string=? act "drop-thing")

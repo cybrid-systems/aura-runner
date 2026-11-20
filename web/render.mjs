@@ -411,6 +411,49 @@ export function gateBarDepth(w) {
   return Math.max(0.22, depth * 0.35);
 }
 
+// A world switch crossfades for about half a second. New props appear
+// past this arc first, then the wave walks back toward the runner so
+// scenery already beside the camera is not swapped in one frame.
+export const WORLD_BLEND_S = 0.52;
+export function propWave(heroS, t) {
+  const u = Math.max(0, Math.min(1, Number(t) || 0));
+  const s = Number.isFinite(heroS) ? heroS : 0;
+  return s + 34 - u * 40;
+}
+
+function paletteId(p) {
+  if (!p) return "";
+  const sky = Array.isArray(p.sky0) ? p.sky0.map((n) => Number(n).toFixed(2)).join(",") : "";
+  return [p.biome || "", p.mood || "", p.custom ? 1 : 0, sky].join("|");
+}
+
+export function mixPalette(a, b, t) {
+  const u = Math.max(0, Math.min(1, Number(t) || 0));
+  const left = a || {};
+  const right = b || {};
+  const out = {};
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+  for (const k of keys) {
+    const av = left[k];
+    const bv = right[k];
+    if (Array.isArray(av) && Array.isArray(bv) && av.length === bv.length && av.every((n) => typeof n === "number") && bv.every((n) => typeof n === "number")) {
+      out[k] = av.map((n, i) => n + (bv[i] - n) * u);
+    } else if (typeof av === "number" && typeof bv === "number") {
+      out[k] = av + (bv - av) * u;
+    } else {
+      out[k] = u < 0.5 ? (av !== undefined ? av : bv) : (bv !== undefined ? bv : av);
+    }
+  }
+  return out;
+}
+
+// A gate bar that has already passed the runner sits in the camera's
+// near field and can cover the body. Ahead of the runner it stays put,
+// so the slide gap is still readable. Hit size is unchanged.
+export function barBlocksHero(back) {
+  return back > 0.9 && back < 6;
+}
+
 // A pot's hit is about 1.05 across and stops near 1.12. The picture
 // reads taller than the body. The hit does not grow with that picture.
 // A toy is smaller than the lane it flies in. Twins: lib/phys.aura, web/sim.mjs.
@@ -673,6 +716,7 @@ uniform float uTime; uniform float uCamZ; uniform float uYaw; uniform float uFov
 uniform float uSunAmt; uniform float uRush;
 uniform float uStars;
 uniform vec3 uNebula;
+uniform float uFlash;
 out vec4 o;
 void main() {
   vec2 uv = gl_FragCoord.xy / uRes;
@@ -722,6 +766,12 @@ void main() {
     float tw = 0.7 + 0.3 * sin(uTime * 2.2 + h2 * 24.0);
     c += vec3(0.96, 0.98, 1.0) * star * tw * uStars;
     c = mix(c, uNebula, uStars * 0.18 * smoothstep(0.25, 0.85, uv.y));
+  }
+  // A short portal sweep when the venue changes. One extra uniform on
+  // the sky pass; the mesh draw stays the same instanced call.
+  if (uFlash > 0.001) {
+    float sweep = smoothstep(0.16, 0.0, abs(uv.y - mix(0.78, 0.34, uFlash)));
+    c += vec3(1.0, 0.98, 0.92) * uFlash * (0.38 + sweep * 0.85);
   }
   // Highlight shoulder only. Below 0.9 the sky is unchanged, so the blue
   // stays blue; the sun core rolls toward white instead of clipping flat.
@@ -1170,6 +1220,7 @@ export function createRenderer(canvas) {
     rush: gl.getUniformLocation(sky, "uRush"),
     stars: gl.getUniformLocation(sky, "uStars"),
     nebula: gl.getUniformLocation(sky, "uNebula"),
+    flash: gl.getUniformLocation(sky, "uFlash"),
   };
   function meshLocs(prog) {
     return {
@@ -1204,6 +1255,10 @@ export function createRenderer(canvas) {
   let shownS = 0;
   let shownAt = 0;
   let shownSeen = false;
+  let blendFrom = null;
+  let blendTo = null;
+  let blendT = 1;
+  let worldFlash = 0;
   // World pose at anchor.s. A jump in arc length moves this anchor instead
   // of rewinding the curve back to the opening heading.
   let anchor = { s: 0, x: 0, z: 0, psi: 0 };
@@ -1633,8 +1688,7 @@ export function createRenderer(canvas) {
   }
 
   function frame(st) {
-    const pal = dressPalette(palette(st.hue || 0, st.scene), st.biome, st.mood, st.spec);
-    const gardenLook = !pal.custom && pal.biome === "garden";
+    const arrived = dressPalette(palette(st.hue || 0, st.scene), st.biome, st.mood, st.spec);
     const px = st.lx || 0;
     const py = st.y || 0;
     const pz = Number.isFinite(st.x) ? st.x : runS;
@@ -1645,6 +1699,27 @@ export function createRenderer(canvas) {
     const nowMs = Number.isFinite(st.now) ? st.now : 0;
     const frameDt = shownAt > 0 ? Math.min(0.05, Math.max(0.001, (nowMs - shownAt) / 1000)) : 1 / 60;
     if (nowMs > 0) shownAt = nowMs;
+    const arrivedId = paletteId(arrived);
+    if (!blendTo) {
+      blendTo = arrived;
+      blendT = 1;
+    } else if (arrivedId !== paletteId(blendTo)) {
+      blendFrom = blendT < 1 && blendFrom ? mixPalette(blendFrom, blendTo, blendT * blendT * (3 - 2 * blendT)) : blendTo;
+      blendTo = arrived;
+      blendT = 0;
+      worldFlash = 1;
+    }
+    if (st.reduced) {
+      blendT = 1;
+      worldFlash = 0;
+      blendFrom = null;
+    } else if (blendT < 1) {
+      blendT = Math.min(1, blendT + frameDt / WORLD_BLEND_S);
+      if (blendT >= 1) blendFrom = null;
+    }
+    if (worldFlash > 0) worldFlash = Math.max(0, worldFlash - frameDt / 0.45);
+    const blendU = blendT * blendT * (3 - 2 * blendT);
+    let pal = blendFrom && blendT < 1 ? mixPalette(blendFrom, blendTo, blendU) : blendTo;
     if (!shownSeen) {
       shownS = pz;
       shownSeen = true;
@@ -1737,6 +1812,7 @@ export function createRenderer(canvas) {
     gl.uniform1f(u.rush, rush);
     gl.uniform1f(u.stars, pal.stars || 0);
     gl.uniform3fv(u.nebula, pal.nebula || [0, 0, 0]);
+    gl.uniform1f(u.flash, worldFlash || 0);
     gl.uniform2f(u.res, w, h);
     gl.bindVertexArray(null);
     gl.bindBuffer(gl.ARRAY_BUFFER, tri);
@@ -2045,9 +2121,12 @@ export function createRenderer(canvas) {
           }
         }
       }
+      const heldPal = pal;
+      if (blendFrom && blendT < 1) pal = cz > propWave(pz, blendT) ? blendTo : blendFrom;
+      const sceneGarden = !pal.custom && pal.biome === "garden";
       if (pal.custom) {
         if (dist < 36 && n < MAX - 80) drawMix(cz, dist);
-      } else if (gardenLook) {
+      } else if (sceneGarden) {
       if (dist < 36 && ((z / 2) | 0) % 2 === 0) {
         const hv = laneHash(z * 0.19 + 4.2);
         const hedgeH = 0.30 + hv * 0.22;
@@ -2135,7 +2214,9 @@ export function createRenderer(canvas) {
                 const h = 2.4;
                 push(a.x, h * 0.5, a.z, 0.1, h, 0.1, 0, railCol, 0.25, 0.55, a.psi);
                 push(b.x, h * 0.5, b.z, 0.1, h, 0.1, 0, railCol, 0.25, 0.55, b.psi);
-                push(mid.x, h, mid.z, Math.abs(outer - inner), 0.09, 0.1, 0, railCol, 0.2, 0.75, mid.psi);
+                if (!barBlocksHero(pz - cz)) {
+                  push(mid.x, h, mid.z, Math.abs(outer - inner), 0.09, 0.1, 0, railCol, 0.2, 0.75, mid.psi);
+                }
               }
             }
           }
@@ -2158,6 +2239,7 @@ export function createRenderer(canvas) {
           }
         }
       }
+      pal = heldPal;
     }
     if (!pal.custom && !(pal.biome === "garden" && pal.mood === "day") && n < MAX - 12) {
       const motes = reduced ? 3 : 6;
@@ -2268,6 +2350,7 @@ export function createRenderer(canvas) {
       const postRgb = look === 2 ? pal.trunk : look === 1 ? [1, 0.82, 0.38] : look === 4 ? [0.95, 0.55, 0.62] : pal.gate;
       push(postL.x, bottom * 0.5 * sc, postL.z, 0.28, bottom * sc, 0.28, 0, postRgb, 0.4, 0.12, postL.psi);
       push(postR.x, bottom * 0.5 * sc, postR.z, 0.28, bottom * sc, 0.28, 0, postRgb, 0.4, 0.12, postR.psi);
+      if (barBlocksHero(pz - zc)) return;
       if (look === 1) {
         push(gate.x, gy, gate.z, span, barH * sc * 0.62, solid * 0.85, 0, [1, 0.55, 0.72], 0.25, 0.35 + glow, gate.psi);
         push(gate.x, gy, gate.z, span, Math.max(0.05, barH * sc * 0.2), solid * 0.55, 0, [1, 0.82, 0.38], 0.2, 0.45, gate.psi);

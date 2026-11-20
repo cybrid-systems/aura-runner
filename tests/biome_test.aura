@@ -112,4 +112,9 @@
 (show-intent "soft-star" "来一个金色的星星")
 (show-intent "still-fast" "跑快点")
 
+(show "world-space" (world-banner "space"))
+(show "world-garden" (world-banner "garden"))
+(show "world-city" (world-banner "city"))
+(show "world-coast" (world-banner "coast"))
+
 (void)

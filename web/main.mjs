@@ -343,14 +343,25 @@ function paintNotes() {
   paintWorld(noteList, worldline, requestRewind);
 }
 
-function showSaid(text) {
+function trialLabel(kind) {
+  if (kind === "ROLLBACK") return "evo trial ROLLBACK";
+  if (kind === "KEEP") return "evo trial KEEP";
+  return "";
+}
+
+function showSaid(text, kind) {
   const clean = String(text || "").trim();
   if (!clean || !saidEl) return;
   if (saidRows[0] === clean) return;
   saidRows.unshift(clean);
   if (saidRows.length > 6) saidRows.pop();
+  const body = document.getElementById("said-body");
+  const kicker = document.getElementById("said-kicker");
+  if (body) body.textContent = clean;
+  else saidEl.textContent = clean;
+  if (kicker) kicker.textContent = trialLabel(kind);
+  saidEl.dataset.verdict = kind === "ROLLBACK" ? "ROLLBACK" : kind === "KEEP" ? "KEEP" : "";
   saidEl.hidden = false;
-  saidEl.textContent = clean;
 }
 
 function showCue(text) {
@@ -362,11 +373,16 @@ function showCue(text) {
   toastQ.push(text);
 }
 
-function showMark(word) {
+function showMark(word, kind) {
   const clean = String(word).toLowerCase().replace(/[^a-z]/g, "").slice(0, 12);
   if (!clean || !markEl) return;
+  const wordEl = document.getElementById("mark-word");
+  const kicker = document.getElementById("mark-kicker");
+  if (wordEl) wordEl.textContent = clean;
+  else markEl.textContent = clean;
+  if (kicker) kicker.textContent = trialLabel(kind);
+  markEl.dataset.verdict = kind === "ROLLBACK" ? "ROLLBACK" : "KEEP";
   markEl.hidden = false;
-  markEl.textContent = clean;
   markEl.animate(
     [{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "none" }],
     { duration: 180, easing: "ease-out", fill: "both" },
@@ -384,8 +400,9 @@ function remember(msg) {
   if (!notesEl.hidden) paintNotes();
   // The corner keeps the model's sentence. A dream's canned line and
   // the stumble toasts stay off that line.
-  if (msg.ask) showSaid(cue);
-  if (msg.mark) showMark(msg.mark);
+  const verdict = msg.kind === "ROLLBACK" || msg.kind === "KEEP" ? msg.kind : "";
+  if (msg.ask) showSaid(cue, verdict);
+  if (msg.mark) showMark(msg.mark, verdict);
   else showCue(cue);
 }
 
@@ -1263,14 +1280,16 @@ function publishProbe() {
   root.dataset.gear = String(gearTier());
   root.dataset.best = String(record.bestLevel);
   root.dataset.bend = bend.toFixed(2);
-  root.dataset.mark = markEl && !markEl.hidden ? markEl.textContent : "";
+  const markWord = document.getElementById("mark-word");
+  const saidBody = document.getElementById("said-body");
+  root.dataset.mark = markEl && !markEl.hidden ? (markWord ? markWord.textContent : markEl.textContent) : "";
   root.dataset.g = String(rules.g);
   root.dataset.air = String(rules.air || 0);
   root.dataset.magnet = String(rules.magnet || 0);
   root.dataset.cards = cardBook.equipped.join(",");
   root.dataset.owned = CARD_ORDER.filter((id) => cardBook.owned.has(id)).join(",");
   root.dataset.chat = saidRows.join(" | ");
-  root.dataset.said = saidEl && !saidEl.hidden ? saidEl.textContent : "";
+  root.dataset.said = saidEl && !saidEl.hidden ? (saidBody ? saidBody.textContent : saidEl.textContent) : "";
   root.dataset.flyers = String(pieces.reduce((n, q) => n + (q[0] === 8 ? 1 : 0), 0));
   root.dataset.poppers = String(pieces.reduce((n, q) => n + (q[0] === 9 ? 1 : 0), 0));
   root.dataset.rivals = String(pieces.reduce((n, q) => n + (q[0] === 10 ? 1 : 0), 0));

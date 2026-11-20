@@ -3,7 +3,7 @@
 // Left press the runner's screen x, under a camera that stays on the centre
 // lane, must decrease.
 import { DT, bodyLane, makePlayer, pressJump, pressLane, rulesOf, step } from "../web/sim.mjs";
-import { DEFAULT_BEND, drawsKeeper, gapSpans, gateBarDepth, glideS, integrateRoad, poseOnRoad, rebaseAnchor, roadPoint, screenX } from "../web/render.mjs";
+import { DEFAULT_BEND, barBlocksHero, drawsKeeper, gapSpans, gateBarDepth, glideS, integrateRoad, mixPalette, poseOnRoad, propWave, rebaseAnchor, roadPoint, screenX } from "../web/render.mjs";
 
 const rules = rulesOf(32, 11.2, 5, 0.48, 0.12, 0.12);
 const centre = makePlayer(10);
@@ -128,6 +128,16 @@ if (gapSpans([[2, 10, 1, 1.2, -1.2, -1]], 10, 12, 2).length !== 1) {
 }
 if (Math.abs(gateBarDepth(0.7) - 0.245) > 1e-9) {
   throw new Error(`gate bar drifted from the mesh ${gateBarDepth(0.7)}`);
+}
+if (barBlocksHero(0.2) || barBlocksHero(8) || !barBlocksHero(2.4)) {
+  throw new Error("a passed gate bar no longer stays out of the hero");
+}
+if (propWave(100, 0) !== 134 || propWave(100, 1) !== 94) {
+  throw new Error(`world prop wave drifted ${propWave(100, 0)} ${propWave(100, 1)}`);
+}
+const mixed = mixPalette({ sky0: [0, 0, 0], biome: "garden", stars: 0 }, { sky0: [1, 1, 1], biome: "space", stars: 1 }, 0.5);
+if (mixed.sky0[0] !== 0.5 || mixed.stars !== 0.5 || mixed.biome !== "space") {
+  throw new Error(`palette crossfade drifted ${JSON.stringify(mixed)}`);
 }
 const edge = makePlayer(5);
 edge[10] = 0.88;
