@@ -105,9 +105,65 @@ export function animOf(thing, time, phase, reduced) {
   return [Math.sin(w * 0.5) * 0.3, (Math.sin(w) * 0.5 + 0.5) * a.amp];
 }
 
+function clampRange(v, lo, hi) {
+  return Math.max(lo, Math.min(hi, v));
+}
+
+// Roughness, metal and sheen from the part's colour. No schema change:
+// saturation and glow pull a surface smoother, golds and pale brights pick
+// up a little metal, foliage stays matte. metal/sheen ride the free
+// instance channels after yaw.
+export function thingShade(rgb, glow) {
+  const r = Math.max(0, Number(rgb && rgb[0]) || 0);
+  const g = Math.max(0, Number(rgb && rgb[1]) || 0);
+  const b = Math.max(0, Number(rgb && rgb[2]) || 0);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const sat = max > 1e-4 ? (max - min) / max : 0;
+  const lum = 0.25 * r + 0.5 * g + 0.25 * b;
+  let hue = 0;
+  if (max !== min) {
+    const d = max - min;
+    if (max === r) hue = (g - b) / d;
+    else if (max === g) hue = (b - r) / d + 2;
+    else hue = (r - g) / d + 4;
+    hue = ((hue / 6) % 1 + 1) % 1;
+  }
+  const glw = clampRange(glow || 0, 0, 0.6);
+  let rough = 0.5 - sat * 0.22 - glw * 0.2 + (1 - sat) * 0.16;
+  let metal = sat > 0.5 ? 0.08 : 0;
+  let sheen = 0.05 + glw * 0.6 + sat * 0.08;
+  const gold = hue > 0.06 && hue < 0.17 && sat > 0.32 && lum > 0.55;
+  const silver = sat < 0.16 && lum > 0.6;
+  const jewel = sat > 0.45 && (hue < 0.05 || hue > 0.7 || (hue > 0.5 && hue < 0.72));
+  const leaf = hue > 0.18 && hue < 0.48 && sat > 0.18 && lum < 0.75;
+  if (gold) {
+    metal = 0.66;
+    sheen = Math.max(sheen, 0.48);
+    rough = Math.min(rough, 0.26);
+  } else if (silver) {
+    metal = 0.5;
+    sheen = Math.max(sheen, 0.4);
+    rough = Math.min(rough, 0.22);
+  } else if (jewel) {
+    metal = 0.18;
+    sheen = Math.max(sheen, 0.36);
+    rough = Math.min(rough, 0.18);
+  } else if (leaf) {
+    metal = 0;
+    sheen *= 0.4;
+    rough = Math.max(rough, 0.64);
+  }
+  return {
+    rough: clampRange(rough, 0.08, 0.92),
+    metal: clampRange(metal, 0, 1),
+    sheen: clampRange(sheen, 0, 1),
+  };
+}
+
 // box: { x, y, z, psi, w, h, d } with y the bottom of the hit box and
 // w, h, d its world size across the road, up, and along the road.
-// push(x, y, z, sx, sy, sz, shape, rgb, rough, emit, yaw)
+// push(x, y, z, sx, sy, sz, shape, rgb, rough, emit, yaw, metal, sheen)
 export function drawThing(push, thing, box, opts = {}) {
   const grow = opts.grow === undefined ? 1 : opts.grow;
   const [spinYaw, lift] = opts.anim || [0, 0];
@@ -123,11 +179,13 @@ export function drawThing(push, thing, box, opts = {}) {
     const ly = (p.y + lift) * box.h * grow;
     const wx = box.x + c * lx + s * lz;
     const wz = box.z - s * lx + c * lz;
+    const emit = Math.min(0.95, p.glow + glowBoost);
+    const shade = thingShade(p.rgb, emit);
     push(wx, box.y + ly, wz,
       Math.max(0.01, p.sx * box.w * grow),
       Math.max(0.01, p.sy * box.h * grow),
       Math.max(0.01, p.sz * box.d * grow),
-      p.shape, p.rgb, 0.42, Math.min(0.95, p.glow + glowBoost), yaw);
+      p.shape, p.rgb, shade.rough, emit, yaw, shade.metal, shade.sheen);
     drawn++;
   }
   return drawn;
