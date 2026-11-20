@@ -98,6 +98,7 @@ fi
 
 # A trial leaves the parent read-only unless the sandbox is off, and a
 # kept phrase has to rebind.
+export AURA_WORK="$ROOT"
 export AURA_SANDBOX="${AURA_SANDBOX:-off}"
 export AURA_EVO_LOG="$ROOT/out/evo.jsonl"
 export AURA_RUNNER_PORT="$AURA_PORT"

@@ -16,7 +16,7 @@ Linux x86_64 or arm64, Node.js 22, `bash`, `curl`, and `python3`. No C compiler,
 
 The first run downloads the [Aura nightly](https://github.com/cybrid-systems/aura/releases/tag/nightly) (sha256-checked, cached in `~/.cache/lumen-run`) and prints the version, where it came from (`download`, `cache`, or `offline`), and the URL. Open that URL. The page retries until the core is listening. Ctrl-C stops both. If 8080 or 8765 is taken, `./run.sh` prints the next free port. `AURA_RUNNER_WEB` and `AURA_RUNNER_PORT` pin one.
 
-`AURA_BIN=/path/to/aura` uses a binary you already have. `AURA_VERSION=v0.2.7` pins a release instead of `nightly`. `AURA_OFFLINE=1` uses the cache and does not touch the network. macOS and Windows pick the matching asset when the release publishes one.
+`AURA_BIN=/path/to/aura` uses a binary you already have. `AURA_VERSION=v0.2.7` pins a release instead of `nightly`. `AURA_OFFLINE=1` uses the cache and does not touch the network. The nightly release publishes Linux x86_64 and arm64. On a Mac, install [OrbStack](https://orbstack.dev) or Docker Desktop and run `./run.sh` again: it uses the prebuilt image `ghcr.io/cybrid-systems/aura:nightly` and does not compile.
 
 ## Controls
 
