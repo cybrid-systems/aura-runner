@@ -973,9 +973,6 @@ function frame(now) {
   lastNow = now;
   frames[frameN % frames.length] = dt * 1000;
   frameN++;
-  if (renderer && frameN > 48 && frameN % 20 === 0) {
-    renderer.noteFrameTime(frames, Math.min(frameN, frames.length));
-  }
   const inp = input.consume();
   if (inp.jump || inp.slide || inp.lane) {
     audio.unlock();
