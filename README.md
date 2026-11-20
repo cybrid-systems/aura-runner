@@ -64,6 +64,26 @@ The form in [`lib/edsl.aura`](lib/edsl.aura):
 KIND is tree, tower, arch, crystal, rock, coral, or ring.
 A proposal is kept only after evo:trial (edsl-gate).
 
+## Music
+
+The page plays Symphony No. 29 when `LUMEN_MUSIC` points at the recording. A missing file is HTTP 204, and a play error does the same: the page starts a synthesized tune. No audio file is added to the repo. The first key, tap, or click starts the sound. Mute and the volume slider sit in the corner.
+
+The tune is a `(tune ...)` form in [`lib/music.aura`](lib/music.aura). `evo:trial` keeps a fair phrase and rolls a harsh one back. A kept phrase starts on the next bar. A rollback before that bar stays on the current phrase; after the bar, the previous phrase returns on the next one. Speed and level raise the tempo and add a layer. A combo or a near miss plays a fill. A hit ducks the filter, a shield plays a short brighter note, and a level-up lifts the key. Everything lands on the beat.
+
+After a click or a key, the console can fire each of those:
+
+| Call | What you hear |
+| --- | --- |
+| `__musicState()` | Phrase, tempo, bed (`synth` or `file`), and whether a swap is waiting |
+| `__musicEvent("combo")` or `"near"` | A drum fill on the next eighth |
+| `__musicEvent("hit")` | Filter duck and a short pitch dip, then the phrase returns |
+| `__musicEvent("shield")` | A brighter stinger, then the phrase returns |
+| `__musicEvent("level")` | A stinger now, and a key lift on the next bar |
+| `__musicTrial(form)` | The same bounds as the gate. A fair form waits for the next bar |
+| `__musicRollback()` | Drops a phrase that has not started, or queues the previous one |
+
+`document.documentElement.dataset` mirrors the bed, phrase, key, bpm, layers, and pending swap.
+
 ## LLM
 
 With no key, the offline generator still builds the run. These are the `LLM_*` variables the repo reads.
@@ -111,6 +131,8 @@ Aura commands need `AURA_SANDBOX=off` and a nightly binary on `PATH`. CI runs th
 | `node scripts/check-edsl.mjs` | Biome EDSL view |
 | `node scripts/check-run.mjs` | Multiplier, venues, voice |
 | `node scripts/check-probe.mjs` | Startup model probe |
+| `node scripts/check-music.mjs` | Tune bounds, KEEP/ROLLBACK, tempo, missing file |
+| `node scripts/check-voice.mjs` | Soft voice stays on 196 Hz |
 | `bash scripts/check-install.sh` | Install from an empty tools dir |
 | `node scripts/smoke.mjs` | Seeded end-to-end run |
 | `node scripts/mock-llm-e2e.mjs` | Mock LLM rebind |
