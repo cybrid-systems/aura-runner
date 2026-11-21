@@ -54,12 +54,87 @@ stretch has no popper and no flyer in it.
 ## The candidates
 
 - `nudge-flyers-noop`: the piece list comes back unchanged when nothing
-  moved, so a stretch without a flyer does not rebuild it.
+  moved, so a stretch without a flyer does not rebuild it. **Landed** in
+  `lib/phys.aura` (gated round on nightly `e174386808`, intend-met=1,
+  held-out 2036 ms against its own null's 3090 ms; see below).
 - `step-poppers-noop`: the same for the poppers.
 - `collide-slack`: the metre of slack around the body is more than the
   geometry needs.
 - `wrong-scale`: the score is doubled on the way in; the checksum has to
   reject it.
+
+## The run on the float-pool-fixed nightly (`e174386808`)
+
+The runtime leak that made a long run stutter is fixed upstream
+(`f92517b79`, "reclaim: recycle the boxed-float pool"): the same 40M-op
+general-TW float loop now holds RSS flat (was 144MB->461MB linear). What
+remains is the steady tree-walker cost, so the gated round re-runs on the
+fixed nightly with the bus on (`AURA_PERF_BUS_WORKSPACE`, aura-harness
+attaches during the linger window):
+
+```
+verdict intend-met=1 KEEP=2 ROLLBACK=3 speedup-x=1.15 (2349ms->2036ms n=5)
+mined class=flat-hot hot-node=collide site=bench-kernel
+candidate collide-nocopy    PASS gate-pass heldout-ms=2236 ref-ms=3067 ref-target=collide
+candidate nudge-flyers-noop PASS gate-pass heldout-ms=2036 ref-ms=3090 ref-target=nudge-flyers
+kernel KEEP id=nudge-flyers-noop
+```
+
+Each candidate is judged against the null of the define it rebinds,
+measured in the same child process (the rebind tax is on both sides).
+`nudge-flyers-noop` is the winner and is now the library's body. The
+checksum is byte-identical (it returns the SAME list when no flyer moved),
+and check-sim, play-review (11/11), `aura test` (28/28) and check-play
+(ten minutes, minAhead 1) are unchanged after landing.
+
+`collide-nocopy` also passes the gate, but the library already carries the
+nocopy structure (`4023894`) with per-coin worth (`62cc758`); the candidate
+file is an older snapshot (`pickup-worth`), so there is nothing new to land.
+
+### Why the physics is still on the tree-walker
+
+`closure:stats` reads `ir-calls=0` for the whole physics graph. On this
+nightly it is NOT `cond`/`and`/`or`/`let*`/`hash-ref`/`string=?` — isolated
+probes show all of those IR-compile. The one hot-path form that forces the
+walker is a **variadic (dotted-rest) define**, and it poisons its callers:
+a clean fixed-arity define that calls a variadic define also falls back
+(the variadic callee is not IR-cached, so the call-site resolves to
+"unknown"). `lib/phys.aura`'s `piece` is variadic
+(`(define (piece k x w h y . rest)`), and every hot define builds or reads
+pieces, so `piece` drags the whole graph onto the walker. A fixed-arity
+`piece` twin is the next lever; it is a cross-cutting change (27 call
+sites) and must pass the same checksum gate, so it is recorded, not landed.
+
+### The harness side of the cycle (bus)
+
+`scripts/perf-harness-cycle.py` is the aura-harness coordinator: it waits
+for the round's report, attaches the harness server as role 2
+(read|publish) DURING the linger window, reads the committed image
+(hypothesis metrics, trial worldlines, shared audit), cross-checks each
+worldline's bus state against the gate's verdict, and publishes the
+harness's release/reject + held-out evidence (910000/920000/930000 + wl).
+It never opens trials and never KEEPs — KEEP stays with perf under the
+coordinator's constraint gate.
+
+The perf process must keep stdin OPEN for the window to stay up
+(aura-perf#28: "EOF on stdin ends the window"). Run it with a held-open
+stdin, e.g. a FIFO whose writer outlives the round:
+
+```sh
+mkfifo /tmp/perf-fifo
+setsid bash -c 'sleep 900 > /tmp/perf-fifo' </dev/null >/dev/null 2>&1 &
+AURA_PATH=~/aura/lib AURA_PERF_BUS_WORKSPACE=5391 AURA_PERF_BUS_LINGER_S=240 \
+  aura-perf autotune perf/spec.aura < /tmp/perf-fifo
+# then, while it lingers:
+AURA_BIN=... AURA_LIB=~/aura/lib python3 scripts/perf-harness-cycle.py --ws 5391
+```
+
+Measured (ws=5391): harness attached, hypothesis keys match the report,
+both worldline states agree with the gate, 2 release verdicts published,
+20 shared audit events read, clean detach. `std/bus` lives in the source
+tree's `lib` (`AURA_PATH=~/aura/lib`); the nightly's bundled lib does not
+ship it, though the binary has the bus primitives.
+
 
 ## The run remembers
 

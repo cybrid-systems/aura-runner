@@ -74,7 +74,7 @@
                  (loop (cdr ps) (+ n 1)
                        (append coins
                                (list (cons n (piece 0.0 x1 (piece-w q) (piece-h q) y1 (piece-lane q)))))
-                       (pset player 6 (+ (player-score player) (pickup-worth rules)))
+                       (pset player 6 (+ (player-score player) (coin-points q rules)))
                        "coin"
                        #f))
                 ((and hit (= k 6.0) (<= (player-y player) 0.05) (<= (player-vy player) 0.0))

@@ -183,14 +183,18 @@
           (loop (cdr ps) (cons (step-one-rival q p dt) acc))
           (loop (cdr ps) (cons q acc)))))))
 
+; The piece list comes back unchanged when no flyer moved, so a stretch
+; without a flyer does not rebuild it. Nothing moved means the same list
+; is returned (the gate's digest is byte-identical); the allocation and
+; the reverse go away on the frames that touch no flyer.
 (define (nudge-flyers pieces dt)
-  (let loop ((ps pieces) (acc (list)))
+  (let loop ((ps pieces) (acc (list)) (moved #f))
     (if (null? ps)
-      (reverse acc)
+      (if moved (reverse acc) pieces)
       (let ((q (car ps)))
         (if (= (piece-k q) 8.0)
-          (loop (cdr ps) (cons (shift-one q (* (- 0.0 (piece-nth q 7 0.0)) dt)) acc))
-          (loop (cdr ps) (cons q acc)))))))
+          (loop (cdr ps) (cons (shift-one q (* (- 0.0 (piece-nth q 7 0.0)) dt)) acc) #t)
+          (loop (cdr ps) (cons q acc) moved))))))
 
 (define (piece-k q) (car q))
 (define (piece-x q) (car (cdr q)))
