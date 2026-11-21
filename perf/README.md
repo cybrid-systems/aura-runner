@@ -318,10 +318,35 @@ golden, play-review, coin digest, the `#4525` burst ACs, AC7 float-churn, the
 TW park reclaim, and the JIT L1/L2 float-pool growth tests are all unchanged.
 Rebuild the runtime with LLVM (`build-jit2`) to run the JIT-path checks.
 
-The recurring 100-300ms spikes are the level gate (trials + rebind +
-eval-current + roster-evolve) and chunk spawn, every ~5s; the boot stall is
-the deferred module compile (`load-slow-one`, ~7.7s). Those are steady-state
-costs, not the time-dependent growth the float-pool fix removes.
+The recurring 100-300ms spikes were the level gate and chunk spawn, every
+~5s; the boot stall is the deferred module compile (`load-slow-one`, ~7.7s).
+
+**The gate spike is now amortized** (`core/main.aura`). A sub-step probe
+showed `finish-level!` cost ~120-276ms on the crossing tick, dominated by
+three COSMETIC `evo:trial`s that do not touch physics / fairness / score:
+the biome evolve (`consider-edsl!` ~85ms), the roster evolve
+(`roster-evolve!`/`keep-pals!` ~60-130ms), and the tune (`tune-commit!`
+~50ms, already deferred via `tune-due`). The gameplay-critical work
+(`gate-cross`, `advance-pace!`, `begin-level!`, banner, coins, chase queue)
+is only ~10-40ms.
+
+The fix queues the biome and roster evolves as thunks on `gate-followups`
+and drains ONE per tick in `maybe-gate-followup!` (after `maybe-tune!`),
+the same slice convention the dream / card / chase already use. The gate
+still rotates the biome inline (cheap, keeps the banner correct); the
+evolve trial KEEPs/ROLLBACKs a tick or two later with the identical verdict.
+The drainer waits while a chat POST or another trial holds the slot, so it
+never wedges an in-flight call. `reset-run!` and `clear-slices!` empty the
+queue. Measured on the instrumented probe (same seed): the crossing-tick
+`finish-level!` drops 276ms -> 69ms, the worst per-tick spike 454ms -> 304ms,
+and >150ms buckets 14 -> 10 over 150s. The deferred trials still cost their
+own ~60-100ms when they run, but on later frames, spread one per tick
+instead of stacked on the gate. check-sim golden, play-review (11/11),
+check-run, check-edsl-e2e (offline + voice biome KEEP), check-setcode,
+check-music, check-world, check-voice, check-contrast all unchanged.
+
+The chunk-spawn cost (`spawn-chunk!`/`coin-lay`, ~30-45ms) and the boot
+compile remain; those are separate steady-state costs, not the gate spike.
 
 | file | what it is |
 |---|---|

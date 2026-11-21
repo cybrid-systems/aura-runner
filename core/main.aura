@@ -106,6 +106,13 @@
 (define tune-now music-home)
 (define tune-prev music-home)
 (define tune-due #f)
+; The level gate's cosmetic follow-ups (biome evolve, roster evolve) are
+; queued here and drained one per tick, the way a dream / card / chase is
+; sliced. The gate itself keeps only the gameplay-critical work (pace,
+; level span, banner, coins, chase queue) on the crossing tick, so the
+; ~150-250ms evolution trials no longer land in one frame. Each entry is a
+; thunk; maybe-gate-followup! runs at most one per tick.
+(define gate-followups (list))
 (define scene-now default-scene)
 (define pals-now default-pals)
 (define pals-rows (list))
@@ -870,12 +877,25 @@
               (begin
                 (edsl-clear!)
                 (set! biome-now (hash-ref cross "biome" (biome-for-level level-n))))
-              (let ((born (begin (load-slow!) (edsl-evolve edsl-pool (+ (floor seed) level-n)))))
-                (if (and (string? born) (consider-edsl! born "" #t #f))
-                  #f
-                  (begin
-                    (edsl-clear!)
-                    (set! biome-now (hash-ref cross "biome" (biome-for-level level-n)))))))))))
+              ;; The offline biome evolve is a cosmetic evo:trial (~85ms).
+              ;; Rotate to the level's biome now (cheap, keeps the banner
+              ;; correct) and queue the evolve trial for a later tick. If it
+              ;; KEEPs, consider-edsl! installs the evolved world then; a
+              ;; ROLLBACK leaves the rotation. Same verdict, spread off the
+              ;; crossing frame.
+              (begin
+                (edsl-clear!)
+                (set! biome-now (hash-ref cross "biome" (biome-for-level level-n)))
+                (let ((lv level-n))
+                  (set! gate-followups
+                        (append gate-followups
+                                (list (lambda ()
+                                        (let ((born (begin (load-slow!)
+                                                           (edsl-evolve edsl-pool
+                                                                        (+ (floor seed) lv)))))
+                                          (if (string? born)
+                                              (consider-edsl! born "" #t #f)
+                                              #f)))))))))))))
     (set! chal-coins 0)
     (set! chal-done #f)
     (set! run-mult (hash-ref cross "mult" run-mult))
@@ -909,7 +929,11 @@
              "level"))
     (consider-coins! played bumps got-coins got-swaps near)
     (queue-chase! played bumps (chase-sum chase-recent) speed-now race)
-    (roster-evolve! "Level clear")
+    ;; The roster evolve is a cosmetic evo:trial + rebind (~60-130ms). Queue
+    ;; it for a later tick; the friends restyle a frame or two after the gate
+    ;; instead of stalling the crossing frame. Same KEEP/ROLLBACK verdict.
+    (set! gate-followups
+          (append gate-followups (list (lambda () (roster-evolve! "Level clear")))))
     (set! tune-due #t)))
 
 ; Three coins in one level step the multiplier once. A gate does not
@@ -1276,6 +1300,7 @@
   (set! tune-now music-home)
   (set! tune-prev music-home)
   (set! tune-due #f)
+  (set! gate-followups (list))
   (set! next-dream 1500.0)
   (set! motif-next 2500.0)
   (set! scene-next 5000.0)
@@ -4023,7 +4048,8 @@
   (set! chase-plan #f)
   (set! card-spec #f)
   (set! hold-form "")
-  (set! dream-form ""))
+  (set! dream-form "")
+  (set! gate-followups (list)))
 
 (define (how-ok? how)
   (and (string? how) (not (string=? how "fail"))))
@@ -4313,6 +4339,19 @@
     (try (tune-commit!) (catch (e) (set! tune-due #f)))
     #f))
 
+; Drain one queued gate follow-up per tick (a biome evolve or a roster
+; evolve). One thunk a tick keeps each cosmetic trial off the crossing
+; frame and spreads the work the way a dream / card slice does. Waits while
+; a chat POST or another trial holds the slot, exactly as maybe-tune! does,
+; so the evolve never wedges an in-flight call. A thunk that raises is
+; dropped, not retried — the gate already rotated the biome / kept the run.
+(define (maybe-gate-followup!)
+  (if (or (null? gate-followups) (llm-posting?) (chat-open?) trial-open)
+      #f
+      (let ((job (car gate-followups)))
+        (set! gate-followups (cdr gate-followups))
+        (try (job) (catch (e) #f)))))
+
 (define (on-tick c msg)
   (note-hearts! msg)
   (absorb-skill! msg)
@@ -4359,6 +4398,10 @@
     ; note sent after it can sit unread when the deadline lands on that tick.
     ; A level's tune trial waits until no chat is holding the slot.
     (maybe-tune!)
+    ; One queued gate follow-up (biome / roster evolve) per tick, after the
+    ; tune so at most one cosmetic trial lands on a frame. Its KEEP/ROLLBACK
+    ; note goes out with this tick's flush-notes below.
+    (maybe-gate-followup!)
     (flush-notes! c)
     (send c (state-msg ev))))
 
