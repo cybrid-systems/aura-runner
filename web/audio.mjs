@@ -1,5 +1,7 @@
-// Small synthesized cues, plus Symphony No. 29 when the bridge can see the
-// recording. play() has to run inside the key, pointer, or touch listener.
+// Small synthesized cues, plus a folder of the player's own tracks when
+// one is configured. A single recording at LUMEN_MUSIC is the fallback
+// when that folder is unset. play() has to run inside the key, pointer,
+// or touch listener.
 // A later animation frame is no longer a user gesture, and the browser drops it.
 // The piece goes straight to the speakers. Routing it through a media-element
 // source leaves it silent while that context is still suspended.
@@ -14,8 +16,8 @@
 
 import {
   CUE_BUS, DEFAULT_VOLUME, HOME, MAX_VOICES,
-  acceptPhrase, atBar, check, chooseBed, chordRoot, createBook, effectFor,
-  hzFor, layersFor, liftKey, offerKeep, offerRollback, rolesAt, stepTime, tempoFor,
+  acceptPhrase, advancePlaylist, atBar, check, chooseBed, chordRoot, createBook, effectFor,
+  freshPlaylist, hzFor, layersFor, liftKey, offerKeep, offerRollback, rolesAt, stepTime, tempoFor,
 } from "./music.mjs";
 
 export const SESSION_VOICE = Object.freeze({
@@ -50,6 +52,11 @@ export function createAudio() {
   let bed = "wait";
   let fileTried = false;
   let unlocked = false;
+  let playState = null;
+  let playGen = 0;
+  let failGen = -1;
+  let bedPlan = "pending";
+  let catalogPromise = null;
   let nextBeat = 0;
   const SONG_VOL = 0.8;
   let book = createBook();
@@ -166,20 +173,32 @@ export function createAudio() {
   function ensureSong() {
     if (song) return;
     const el = document.createElement("audio");
-    el.src = "/symphony.mp4";
-    el.loop = true;
+    el.loop = false;
     el.playsInline = true;
-    el.preload = "metadata";
+    el.preload = "auto";
     el.volume = muted ? 0 : SONG_VOL * userVolume;
     el.setAttribute("playsinline", "");
     el.setAttribute("aria-hidden", "true");
     el.style.cssText = "position:fixed;left:0;top:0;width:0;height:0;opacity:0;pointer-events:none";
-    el.addEventListener("error", () => useSynth());
     document.body.appendChild(el);
     song = el;
   }
 
+  function noteMusic(text) {
+    const root = document.documentElement;
+    if (!text) {
+      delete root.dataset.musicNote;
+      return;
+    }
+    root.dataset.musicNote = text;
+    try {
+      window.dispatchEvent(new CustomEvent("lumen-music-note", { detail: text }));
+    } catch { /* the page may not be listening yet */ }
+  }
+
   function useSynth() {
+    playGen += 1;
+    playState = null;
     if (song && !song.paused) {
       try { song.pause(); } catch { /* already stopped */ }
     }
@@ -193,30 +212,135 @@ export function createAudio() {
     }
   }
 
-  function playFile() {
+  function markFilePlaying() {
+    if (!song || song.paused || song.error) return;
+    bedKnown = true;
+    bed = "file";
+    delete document.documentElement.dataset.musicError;
+    mark("play", song.currentTime);
+    applyGains();
+    publish();
+  }
+
+  function playCurrent(gen) {
+    if (!song || muted) return;
+    const pending = song.play();
+    if (pending && typeof pending.then === "function") {
+      pending.then(() => {
+        if (gen !== playGen) return;
+        markFilePlaying();
+      }).catch((err) => {
+        if (gen !== playGen) return;
+        document.documentElement.dataset.musicError = (err && err.name) || "play";
+        if (playState) failTrack();
+        else useSynth();
+      });
+    }
+  }
+
+  function armTrack() {
+    if (!playState || !playState.tracks.length) {
+      useSynth();
+      return;
+    }
+    ensureSong();
+    const track = playState.tracks[playState.index];
+    if (!track || !track.url) {
+      stepPlaylist("error");
+      return;
+    }
+    const gen = ++playGen;
+    song.loop = playState.tracks.length === 1;
+    song.onended = () => {
+      if (gen !== playGen || song.loop) return;
+      stepPlaylist("end");
+    };
+    song.onerror = () => {
+      if (gen !== playGen) return;
+      failTrack();
+    };
+    try { song.pause(); } catch { /* swap */ }
+    song.src = track.url;
+    playCurrent(gen);
+  }
+
+  function stepPlaylist(event) {
+    if (!playState) return;
+    playState = advancePlaylist(playState, event);
+    if (!playState || playState.action === "synth") useSynth();
+    else armTrack();
+  }
+
+  function failTrack() {
+    if (failGen === playGen) return;
+    failGen = playGen;
+    stepPlaylist("error");
+  }
+
+  function playSymphony() {
     ensureSong();
     if (!song || muted) return;
+    song.loop = true;
+    song.onerror = () => useSynth();
+    if (!song.src) song.src = "/symphony.mp4";
     if (!song.paused) {
       bed = "file";
       mark("play", song.currentTime);
       applyGains();
       return;
     }
-    const pending = song.play();
-    if (pending && typeof pending.then === "function") {
-      pending.then(() => {
-        if (!song || song.paused || song.error) return;
-        bedKnown = true;
+    playCurrent(playGen);
+  }
+
+  function probeSymphony() {
+    playSymphony();
+    fetch("/symphony.mp4", { method: "HEAD" }).then((res) => {
+      if (chooseBed(res.status, true) === "synth") useSynth();
+    }).catch(() => { /* play() rejects, or the element fires error */ });
+  }
+
+  function applyCatalog(info) {
+    if (info && info.message) noteMusic(info.message);
+    else noteMusic("");
+    if (info && info.ok && Array.isArray(info.tracks) && info.tracks.length) {
+      bedPlan = "playlist";
+      playState = freshPlaylist(info.tracks, info.order);
+      return;
+    }
+    playState = null;
+    bedPlan = info && info.message ? "synth" : "symphony";
+  }
+
+  function loadCatalog() {
+    if (!catalogPromise) {
+      catalogPromise = fetch("/music.json")
+        .then((res) => (res.ok ? res.json() : null))
+        .then((info) => {
+          applyCatalog(info);
+          return info;
+        })
+        .catch(() => {
+          bedPlan = "symphony";
+          return null;
+        });
+    }
+    return catalogPromise;
+  }
+
+  loadCatalog();
+
+  function playFile() {
+    if (bedPlan === "playlist" && playState) {
+      if (song && !song.paused) {
         bed = "file";
-        delete document.documentElement.dataset.musicError;
         mark("play", song.currentTime);
         applyGains();
-        publish();
-      }).catch((err) => {
-        document.documentElement.dataset.musicError = (err && err.name) || "play";
-        useSynth();
-      });
+        return;
+      }
+      armTrack();
+      return;
     }
+    playSymphony();
   }
 
   function probeFile() {
@@ -225,10 +349,17 @@ export function createAudio() {
       return;
     }
     fileTried = true;
-    playFile();
-    fetch("/symphony.mp4", { method: "HEAD" }).then((res) => {
-      if (chooseBed(res.status, true) === "synth") useSynth();
-    }).catch(() => { /* play() rejects, or the element fires error */ });
+    loadCatalog().then(() => {
+      if (bedPlan === "playlist") {
+        armTrack();
+        return;
+      }
+      if (bedPlan === "synth") {
+        useSynth();
+        return;
+      }
+      probeSymphony();
+    });
   }
 
   function begin(fromUser) {

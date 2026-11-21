@@ -12,7 +12,10 @@ export AURA_EVO_LOG="${AURA_EVO_LOG:-/opt/lumen-run/out/evo.jsonl}"
 mkdir -p /opt/lumen-run/out
 : > "$AURA_EVO_LOG" || true
 
-if [ -n "${LLM_API_KEY:-}${LUMEN_MINIMAX_KEY:-}${LUMEN_DEEPSEEK_KEY:-}" ]; then
+if [ -n "${LUMEN_MINIMAX_KEY:-}${LUMEN_MINIMAX_URL:-}${LUMEN_MINIMAX_MODEL:-}" ] || [ "${LUMEN_LLM:-}" = "minimax" ]; then
+  echo "MiniMax is no longer a preset. Using saved API settings if present, otherwise playing offline."
+fi
+if [ -n "${LLM_API_KEY:-}${LUMEN_DEEPSEEK_KEY:-}" ]; then
   echo "llm: on"
 else
   echo "llm: off (the game runs without an API key)"

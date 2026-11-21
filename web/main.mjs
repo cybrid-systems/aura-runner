@@ -271,7 +271,7 @@ function applyHero(msg) {
 }
 
 function paintModel() {
-  const label = provider === "minimax" ? "MiniMax" : provider === "deepseek" ? "DeepSeek" : "";
+  const label = provider === "deepseek" ? "DeepSeek" : "";
   modelBtn.hidden = providers.length < 2 || !label;
   modelBtn.textContent = label || "Model";
   const which = modelName || label;
@@ -282,7 +282,7 @@ function applyProvider(msg) {
   if (typeof msg.provider === "string") provider = msg.provider;
   if (typeof msg.model === "string") modelName = msg.model;
   if (Array.isArray(msg.providers)) {
-    providers = msg.providers.filter((name) => name === "deepseek" || name === "minimax");
+    providers = msg.providers.filter((name) => name === "deepseek");
   }
   paintModel();
 }
@@ -397,6 +397,11 @@ function showCue(text) {
   lastCueAt = now;
   toastQ.push(text);
 }
+
+window.addEventListener("lumen-music-note", (ev) => {
+  const text = ev && ev.detail;
+  if (typeof text === "string" && text.trim()) showCue(text.trim());
+});
 
 function showMark(word, kind) {
   const clean = String(word).toLowerCase().replace(/[^a-z]/g, "").slice(0, 12);

@@ -5,6 +5,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import net from "node:net";
 import { fileURLToPath } from "node:url";
+import { discoverMusic, mimeFor, musicOrder, trackByName } from "./musiclib.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const web = path.join(root, "web");
@@ -14,6 +15,8 @@ const auraPort = Number(process.env.AURA_RUNNER_PORT || 8765);
 // page plays the synthesized tune instead.
 const musicFile = process.env.LUMEN_MUSIC
   || "/home/dev/code/symphony/symphony_no_29_in_a_major_k_201.mp4";
+const musicDir = process.env.LUMEN_MUSIC_DIR || "";
+const trackOrder = musicOrder(process.env.LUMEN_MUSIC_ORDER);
 const mime = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -196,6 +199,41 @@ const server = http.createServer((req, res) => {
     res.end();
     return;
   }
+  if (rel === "/music.json") {
+    const found = discoverMusic(musicDir);
+    const tracks = found.ok
+      ? found.tracks.map((row) => ({ name: row.name, url: row.url }))
+      : [];
+    const body = JSON.stringify({
+      ok: found.ok,
+      order: trackOrder,
+      tracks,
+      message: found.message,
+      reason: found.reason,
+    });
+    res.writeHead(200, {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "content-length": String(Buffer.byteLength(body)),
+    });
+    if (req.method === "HEAD") res.end();
+    else res.end(body);
+    return;
+  }
+  if (rel.startsWith("/music/t/")) {
+    const name = rel.slice("/music/t/".length);
+    const found = discoverMusic(musicDir);
+    const track = trackByName(found, name);
+    if (!track) {
+      res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+      if (req.method === "HEAD") res.end();
+      else res.end("not found");
+      return;
+    }
+    const type = mimeFor(track.name) || "application/octet-stream";
+    sendBytes(req, res, track.file, type);
+    return;
+  }
   if (rel === "/symphony.mp4") {
     if (!fs.existsSync(musicFile)) {
       res.writeHead(204);
@@ -235,6 +273,12 @@ server.on("upgrade", (req, socket) => {
 // 127.0.0.1 keeps ./run.sh on this machine. The container sets
 // AURA_RUNNER_BIND=0.0.0.0 so Docker's published port can reach the page.
 const bindHost = process.env.AURA_RUNNER_BIND || "127.0.0.1";
+const musicAtBoot = discoverMusic(musicDir);
+if (musicAtBoot.message) console.log(musicAtBoot.message);
+else if (musicAtBoot.ok) console.log(`music: ${musicAtBoot.tracks.length} tracks from ${musicAtBoot.folder} (${trackOrder})`);
+else console.log("music: synthesized");
 server.listen(webPort, bindHost, () => {
-  console.log(`Lumen Run  http://${bindHost}:${webPort}`);
+  const addr = server.address();
+  const port = addr && typeof addr === "object" ? addr.port : webPort;
+  console.log(`Lumen Run  http://${bindHost}:${port}`);
 });

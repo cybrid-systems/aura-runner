@@ -24,10 +24,20 @@ On a Mac this is the short path. Docker Desktop and OrbStack both run the linux/
 
 1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) or [OrbStack](https://orbstack.dev) and open it.
 2. Get this folder: `git clone https://github.com/cybrid-systems/aura-runner.git` and `cd aura-runner`, or download the ZIP from GitHub and unzip it.
-3. Run `./play.sh`. The first question is which AI service; press Enter for MiniMax. The next question is the API key; press Enter to play with AI features off, or paste a key. The key is not shown. It is saved in `.env` (mode 0600, and git ignores it). `./play.sh --setup` asks both questions again.
+3. Run `./play.sh`. Paste a DeepSeek API key, or press Enter to play with AI features off. The key is not shown. It is saved in `.env` (mode 0600, and git ignores it). The next question is an optional folder of your own songs. `./play.sh --setup` asks both again.
 4. When the game is ready, it opens in the browser. The script prints the URL and a `docker run` command. If port 8080 is taken, it picks another one.
 
 The image is `ghcr.io/cybrid-systems/aura-runner`. If that download is not available yet, `./play.sh` builds it from the same Aura nightly `./run.sh` downloads, and does not compile Aura. The next start uses that copy and does not build again.
+
+## Settings
+
+`./play.sh --config` prints the settings that are in effect. The API key is shown only as a character count.
+
+Copy [`lumen.toml.example`](lumen.toml.example) to `lumen.toml` (git ignores that copy) to change them by hand. A value already exported in the terminal wins, then `lumen.toml`, then `.env`, then the built-in default. The key is the exception: the terminal wins, then `.env`, then `lumen.toml`, so `./play.sh --setup` replaces a key left in the config. Keep the key in `.env`.
+
+DeepSeek V4.1 Flash (`deepseek-flash`, `https://api.deepseek.com/v1`) is the preset. For another OpenAI-compatible service, set `base_url` and `model` in `lumen.toml`, or export `LLM_BASE_URL`, `LLM_MODEL`, and `LLM_API_KEY`.
+
+An old `.env` that still names MiniMax prints one line and keeps going. A saved `LLM_API_KEY` still works. Otherwise the game stays offline.
 
 ## Controls
 
@@ -79,7 +89,9 @@ A proposal is kept only after evo:trial (edsl-gate).
 
 ## Music
 
-The page plays Symphony No. 29 when `LUMEN_MUSIC` points at the recording. A missing file is HTTP 204, and a play error does the same: the page starts a synthesized tune. No audio file is added to the repo. The first key, tap, or click starts the sound. Mute and the volume slider sit in the corner.
+With no music folder, the page plays a synthesized tune. Set `music_dir` in `lumen.toml` (or paste the folder when `./play.sh` asks) to loop your own mp3, ogg, wav, m4a, or flac files. `music_order` is `shuffle` (the default) or `ordered`. `./play.sh` mounts that folder read-only at `/music` in the container. `./run.sh` reads the same path on this computer. The files stay on your machine: the bridge serves them, and nothing is uploaded or added to git. An empty folder, or one with no supported files, keeps the synthesized tune and prints a short message.
+
+A single file in `LUMEN_MUSIC` still plays when no folder is set. A missing file is HTTP 204, and a play error does the same. The first key, tap, or click starts the sound. Mute and the volume slider sit in the corner.
 
 The tune is a `(tune ...)` form in [`lib/music.aura`](lib/music.aura). `evo:trial` keeps a fair phrase and rolls a harsh one back. A kept phrase starts on the next bar. A rollback before that bar stays on the current phrase; after the bar, the previous phrase returns on the next one. Speed and level raise the tempo and add a layer. A combo or a near miss plays a fill. A hit ducks the filter, a shield plays a short brighter note, and a level-up lifts the key. Everything lands on the beat.
 
@@ -108,9 +120,9 @@ With no key, the offline generator still builds the run. These are the `LLM_*` v
 | `LLM_MODEL` | Model id |
 | `LLM_TIMEOUT` | HTTP timeout in seconds (default 120). When unset, the core reads `AURA_HTTP_TIMEOUT` |
 
-Wished-object calls with no provider selected fill an empty `LLM_BASE_URL` with `https://api.deepseek.com/v1` and an empty `LLM_MODEL` with `deepseek-chat`.
+Wished-object calls with no provider selected fill an empty `LLM_BASE_URL` with `https://api.deepseek.com/v1` and an empty `LLM_MODEL` with `deepseek-flash`.
 
-With no `LLM_API_KEY`, `./run.sh` fills those three from `~/code/keys/deepseek` (`DEEPSEEK_KEY_FILE`) or `~/code/keys/minimax` (`MINIMAX_KEY_FILE`). `./run.sh minimax` prefers MiniMax when that key is usable. The key-file defaults are DeepSeek `deepseek-flash` and MiniMax `MiniMax-M3.1-Flash`.
+With no `LLM_API_KEY`, `./run.sh` fills those three from `~/code/keys/deepseek` (`DEEPSEEK_KEY_FILE`). The key-file model is `deepseek-flash`. `./run.sh deepseek` selects that preset. `./run.sh minimax` prints one line and then uses DeepSeek or stays offline.
 
 ## Picture
 
@@ -124,10 +136,11 @@ The budgets live in [`lib/quality.aura`](lib/quality.aura). The page carries the
 core/      Aura entry (core/main.aura): simulation, wishes, evo:trial
 web/       WebGL2 view. Low is one pass; Medium and High add shadow, bloom, grade, and FXAA
 lib/       Biome EDSL, physics, voice, pals, hearts, race
-scripts/   Checks, seeded play-review, LLM probe
-bridge/    Static page and the WebSocket bridge. ./run.sh starts it
-docker/    Container entrypoint. ./play.sh starts the image
+scripts/   Checks, seeded play-review, LLM probe, lumen.toml loader
+bridge/    Static page, music folder, and the WebSocket bridge. ./run.sh starts it
+docker/    Container entrypoint. ./play.sh starts the image and mounts a music folder
 docs/      Demo poster
+lumen.toml.example   Commented settings. Copy to lumen.toml.
 ```
 
 ## Checks
@@ -145,11 +158,13 @@ docs/      Demo poster
 | `node scripts/check-edsl.mjs` | Biome EDSL view |
 | `node scripts/check-run.mjs` | Multiplier, venues, voice |
 | `node scripts/check-probe.mjs` | Startup model probe |
-| `node scripts/check-music.mjs` | Tune bounds, KEEP/ROLLBACK, tempo, missing file |
+| `node scripts/check-config.mjs` | Settings precedence, masked key, music mount |
+| `node scripts/check-musicdir.mjs` | Music folder discovery and local files |
+| `node scripts/check-music.mjs` | Tune bounds, KEEP/ROLLBACK, tempo, playlist, missing file |
 | `node scripts/check-voice.mjs` | Soft voice stays on 196 Hz |
 | `bash scripts/check-install.sh` | Install from an empty cache, offline reuse |
 | `bash scripts/check-runsh.sh` | `./run.sh` downloads a prebuilt binary and serves the page |
-| `bash scripts/check-play.sh` | `./play.sh` questions, hidden key, gitignored env |
+| `bash scripts/check-play.sh` | `./play.sh` questions, hidden key, gitignored env and config |
 | `bash scripts/check-docker.sh` | Image serves the page and the core with no LLM |
 | `node scripts/smoke.mjs` | Seeded end-to-end run |
 | `node scripts/mock-llm-e2e.mjs` | Mock LLM rebind |

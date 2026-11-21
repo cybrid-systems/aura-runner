@@ -56,12 +56,27 @@ else
   AURA_PORT="$(pick_port aura 8765 0 8766)"
 fi
 
-if [[ "${1:-}" == "deepseek" || "${1:-}" == "minimax" ]]; then
-  export LUMEN_LLM="$1"
+if [[ "${1:-}" == "minimax" ]]; then
+  # The loader prints one line and continues with DeepSeek or offline.
+  export LUMEN_LLM="minimax"
+elif [[ "${1:-}" == "deepseek" ]]; then
+  export LUMEN_LLM="deepseek"
 elif [[ -n "${1:-}" ]]; then
-  echo "usage: ./run.sh [deepseek|minimax]" >&2
+  echo "usage: ./run.sh [deepseek]" >&2
   exit 1
 fi
+
+_lumen_export="$(mktemp)"
+chmod 600 "$_lumen_export"
+if ! python3 "$ROOT/scripts/lumen_config.py" --export-file "$_lumen_export"; then
+  rm -f "$_lumen_export"
+  echo "Could not read settings (lumen.toml or .env)." >&2
+  exit 1
+fi
+# shellcheck disable=SC1090
+source "$_lumen_export" || { rm -f "$_lumen_export"; exit 1; }
+rm -f "$_lumen_export"
+unset _lumen_export
 
 aura_from=""
 aura_ver=""

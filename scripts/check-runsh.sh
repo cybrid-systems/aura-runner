@@ -33,7 +33,9 @@ export AURA_CACHE_DIR="$cache"
 export AURA_RUNNER_WEB="${AURA_RUNNER_WEB:-18092}"
 export AURA_RUNNER_PORT="${AURA_RUNNER_PORT:-18792}"
 export DEEPSEEK_KEY_FILE=/tmp/no-deepseek-key
-export MINIMAX_KEY_FILE=/tmp/no-minimax-key
+export LUMEN_ENV_FILE=/tmp/no-lumen-env
+export LUMEN_CONFIG=/tmp/no-lumen-toml
+unset MINIMAX_KEY_FILE || true
 unset AURA_BIN AURA_OFFLINE AURA_FORCE_TOOLS AURA_VERSION AURA_DOWNLOAD_BASE
 
 mkdir -p out

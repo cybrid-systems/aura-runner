@@ -2,8 +2,8 @@
 // The page plays these phrases; this check never opens an audio device.
 import {
   HOME, LIMITS, MAX_VOICES,
-  acceptPhrase, audibleAfterGesture, atBar, check, chooseBed, createBook, effectFor, emit, evolve,
-  layersFor, liftKey, offerKeep, offerRollback, quantize, recoverTime, rolesAt,
+  acceptPhrase, advancePlaylist, arrangeTracks, audibleAfterGesture, atBar, check, chooseBed, createBook, effectFor, emit, evolve,
+  freshPlaylist, layersFor, liftKey, offerKeep, offerRollback, quantize, recoverTime, rolesAt,
   stepTime, tempoFor, volumeFromStore,
 } from "../web/music.mjs";
 
@@ -145,6 +145,25 @@ for (let s = 0; s < 8; s += 1) {
   if (n < 1 || n > MAX_VOICES) voices = false;
 }
 checkOk("voices", voices && LIMITS.voices === MAX_VOICES);
+
+const ordered = freshPlaylist(["a.mp3", "b.ogg", "c.wav"], "ordered");
+checkOk("playlist-order", ordered.action === "play" && ordered.tracks.join() === "a.mp3,b.ogg,c.wav" && ordered.index === 0);
+const stepped = advancePlaylist(ordered, "end");
+checkOk("playlist-next", stepped.index === 1 && stepped.tracks[0] === "a.mp3" && stepped.action === "play");
+const wrapped = advancePlaylist({ order: "ordered", tracks: ordered.tracks, index: 2, failed: 0 }, "end");
+checkOk("playlist-wrap", wrapped.index === 0 && wrapped.tracks.join() === "a.mp3,b.ogg,c.wav");
+const shuffled = arrangeTracks(["a", "b", "c", "d"], "shuffle", () => 0);
+checkOk("playlist-shuffle", shuffled.join() === "b,c,d,a");
+const reshuffle = advancePlaylist({ order: "shuffle", tracks: ["a", "b"], index: 1, failed: 0 }, "end", () => 0);
+checkOk("playlist-reshuffle", reshuffle.action === "play" && reshuffle.index === 0 && reshuffle.tracks[0] === "a");
+let skipped = freshPlaylist(["a", "b"], "ordered");
+skipped = advancePlaylist(skipped, "error");
+checkOk("playlist-skip", skipped.action === "play" && skipped.index === 1 && skipped.failed === 1);
+skipped = advancePlaylist(skipped, "error");
+checkOk("playlist-give-up", skipped.action === "synth" && skipped.failed === 2);
+const single = advancePlaylist(freshPlaylist(["only.mp3"], "shuffle", () => 0), "end");
+checkOk("playlist-one", single.action === "play" && single.index === 0 && single.tracks[0] === "only.mp3");
+checkOk("playlist-empty", freshPlaylist([], "shuffle").action === "synth");
 
 if (failed) {
   console.error(failed + " failed");

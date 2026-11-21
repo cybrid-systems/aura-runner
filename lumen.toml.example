@@ -1,0 +1,26 @@
+# Lumen Run settings.
+# Copy this file to lumen.toml (git ignores that copy) and edit it.
+# ./play.sh writes lumen.toml for you. ./play.sh --config shows the result.
+# ./play.sh --setup asks again.
+#
+# Which value wins:
+#   1. A variable already set in the terminal
+#   2. This file
+#   3. .env (where ./play.sh stores the API key)
+#   4. The built-in default
+#
+# The API key stays in .env (mode 0600). Do not put it in a file you commit.
+# ./play.sh --config prints the key only as a character count.
+
+# A folder of your own songs: mp3, ogg, wav, m4a, or flac.
+# Files sit in that folder (not in subfolders). Leave this unset for
+# the synthesized music.
+# music_dir = "/Users/you/Music/lumen"
+
+# shuffle (the default) or ordered.
+# music_order = "shuffle"
+
+# Another OpenAI-compatible service. Leave these unset for DeepSeek V4.1 Flash
+# (model deepseek-flash, https://api.deepseek.com/v1).
+# base_url = "https://example.com/v1"
+# model = "your-model"
