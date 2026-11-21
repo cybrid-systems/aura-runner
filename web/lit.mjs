@@ -87,63 +87,71 @@ export function litSky(src) {
 }
 
 const HIGH_FNS = `
+float shadeHash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5);
+}
+float shadeNoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(shadeHash(i), shadeHash(i + vec2(1.0, 0.0)), u.x),
+    mix(shadeHash(i + vec2(0.0, 1.0)), shadeHash(i + vec2(1.0, 1.0)), u.x),
+    u.y);
+}
 vec3 surfaceDetail(vec3 col, float dist) {
-  // Coarse on purpose. Fine grain aliases once the road starts moving.
-  // Marks fade by 20 m, where a seam would be only a few pixels tall.
+  // Smooth and wide on purpose. A hard cell used to restart on every
+  // slab and read as coarse blocks once the road moved. Marks still
+  // fade by 20 m, where a seam would be only a few pixels tall.
   float fade = 1.0 - smoothstep(8.0, 20.0, dist);
   if (fade < 0.03) return col;
   bool slab = vHalf.y < 0.1 && vHalf.x > 0.7 && vRough > 0.4 && vRough < 0.72 && vKind < 0.5;
   bool dash = abs(vL.x) < 0.045 && abs(vL.z) < 0.24;
   bool curb = abs(vL.x) > 0.38;
   if (slab && !dash && !curb) {
-    float along = vL.z * vHalf.z * 2.0;
-    float across = vL.x * vHalf.x * 2.0;
+    vec2 world = vW.xz;
+    float side = vL.x * vHalf.x * 2.0;
     vec3 next = col;
     if (uGround < 0.5) {
-      vec2 uv = vec2(across * 1.1, along * 0.62);
-      vec2 cell = floor(uv);
-      vec2 f = abs(fract(uv) - 0.5);
-      float n = fract(sin(dot(cell, vec2(127.1, 311.7))) * 43758.5);
-      float mortar = smoothstep(0.34, 0.46, max(f.x, f.y));
-      next *= 0.92 + 0.1 * n;
-      next = mix(next, next * vec3(0.62, 0.58, 0.52), mortar * 0.55);
+      float tone = shadeNoise(world * 0.38);
+      vec2 g = abs(fract(world * 0.42) - 0.5);
+      float joint = smoothstep(0.44, 0.5, max(g.x, g.y));
+      next *= 0.975 + 0.04 * tone;
+      next = mix(next, next * vec3(0.84, 0.80, 0.74), joint * 0.22);
     } else if (uGround < 1.5) {
-      float lane = smoothstep(0.22, 0.02, abs(abs(across) - 0.28));
-      float crack = smoothstep(0.025, 0.0, abs(fract(along * 0.23 + across * 0.05) - 0.5));
-      next *= 1.0 - lane * 0.1;
-      next = mix(next, next * vec3(0.4, 0.41, 0.44), crack * 0.5);
+      float lane = smoothstep(0.36, 0.1, abs(abs(side) - 0.32));
+      next *= 0.98 + 0.035 * shadeNoise(world * 0.2);
+      next *= 1.0 - lane * 0.05;
     } else if (uGround < 2.5) {
-      float streak = 0.5 + 0.5 * sin(across * 7.0 + along * 0.22);
-      next = mix(next, next * vec3(0.84, 0.92, 1.0) + vec3(0.05, 0.07, 0.1), streak * 0.38);
+      float streak = 0.5 + 0.5 * sin(side * 2.6 + world.y * 0.12);
+      next = mix(next, next * vec3(0.92, 0.97, 1.0) + vec3(0.02, 0.03, 0.05), streak * 0.16);
     } else if (uGround < 3.5) {
-      float rib = 0.5 + 0.5 * sin(across * 2.4 + along * 0.18);
-      next *= 0.9 + 0.12 * rib;
+      next *= 0.97 + 0.05 * shadeNoise(world * 0.28);
     } else if (uGround < 4.5) {
-      float board = floor(across * 2.1);
-      float seam = smoothstep(0.38, 0.48, abs(fract(across * 2.1) - 0.5));
-      float grain = fract(sin(board * 17.1) * 43758.5);
-      next *= 0.9 + 0.1 * grain;
-      next = mix(next, next * 0.66, seam * 0.7);
+      float boardUv = side * 1.15 + 0.8;
+      float seam = smoothstep(0.46, 0.5, abs(fract(boardUv) - 0.5));
+      float grain = shadeNoise(vec2(floor(boardUv) * 0.7, world.y * 0.18));
+      next *= 0.975 + 0.04 * grain;
+      next = mix(next, next * 0.86, seam * 0.28);
     } else if (uGround < 5.5) {
-      vec2 uv = vec2(across * 0.85, along * 0.55);
-      vec2 f = abs(fract(uv) - 0.5);
-      float crack = smoothstep(0.36, 0.46, max(f.x, f.y));
-      next = mix(next, vec3(1.0, 0.38, 0.06), crack * 0.5);
+      vec2 g = abs(fract(world * 0.36) - 0.5);
+      float crust = smoothstep(0.42, 0.5, max(g.x, g.y));
+      next = mix(next, vec3(1.0, 0.45, 0.1), crust * 0.22);
     } else {
-      float blob = 0.5 + 0.5 * sin(across * 1.8) * sin(along * 1.3 + 0.6);
-      next = mix(next, next * vec3(0.92, 0.95, 1.0) + vec3(0.05), blob * 0.45);
+      float blob = shadeNoise(world * 0.22);
+      next = mix(next, next * vec3(0.95, 0.97, 1.0) + vec3(0.025), blob * 0.18);
     }
-    float wear = smoothstep(0.46, 0.06, abs(across));
-    next *= 1.0 - wear * 0.06;
+    float wear = smoothstep(0.46, 0.06, abs(side));
+    next *= 1.0 - wear * 0.04;
     return mix(col, next, fade);
   }
   if (vRough > 0.72 && vKind < 0.5 && vHalf.x > 0.22 && vHalf.z > 0.3 && vHalf.y < 0.7) {
-    float clump = sin(vW.x * 0.7 + vCenter.z * 0.15) * sin(vW.z * 0.52);
-    return mix(col, col * (0.9 + 0.12 * clump), fade);
+    float clump = sin(vW.x * 0.42) * sin(vW.z * 0.33);
+    return mix(col, col * (0.97 + 0.04 * clump), fade);
   }
   if (vShape > 0.5 && vShape < 1.5 && vRough > 0.6 && vRough < 0.74 && vHalf.x > 0.3) {
-    float leaf = sin(vW.x * 1.5 + vW.y * 1.8) * sin(vW.z * 1.4 + vW.y);
-    return mix(col, col * (0.88 + 0.16 * leaf), fade);
+    float leaf = sin(vW.x * 0.85 + vW.y * 0.55) * sin(vW.z * 0.7 + vW.y * 0.4);
+    return mix(col, col * (0.96 + 0.05 * leaf), fade);
   }
   return col;
 }

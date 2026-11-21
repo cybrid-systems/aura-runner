@@ -1355,6 +1355,8 @@ export function createRenderer(canvas, hooks) {
     : "";
   const software = softwareFromRenderer(gpuName);
   let dprCap = software ? 1 : 2;
+  let dprDrops = 0;
+  let dprCalm = 0;
   const msaa = gl.getParameter(gl.SAMPLES) || 0;
   const maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE) || 0;
   let floatFb = false;
@@ -1769,21 +1771,37 @@ export function createRenderer(canvas, hooks) {
     canvas.dataset.dpr = String(dpr);
   }
 
-  // Same ring the page already keeps for the fps readout. A p95 past ~20 ms
-  // drops the backing store from 2x to 1x and leaves it there.
+  // Same ring the page already keeps for the fps readout. Drop to 1x
+  // only when the typical frame is late, not on one hitch. A quiet 1x
+  // window may give 2x back once; a second drop stays down.
   function noteFrameTime(buf, count) {
-    if (dprCap <= 1 || !buf) return;
+    if (software || !buf) return;
     const n = Math.min(count | 0, buf.length);
-    if (n < 48) return;
+    if (n < 120) return;
     const copy = [];
     for (let i = 0; i < n; i++) {
       const v = buf[i];
       if (v > 0.4 && v < 250) copy.push(v);
     }
-    if (copy.length < 40) return;
+    if (copy.length < 80) return;
     copy.sort((a, b) => a - b);
+    const p50 = copy[Math.floor(0.5 * (copy.length - 1))];
     const p95 = copy[Math.min(copy.length - 1, Math.floor(0.95 * (copy.length - 1)))];
-    if (p95 > 20) dprCap = 1;
+    if (dprCap > 1) {
+      if (p50 > 18 && p95 > 22) {
+        dprCap = 1;
+        dprDrops++;
+        dprCalm = 0;
+      }
+      return;
+    }
+    if (dprDrops >= 2) return;
+    if (p95 < 8 && p50 < 6) dprCalm++;
+    else dprCalm = 0;
+    if (dprCalm >= 2) {
+      dprCap = 2;
+      dprCalm = 0;
+    }
   }
 
   let n = 0;

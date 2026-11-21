@@ -333,6 +333,8 @@ assert(scales(2, 1).every((v) => v === 1), "software stays at 1x on every tier")
 const renderSrc = readFileSync(new URL("../web/render.mjs", import.meta.url), "utf8");
 assert(renderSrc.includes("softwareFromRenderer(gpuName)"), "render uses the shared detector");
 assert(!renderSrc.includes("llvmpipe|softpipe"), "render has no private software list");
+assert(renderSrc.includes("dprCalm") && renderSrc.includes("dprDrops >= 2"), "a slow pixel ratio can return once, then stay down");
+assert(!renderSrc.includes("leaves it there"), "the pixel ratio is not pinned for the whole session");
 
 const mem = {
   bag: new Map(),
@@ -415,7 +417,9 @@ assert(!sky.includes("uSkyAnim"), "the knee sample stays plain");
 assert(litAnchorsOk(meshSources()), "live mesh shaders accept the lit variant");
 const highBox = highFragment(meshSources()[1]);
 assert(highBox.includes("uGloss") && highBox.includes("uPenumbra") && highBox.includes("highShade"), "high mesh adds gloss, penumbra, and haze");
-assert(highBox.includes("surfaceDetail") && highBox.includes("uGround") && highBox.includes("smoothstep(8.0, 20.0, dist)"), "high road detail is coarse and fades by 20 m");
+assert(highBox.includes("surfaceDetail") && highBox.includes("uGround") && highBox.includes("smoothstep(8.0, 20.0, dist)"), "high road detail fades by 20 m");
+assert(highBox.includes("vW.xz") && highBox.includes("shadeNoise"), "high road marks continue across slabs");
+assert(!highBox.includes("mortar * 0.55") && !highBox.includes("smoothstep(0.025, 0.0"), "high road marks stay soft");
 assert(!litFragment(meshSources()[1]).includes("uGloss"), "the medium lit shader has no gloss");
 assert(!meshSources()[1].includes("uGloss"), "the low box shader has no gloss");
 assert(!meshSources()[1].includes("surfaceDetail") && !litFragment(meshSources()[1]).includes("uGround"), "low and medium keep a plain road");
