@@ -295,21 +295,33 @@ The physics runs entirely on the tree-walker (`closure:stats`: ~13M tw-calls,
 0 ir-calls per kernel) — `main.aura`'s `set!`/`cond`/`while`/`json-encode`
 force the fallback, and the physics defines are reached as TW closures.
 
-The time-dependent part is a runtime leak, not a target define: every float
+The time-dependent part was a runtime leak, not a target define: every float
 op on the general TW path boxes a double into the process-global
-`g_float_pool` (`aura_alloc_float`), which is append-only and cleared only at
-session reset. The TW/IR heap reclaim frees pairs/cells/vectors/strings but
+`g_float_pool` (`aura_alloc_float`), which was append-only and cleared only at
+session reset. The TW/IR heap reclaim freed pairs/cells/vectors/strings but
 never the float pool. A float loop that defeats the `#5302` raw-double fast
-path (list accumulator + `or` test + helper call — the physics shape) leaks
+path (list accumulator + `or` test + helper call — the physics shape) leaked
 ~16MB RSS per 2M ops with the evaluator pair heap flat; over 40M ops RSS
-climbs 144MB->461MB linearly. The `#5302` fast path keeps a bare-comparison
+climbed 144MB->461MB linearly. The `#5302` fast path keeps a bare-comparison
 float accumulator unboxed and does NOT leak — the physics loops miss it
-because of their list accumulators and `or`/`and` tests. On this 16GB VM the
-per-op latency effect is small within 40M ops, so the leak is a memory bug
-first; on a long session it is the mechanism that degrades the run. The
-recurring 100-300ms spikes are the level gate (trials + rebind + eval-current
-+ roster-evolve) and chunk spawn, every ~5s; the boot stall is the deferred
-module compile (`load-slow-one`, ~7.7s).
+because of their list accumulators and `or`/`and` tests.
+
+**Fixed in the Aura runtime** (commit `f92517b791`, "reclaim: recycle the
+boxed-float pool"): the file-mode and tree-walker reclaims now mark the live
+float boxes and release the dead ones onto a pool free list `aura_alloc_float`
+reuses, the same shape as the string-heap and hash-table slot reclaim.
+Ownership is stamped per slot at mint so a serve session only frees its own
+boxes; a mint-serial handshake protects newborns; the float-literal intern is
+rooted. After the fix the same 40M-op loop stays flat (RSS 100MB->106MB, was
+144MB->461MB), and a 20k-box drop loop grows the pool by 0 slots. The physics
+golden, play-review, coin digest, the `#4525` burst ACs, AC7 float-churn, the
+TW park reclaim, and the JIT L1/L2 float-pool growth tests are all unchanged.
+Rebuild the runtime with LLVM (`build-jit2`) to run the JIT-path checks.
+
+The recurring 100-300ms spikes are the level gate (trials + rebind +
+eval-current + roster-evolve) and chunk spawn, every ~5s; the boot stall is
+the deferred module compile (`load-slow-one`, ~7.7s). Those are steady-state
+costs, not the time-dependent growth the float-pool fix removes.
 
 | file | what it is |
 |---|---|
