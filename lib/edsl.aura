@@ -570,6 +570,13 @@
 (define (edsl-word? low w)
   (string-contains? (string-append " " low " ") (string-append " " w " ")))
 
+; 去背景 / 到程度. A bare 到 inside 看到 does not count unless the
+; misheard name sits right after it.
+(define (edsl-toward? text word)
+  (or (string-contains? text (string-append "去" word))
+      (string-contains? text (string-append "到" word))
+      (string-contains? text (string-append "前往" word))))
+
 ; A novel place. Built-in venue words and the neon word stay with voice.
 (define (edsl-theme text)
   (if (not (and (string? text) (> (string-length text) 0)))
@@ -596,21 +603,44 @@
         ((or (string-contains? text "赛博雨")
              (and (edsl-word? low "cyber") (edsl-word? low "rain")))
          "cyber-rain")
-        ((or (string-contains? text "北京") (edsl-word? low "beijing") (edsl-word? low "peking")) "beijing")
-        ((or (string-contains? text "上海") (edsl-word? low "shanghai")) "shanghai")
-        ((or (string-contains? text "杭州") (string-contains? text "西湖") (edsl-word? low "hangzhou")) "hangzhou")
-        ((or (string-contains? text "成都") (edsl-word? low "chengdu")) "chengdu")
-        ((or (string-contains? text "西安") (string-contains? low "xi'an") (string-contains? low "xi an") (edsl-word? low "xian")) "xian")
+        ((or (string-contains? text "北京") (string-contains? text "北平") (string-contains? text "京城")
+             (edsl-word? low "beijing") (edsl-word? low "peking")) "beijing")
+        ((or (string-contains? text "上海") (string-contains? text "魔都") (string-contains? text "申城")
+             (edsl-word? low "shanghai")) "shanghai")
+        ((or (string-contains? text "杭州") (string-contains? text "西湖") (string-contains? text "杭城")
+             (edsl-word? low "hangzhou")) "hangzhou")
+        ((or (string-contains? text "成都") (string-contains? text "蓉城") (edsl-word? low "chengdu")) "chengdu")
+        ((or (string-contains? text "西安") (string-contains? text "长安")
+             (string-contains? low "xi'an") (string-contains? low "xi an") (edsl-word? low "xian")) "xian")
         ((or (string-contains? text "重庆") (edsl-word? low "chongqing")) "chongqing")
-        ((or (string-contains? text "香港") (string-contains? low "hong kong") (edsl-word? low "hongkong")) "hongkong")
+        ((or (string-contains? text "香港") (string-contains? text "香江")
+             (string-contains? low "hong kong") (edsl-word? low "hongkong")) "hongkong")
         ((or (string-contains? text "纽约") (string-contains? low "new york") (edsl-word? low "newyork") (edsl-word? low "nyc")) "newyork")
-        ((or (string-contains? text "旧金山") (string-contains? low "san francisco") (edsl-word? low "sanfrancisco")) "sanfrancisco")
-        ((or (string-contains? text "洛杉矶") (string-contains? low "los angeles") (edsl-word? low "losangeles")) "losangeles")
-        ((or (string-contains? text "巴黎") (edsl-word? low "paris")) "paris")
+        ((or (string-contains? text "旧金山") (string-contains? text "三藩市")
+             (string-contains? low "san francisco") (edsl-word? low "sanfrancisco")) "sanfrancisco")
+        ((or (string-contains? text "洛杉矶") (string-contains? text "洛城")
+             (string-contains? low "los angeles") (edsl-word? low "losangeles")) "losangeles")
+        ((or (string-contains? text "巴黎") (string-contains? text "花都") (edsl-word? low "paris")) "paris")
         ((or (string-contains? text "伦敦") (edsl-word? low "london")) "london")
         ((or (string-contains? text "罗马") (edsl-word? low "rome")) "rome")
         ((or (string-contains? text "威尼斯") (edsl-word? low "venice")) "venice")
-        ((or (string-contains? text "东京") (string-contains? text "東京") (edsl-word? low "tokyo")) "tokyo")
+        ((or (string-contains? text "东京") (string-contains? text "東京") (string-contains? text "江户")
+             (edsl-word? low "tokyo")) "tokyo")
+        ; 去北京 is often heard as 去背景. Only a travel word plus the
+        ; mishearing counts, so 不要伤害 stays a sentence about harm.
+        ((or (edsl-toward? text "背景") (edsl-toward? text "北景") (edsl-toward? text "背影")) "beijing")
+        ((or (edsl-toward? text "伤害") (edsl-toward? text "商海")) "shanghai")
+        ((edsl-toward? text "航州") "hangzhou")
+        ((or (edsl-toward? text "程度") (edsl-toward? text "成度")) "chengdu")
+        ((edsl-toward? text "先安") "xian")
+        ((or (edsl-toward? text "重亲") (edsl-toward? text "从庆")) "chongqing")
+        ((or (edsl-toward? text "巴里") (edsl-toward? text "八里")) "paris")
+        ((or (edsl-toward? text "伦顿") (edsl-toward? text "论敦")) "london")
+        ((edsl-toward? text "罗玛") "rome")
+        ((or (edsl-toward? text "维尼斯") (edsl-toward? text "威尼司")) "venice")
+        ((edsl-toward? text "东经") "tokyo")
+        ((or (edsl-toward? text "牛约") (edsl-toward? text "纽月")) "newyork")
+        ((or (edsl-toward? text "落杉矶") (edsl-toward? text "洛山矶") (edsl-toward? text "落山矶")) "losangeles")
         (else #f)))))
 
 (define edsl-china-tour
@@ -631,8 +661,12 @@
   (let ((low (string-downcase text)))
     (cond
       ((or (string-contains? text "环球旅行") (string-contains? text "下一个城市") (string-contains? text "下个城市")
+           (string-contains? text "换个城市") (string-contains? text "换一座城市")
+           (string-contains? text "另一座城市") (string-contains? text "别的城市")
+           (string-contains? text "其他城市")
            (string-contains? low "world tour")
-           (and (edsl-word? low "next") (edsl-word? low "city")))
+           (and (edsl-word? low "next") (edsl-word? low "city"))
+           (and (edsl-word? low "another") (edsl-word? low "city")))
        (edsl-after edsl-world-tour current))
       ((or (string-contains? text "中国城市") (string-contains? text "去中国")
            (string-contains? low "chinese cities") (edsl-word? low "china"))
@@ -673,15 +707,24 @@
        (edsl-nth (list "visit-stone" "visit-us" "visit-asia" "visit-palm") (modulo (edsl-hash low) 4)))
       (else #f))))
 
+(define (edsl-tour-city? name)
+  (and (string? name) (edsl-member? edsl-world-tour name)))
+
+; A city the child named, or the next stop on a tour. #f leaves 城市
+; and 夜晚 to the built-in voice. Checked before that voice, because
+; 下一个城市 contains 城市 and 北京的夜晚 contains 夜晚.
+(define (edsl-steer text current)
+  (if (not (and (string? text) (> (string-length text) 0)))
+    #f
+    (let ((named (edsl-theme text)))
+      (if named named (edsl-tour-next text current)))))
+
 ; Named city, regional tour, or an unseen city. Built-in venues stay #f.
 (define (edsl-place text current)
   (if (not (and (string? text) (> (string-length text) 0)))
     #f
-    (let ((named (edsl-theme text)))
-      (if named
-        named
-        (let ((step (edsl-tour-next text current)))
-          (if step step (edsl-ask text)))))))
+    (let ((named (edsl-steer text current)))
+      (if named named (edsl-ask text)))))
 
 (define (edsl-join-props props)
   (let loop ((xs props) (acc ""))

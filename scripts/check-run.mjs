@@ -10,6 +10,7 @@ import {
   onLevelGate,
   seeCoin,
 } from "../web/runstate.mjs";
+import { preferHeard } from "../web/wish.mjs";
 
 let failed = 0;
 function check(name, ok) {
@@ -65,6 +66,10 @@ check("voice-mood", mood.mood === "night" && mood.biome === "space" && mood.comb
 
 const hop = applyVoice(mood, { act: "biome-next", name: "next" });
 check("voice-next", hop.biome === "coast" && hop.combo === 3 && hop.level === 2);
+
+check("heard-city", preferHeard(["去背景", "去北京"]) === "去北京");
+check("heard-top", preferHeard(["跑快点", "再快一点"]) === "跑快点");
+check("heard-tour", preferHeard(["下一个程序", "下一个城市"]) === "下一个城市");
 
 check("banner", evoLine(2, "city", 2, 1, "harder", "en") === "Level 2 · City · ×2 +1 · Trickier path");
 check("banner-zh", evoLine(2, "city", 2, 1, "harder", "zh") === "第2关 · 城市 · ×2 +1 · 路更难一点");

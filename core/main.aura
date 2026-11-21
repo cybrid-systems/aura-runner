@@ -2853,18 +2853,31 @@
 
 ; A novel place. A live model answers on its own fiber. With no key, or
 ; while that fiber is already busy, the themed recipe is gated at once.
+; A named city skips the model: the dream is a different place, and the
+; child asked for this one. An in-flight dream must not replace it.
 (define (edsl-hear! theme)
   (load-slow!)
-  (let ((preset (edsl-preset theme)))
-    (if (and llm-on edsl-req (not edsl-busy) (not edsl-working) (not (llm-posting?)))
-      (begin
-        (set! edsl-theme-now theme)
-        (set! edsl-hint theme)
-        (set! edsl-enter? #t)
-        (ask-edsl!))
-      (if (string? preset)
-        (consider-edsl! preset (edsl-banner (edsl-title theme)) #t #t)
-        #f))))
+  (let ((preset (edsl-preset theme))
+        (city? (edsl-tour-city? theme)))
+    (if (and city? (not (string? preset)))
+      #f
+      (if (and (not city?)
+               llm-on edsl-req (not edsl-busy) (not edsl-working) (not (llm-posting?)))
+        (begin
+          (set! edsl-theme-now theme)
+          (set! edsl-hint theme)
+          (set! edsl-enter? #t)
+          (ask-edsl!))
+        (begin
+          (if city?
+            (begin
+              (set! edsl-enter? #f)
+              (set! edsl-theme-now "")
+              (set! edsl-hint ""))
+            #f)
+          (if (string? preset)
+            (consider-edsl! preset (edsl-banner (edsl-title theme)) #t #t)
+            #f))))))
 
 (define (edsl-fallback! theme)
   (load-slow!)
@@ -3673,22 +3686,27 @@
         ((string=? text "") (wish-note! "ROLLBACK" "empty"))
         ((banned? text) (wish-note! "ROLLBACK" "banned"))
         (else
-         (let ((intent (voice-intent text)))
-           (if intent
-             (voice-apply! intent)
-             (let ((theme (edsl-place text biome-now)))
-               (if theme
-                 (edsl-hear! theme)
-                 (let ((row (wish-with-lang (wish-answer text sky-r sky-g sky-b) wish-locale)))
-               (if (not row)
-                 (wish-note! "ROLLBACK" "shape")
-                 (begin
-                   (apply-offline! row)
-                   (if (wish-waiting? (hash-ref row "arm" "scene"))
-                     (wish-note! "SAY" "soon")
-                     #f)))
-               (if (compose-wanted? text) (thing-show! text) #f)
-               (thing-start! text))))))))))
+         ; The city comes first. 下一个城市 contains 城市, and 北京的夜晚
+         ; contains 夜晚, so the built-in voice would land on the wrong place.
+         (let ((steer (edsl-steer text biome-now)))
+           (if steer
+             (edsl-hear! steer)
+             (let ((intent (voice-intent text)))
+               (if intent
+                 (voice-apply! intent)
+                 (let ((theme (edsl-place text biome-now)))
+                   (if theme
+                     (edsl-hear! theme)
+                     (let ((row (wish-with-lang (wish-answer text sky-r sky-g sky-b) wish-locale)))
+                       (if (not row)
+                         (wish-note! "ROLLBACK" "shape")
+                         (begin
+                           (apply-offline! row)
+                           (if (wish-waiting? (hash-ref row "arm" "scene"))
+                             (wish-note! "SAY" "soon")
+                             #f)))
+                       (if (compose-wanted? text) (thing-show! text) #f)
+                       (thing-start! text))))))))))))
   (flush-notes! c)
   (if rules-dirty
     (begin (send c (rules-msg)) (set! rules-dirty #f))

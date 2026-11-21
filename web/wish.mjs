@@ -2,6 +2,67 @@
 // Speech recognition only fills that text. Nothing here records audio
 // or posts it to the game server.
 
+// Names the recognizer confuses with ordinary words (背景, 程度, 伤害).
+// A hit among the alternatives wins over the top guess.
+export const CITY_PHRASES = [
+  "北京", "北平", "京城", "上海", "魔都", "申城", "杭州", "西湖", "杭城",
+  "成都", "蓉城", "西安", "长安", "重庆", "香港", "香江", "纽约",
+  "旧金山", "三藩市", "洛杉矶", "洛城", "巴黎", "花都", "伦敦", "罗马",
+  "威尼斯", "东京", "東京", "江户",
+  "下一个城市", "下个城市", "换个城市", "换一座城市", "另一座城市", "别的城市", "其他城市",
+  "中国城市", "美国城市", "欧洲城市", "环球旅行",
+  "beijing", "shanghai", "hangzhou", "chengdu", "xian", "chongqing", "hong kong",
+  "new york", "san francisco", "los angeles", "paris", "london", "venice", "tokyo",
+];
+
+export function mentionsCity(line) {
+  const text = String(line || "");
+  const low = text.toLowerCase();
+  return CITY_PHRASES.some((phrase) => {
+    if (/[\u4e00-\u9fff]/.test(phrase)) return text.includes(phrase);
+    const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`(?:^|[^a-z])${escaped}(?:[^a-z]|$)`).test(low);
+  });
+}
+
+export function preferHeard(alternatives) {
+  const list = [];
+  for (const raw of alternatives || []) {
+    const line = String(raw || "").trim();
+    if (line) list.push(line);
+  }
+  if (!list.length) return "";
+  for (const line of list) {
+    if (mentionsCity(line)) return line;
+  }
+  return list[0];
+}
+
+function altsOf(part) {
+  const out = [];
+  const n = part && typeof part.length === "number" ? part.length : 0;
+  for (let j = 0; j < n; j++) {
+    const bit = part[j] && part[j].transcript;
+    if (bit && String(bit).trim()) out.push(String(bit));
+  }
+  return out;
+}
+
+function biasCities(engine) {
+  const Phrase = typeof window !== "undefined" && window.SpeechRecognitionPhrase;
+  if (!Phrase || !engine) return;
+  try {
+    const phrases = CITY_PHRASES.map((phrase) => new Phrase(phrase, 5));
+    if (engine.phrases && typeof engine.phrases.push === "function") {
+      for (const phrase of phrases) engine.phrases.push(phrase);
+    } else {
+      engine.phrases = phrases;
+    }
+  } catch {
+    // Cloud recognition still runs when biasing is missing.
+  }
+}
+
 export function installWish({ send }) {
   const saidEl = document.getElementById("said");
   const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -61,13 +122,15 @@ export function installWish({ send }) {
     rec.continuous = true;
     rec.interimResults = true;
     rec.lang = "zh-CN";
+    rec.maxAlternatives = 5;
+    biasCities(rec);
     rec.onresult = (ev) => {
       let nextFinal = "";
       let nextInterim = "";
       const list = ev.results || [];
       for (let i = 0; i < list.length; i++) {
         const part = list[i];
-        const bit = part && part[0] ? part[0].transcript : "";
+        const bit = preferHeard(altsOf(part));
         if (part && part.isFinal) nextFinal += bit;
         else nextInterim += bit;
       }

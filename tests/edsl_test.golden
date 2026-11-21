@@ -39,3 +39,13 @@ place-next london
 place-china beijing
 place-guilin visit-china
 place-prague visit-stone
+steer-next london
+steer-bare 0
+steer-night beijing
+steer-swap shanghai
+steer-china beijing
+theme-peking beijing
+theme-mishear beijing
+theme-degree chengdu
+theme-harm 0
+theme-sf sanfrancisco
