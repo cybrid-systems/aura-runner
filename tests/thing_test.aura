@@ -43,7 +43,7 @@
 (report "gloomy" gloomy)
 (report "speck" speck)
 (report "none" "I could not think of one.")
-; Replies seen from MiniMax: the head word dropped, or the name in its place.
+; Replies seen from some models: the head word dropped, or the name in its place.
 (report "headless" "Here comes a donut! (pickup 1.1 (anim spin 0.08 1.2) (name donut) (part torus 0 0.5 0 0.8 0.8 0.8 0.7 0.2 1 0.2))")
 (report "named-head" "A donut! (doughnut pickup 1.2 (anim spin 0.08 1.2) (name doughnut) (part torus 0 0.5 0 0.8 0.8 0.8 0.6 0.2 0.9 0.2))")
 (report "other-head" "(dance pickup) (lambda x 1.2 (part box 0 0.5 0 0.5 0.5 0.5 1 1 1 0))")

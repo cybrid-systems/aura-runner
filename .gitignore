@@ -7,3 +7,7 @@ node_modules/
 # API answers from ./play.sh. Never commit a key.
 .env
 .env.*
+# Local settings (music folder, optional endpoint). See lumen.toml.example.
+lumen.toml
+__pycache__/
+*.pyc

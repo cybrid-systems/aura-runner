@@ -7,13 +7,18 @@ cd "$ROOT"
 
 git check-ignore -q -- .env
 git check-ignore -q -- .env.playtest
+git check-ignore -q -- lumen.toml
+if git check-ignore -q -- lumen.toml.example; then
+  echo "lumen.toml.example should stay in git" >&2
+  exit 1
+fi
 
-if [[ -e .env || -e .env.playtest ]]; then
-  echo "refusing to touch an existing .env or .env.playtest" >&2
+if [[ -e .env || -e .env.playtest || -e lumen.toml ]]; then
+  echo "refusing to touch an existing .env, .env.playtest, or lumen.toml" >&2
   exit 1
 fi
 cleanup() {
-  rm -f "$ROOT/.env" "$ROOT/.env.playtest"
+  rm -f "$ROOT/.env" "$ROOT/.env.playtest" "$ROOT/lumen.toml"
   local f
   for f in "$ROOT"/.env.??????; do
     [[ -e "$f" ]] || continue
@@ -36,7 +41,7 @@ rm -rf "$hide"
 printf '%s\n' "$out" | grep -q "Docker is not installed" || fail "missing docker message"
 printf '%s\n' "$out" | grep -q "https://www.docker.com/products/docker-desktop/" || fail "desktop link"
 printf '%s\n' "$out" | grep -q "https://orbstack.dev" || fail "orbstack link"
-if printf '%s\n' "$out" | grep -q "Paste the API key"; then
+if printf '%s\n' "$out" | grep -q "Paste a DeepSeek API key"; then
   fail "asked for a key before docker was installed"
 fi
 
@@ -50,7 +55,7 @@ chmod +x "$fake/docker"
 out="$(PATH="$fake:/usr/bin:/bin" ./play.sh 2>&1 || true)"
 printf '%s\n' "$out" | grep -q "not running" || fail "stopped docker message"
 printf '%s\n' "$out" | grep -q "https://orbstack.dev" || fail "stopped link"
-if printf '%s\n' "$out" | grep -q "Paste the API key"; then
+if printf '%s\n' "$out" | grep -q "Paste a DeepSeek API key"; then
   fail "asked for a key while docker was stopped"
 fi
 
@@ -65,9 +70,27 @@ rm -rf "$fake"
 
 if ./play.sh --help >/tmp/lumen-play-help.out 2>/tmp/lumen-play-help.err; then
   grep -q "\-\-setup" /tmp/lumen-play-help.err
+  grep -q "\-\-config" /tmp/lumen-play-help.err
 else
   fail "help"
 fi
+
+cfg_show="$(mktemp)"
+env_show="$(mktemp)"
+rm -f "$cfg_show" "$env_show"
+show_out="$(
+  env -u LLM_API_KEY -u LLM_BASE_URL -u LLM_MODEL \
+    -u LUMEN_MINIMAX_KEY -u LUMEN_MINIMAX_URL -u LUMEN_MINIMAX_MODEL \
+    -u LUMEN_DEEPSEEK_KEY -u LUMEN_LLM -u LUMEN_MUSIC_DIR \
+    LUMEN_ENV_FILE="$env_show" LUMEN_CONFIG="$cfg_show" LUMEN_ROOT="$ROOT" \
+    ./play.sh --config
+)"
+printf '%s\n' "$show_out" | grep -q "api key: not set" || fail "config did not say the key is unset"
+printf '%s\n' "$show_out" | grep -q "synthesized" || fail "config did not default to synthesized music"
+if printf '%s\n' "$show_out" | grep -q "Docker is not installed"; then
+  fail "config tried to start docker"
+fi
+rm -f "$cfg_show" "$env_show"
 
 # A local image is reused. The missing registry is not pulled, and a
 # lumen-run:local tag is published under the ghcr name.
@@ -109,12 +132,15 @@ rm -rf "$imgbin" "$imglog" "$imglog.tagged"
 rm -f "$ROOT/.env.playtest"
 
 python3 - "$ROOT" << 'PY'
-import os, pty, select, subprocess, sys, time, threading
+import os, pty, select, shutil, subprocess, sys, tempfile, time, threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 root = sys.argv[1]
 play = os.path.join(root, "play.sh")
 env_file = os.path.join(root, ".env.playtest")
+cfg_dir = tempfile.mkdtemp(prefix="lumen-play-cfg-")
+cfg = os.path.join(cfg_dir, "lumen.toml")
+NOTICE = "MiniMax is no longer a preset. Using saved API settings if present, otherwise playing offline."
 GOOD = "sk-test-lumen-not-real-7f3a"
 BAD = "sk-test-rejected-9c2b"
 
@@ -145,11 +171,25 @@ def redact(blob, extra=()):
             text = text.replace(secret, "[redacted]")
     return text
 
-def run(args, steps, timeout=12):
+def base_env(extra=None):
     env = os.environ.copy()
     env["LUMEN_PLAY_NO_RUN"] = "1"
     env["LUMEN_ENV_FILE"] = env_file
-    env.pop("LLM_API_KEY", None)
+    env["LUMEN_CONFIG"] = cfg
+    env["LUMEN_ROOT"] = root
+    env["LUMEN_PLAY_PROBE_URL"] = base
+    for name in (
+        "LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL",
+        "LUMEN_MINIMAX_KEY", "LUMEN_MINIMAX_URL", "LUMEN_MINIMAX_MODEL",
+        "LUMEN_DEEPSEEK_KEY", "LUMEN_LLM", "LUMEN_MUSIC_DIR", "LUMEN_MUSIC_ORDER",
+    ):
+        env.pop(name, None)
+    if extra:
+        env.update(extra)
+    return env
+
+def run(args, steps, timeout=12, extra=None):
+    env = base_env(extra)
     master, slave = pty.openpty()
     proc = subprocess.Popen(
         [play, *args],
@@ -242,40 +282,41 @@ def assert_hidden(blob, *secrets):
         if secret and secret in text:
             raise SystemExit("secret was shown\n" + redact(text, secrets))
 
-# Skip path. Enter, then Enter. No key is written.
+# Skip path. Enter on the key, Enter on the folder. No key is written.
 if os.path.exists(env_file):
     os.remove(env_file)
 code, out = run([], [
-    ("Which service?", b"\n"),
     ("Press Enter to play with AI features off:", b"\n"),
+    ("Music folder:", b"\n"),
     ("AI features are off", None),
 ])
 if code != 0:
     raise SystemExit("skip exit %s\n%s" % (code, redact(out)))
-if b"API address" in out:
-    raise SystemExit("skip asked for an address\n" + redact(out))
+if b"Which service?" in out or b"API address" in out or b"MiniMax" in out:
+    raise SystemExit("skip asked for a service menu\n" + redact(out))
 assert_mode(env_file)
 assert_ignored(env_file)
 if value(env_file, "LUMEN_LLM_OFF") != "1":
     raise SystemExit("skip marker missing; names %s" % names(env_file))
 if "LLM_API_KEY" in names(env_file):
     raise SystemExit("skip file has a key name")
+toml = open(cfg, encoding="utf-8").read()
+if any(line.startswith("music_dir ") or line.startswith("music_dir=") for line in toml.splitlines()):
+    raise SystemExit("skip saved a music folder\n" + toml)
 
 # A second run reuses the skip and does not ask.
 code, out = run([], [("AI features are off", None)])
 if code != 0:
     raise SystemExit("reuse exit %s\n%s" % (code, redact(out)))
-if b"Which service?" in out:
+if b"Music folder:" in out or b"Which service?" in out:
     raise SystemExit("reuse asked again\n" + redact(out))
 
-# MiniMax key, checked against the mock.
+# DeepSeek key, checked against the mock. The address is not a question.
 before = server.hits
 code, out = run(["--setup"], [
-    ("Which service?", b"1\n"),
     ("Press Enter to play with AI features off:", (GOOD + "\n").encode()),
-    ("API address", (base + "\n").encode()),
-    ("Model [", b"MiniMax-M3.1-Flash\n"),
     ("Key looks good", None),
+    ("Music folder:", b"\n"),
 ])
 if code != 0:
     raise SystemExit("ok exit %s\n%s" % (code, redact(out)))
@@ -288,22 +329,20 @@ if value(env_file, "LLM_API_KEY") != GOOD:
     raise SystemExit("LLM_API_KEY was not stored")
 if value(env_file, "LLM_BASE_URL") != base:
     raise SystemExit("base url was not stored")
-if value(env_file, "LLM_MODEL") != "MiniMax-M3.1-Flash":
-    raise SystemExit("model was not stored")
-if value(env_file, "LUMEN_LLM") != "minimax":
+if value(env_file, "LLM_MODEL") != "deepseek-flash":
+    raise SystemExit("model was not stored; names %s" % names(env_file))
+if value(env_file, "LUMEN_LLM") != "deepseek":
     raise SystemExit("provider was not stored")
-if value(env_file, "LUMEN_MINIMAX_KEY") != GOOD:
-    raise SystemExit("LUMEN_MINIMAX_KEY was not stored")
-if value(env_file, "LUMEN_MINIMAX_URL") != base:
-    raise SystemExit("minimax url was not stored")
-if "LUMEN_DEEPSEEK_KEY" in names(env_file):
-    raise SystemExit("deepseek key stored for minimax")
+if value(env_file, "LUMEN_DEEPSEEK_KEY") != GOOD:
+    raise SystemExit("deepseek key missing")
+if "LUMEN_MINIMAX_KEY" in names(env_file) or "MiniMax" in open(env_file, encoding="utf-8").read():
+    raise SystemExit("minimax left on a deepseek setup")
 saved = open(env_file, encoding="utf-8").read()
 
 # Reuse does not probe again and does not read a new key.
 hits = server.hits
 code, out = run([], [("Using the saved API setup", None)])
-if code != 0 or b"Which service?" in out:
+if code != 0 or b"Music folder:" in out or b"Which service?" in out:
     raise SystemExit("saved reuse failed\n" + redact(out))
 if server.hits != hits:
     raise SystemExit("reuse probed again")
@@ -312,99 +351,111 @@ if open(env_file, encoding="utf-8").read() != saved:
 
 # A rejected key is not saved over the good file, and is not shown.
 code, out = run(["--setup"], [
-    ("Which service?", b"1\n"),
     ("Press Enter to play with AI features off:", (BAD + "\n").encode()),
-    ("API address", (base + "\n").encode()),
-    ("Model [", b"MiniMax-M3.1-Flash\n"),
     ("That key was not accepted", None),
 ])
 if code == 0:
     raise SystemExit("auth failure exited 0")
 assert_hidden(out, BAD, GOOD)
+if b"Music folder:" in out:
+    raise SystemExit("auth failure asked for music\n" + redact(out))
 if open(env_file, encoding="utf-8").read() != saved:
     raise SystemExit("auth failure replaced the saved file")
 if BAD in open(env_file, encoding="utf-8").read():
     raise SystemExit("rejected key was written")
 
-# Unreachable address: nothing new is saved.
+# Unreachable DeepSeek: nothing new is saved.
 code, out = run(["--setup"], [
-    ("Which service?", b"3\n"),
     ("Press Enter to play with AI features off:", (GOOD + "\n").encode()),
-    ("API address", b"http://127.0.0.1:9/v1\n"),
-    ("Model [", b"gpt-4o-mini\n"),
-    ("Could not reach that service", None),
-])
+    ("Could not reach", None),
+], extra={"LUMEN_PLAY_PROBE_URL": "http://127.0.0.1:9/v1"})
 if code == 0:
     raise SystemExit("unknown probe exited 0")
 assert_hidden(out, GOOD)
 if open(env_file, encoding="utf-8").read() != saved:
     raise SystemExit("unreachable probe replaced the saved file")
 
-# DeepSeek names, then an OpenAI-compatible service with only LLM_*.
+# A music folder is saved in the config, mounted read-only, and the key stays masked.
+songs = os.path.join(cfg_dir, "my songs")
+os.makedirs(songs)
+open(os.path.join(songs, "one.mp3"), "wb").write(b"not-a-real-mp3")
 code, out = run(["--setup"], [
-    ("Which service?", b"2\n"),
     ("Press Enter to play with AI features off:", (GOOD + "\n").encode()),
-    ("API address", (base + "\n").encode()),
-    ("Model [", b"deepseek-flash\n"),
     ("Key looks good", None),
+    ("Music folder:", (songs + "\n").encode()),
+    ("will loop", None),
 ])
 if code != 0:
-    raise SystemExit("deepseek exit %s\n%s" % (code, redact(out)))
+    raise SystemExit("music exit %s\n%s" % (code, redact(out)))
 assert_hidden(out, GOOD)
-if value(env_file, "LUMEN_LLM") != "deepseek":
-    raise SystemExit("deepseek provider; names %s" % names(env_file))
-if value(env_file, "LUMEN_DEEPSEEK_KEY") != GOOD:
-    raise SystemExit("deepseek key missing")
+if value(env_file, "LUMEN_LLM") != "deepseek" or value(env_file, "LLM_MODEL") != "deepseek-flash":
+    raise SystemExit("music setup lost the deepseek preset")
 if "LUMEN_MINIMAX_KEY" in names(env_file):
-    raise SystemExit("minimax key left on a deepseek setup")
-assert_mode(env_file)
+    raise SystemExit("minimax key stored with music")
+toml = open(cfg, encoding="utf-8").read()
+if songs not in toml:
+    raise SystemExit("music folder was not saved\n" + toml)
+shown = subprocess.run(
+    [play, "--config"], cwd=root, env=base_env(), capture_output=True, text=True,
+)
+if shown.returncode != 0:
+    raise SystemExit("config exit %s\n%s" % (shown.returncode, shown.stderr))
+if GOOD in shown.stdout or GOOD in shown.stderr or BAD in shown.stdout:
+    raise SystemExit("config printed the key")
+if ("%d characters" % len(GOOD)) not in shown.stdout:
+    raise SystemExit("config did not mask the key\n" + shown.stdout)
+if "deepseek-flash" not in shown.stdout or songs not in shown.stdout:
+    raise SystemExit("config missing preset or folder\n" + shown.stdout)
+mounted = subprocess.run(
+    [sys.executable, os.path.join(root, "scripts/lumen_config.py"), "--docker-sh"],
+    cwd=root, env=base_env(), capture_output=True, text=True,
+)
+if mounted.returncode != 0:
+    raise SystemExit("docker-sh failed\n" + mounted.stderr)
+if ":/music:ro" not in mounted.stdout or songs not in mounted.stdout:
+    raise SystemExit("music folder was not mounted read-only\n" + mounted.stdout)
+if GOOD in mounted.stdout or GOOD in mounted.stderr:
+    raise SystemExit("docker args printed the key")
+container_env = os.path.join(cfg_dir, "container.env")
+held = subprocess.run(
+    [sys.executable, os.path.join(root, "scripts/lumen_config.py"), "--docker-sh", "--container-env", container_env],
+    cwd=root, env=base_env(), capture_output=True, text=True,
+)
+if held.returncode != 0 or GOOD in held.stdout:
+    raise SystemExit("container env command printed the key")
+inside = open(container_env, encoding="utf-8").read()
+if "LLM_API_KEY=%s" % GOOD not in inside or "LUMEN_MUSIC_DIR=/music" not in inside:
+    raise SystemExit("container env missing key or mount path")
+if "LUMEN_MINIMAX" in inside:
+    raise SystemExit("container env kept minimax")
+if (os.stat(container_env).st_mode & 0o777) != 0o600:
+    raise SystemExit("container env mode is not 0600")
 
-code, out = run(["--setup"], [
-    ("Which service?", b"3\n"),
-    ("Press Enter to play with AI features off:", (GOOD + "\n").encode()),
-    ("API address", (base + "\n").encode()),
-    ("Model [", b"\n"),
-    ("Key looks good", None),
-])
+# An old MiniMax .env does not crash. The generic key still counts, and the key is not shown.
+open(env_file, "w", encoding="utf-8").write(
+    "LLM_API_KEY=%s\nLLM_BASE_URL=%s\nLLM_MODEL=MiniMax-M3.1-Flash\nLUMEN_LLM=minimax\nLUMEN_MINIMAX_KEY=%s\n"
+    % (GOOD, base, BAD)
+)
+os.chmod(env_file, 0o600)
+code, out = run([], [("Using the saved API setup", None)])
 if code != 0:
-    raise SystemExit("other exit %s\n%s" % (code, redact(out)))
-assert_hidden(out, GOOD)
-if value(env_file, "LLM_MODEL") != "gpt-4o-mini":
-    raise SystemExit("other default model; names %s" % names(env_file))
-if "LUMEN_LLM" in names(env_file) or "LUMEN_MINIMAX_KEY" in names(env_file):
-    raise SystemExit("named provider stored for a generic service: %s" % names(env_file))
-assert_mode(env_file)
-assert_ignored(env_file)
-
-# A bad menu choice does not write.
-before_text = open(env_file, encoding="utf-8").read()
-code, out = run(["--setup"], [
-    ("Which service?", b"9\n"),
-    ("Type 1, 2, or 3", None),
-])
-if code == 0:
-    raise SystemExit("bad choice exited 0")
-if open(env_file, encoding="utf-8").read() != before_text:
-    raise SystemExit("bad choice rewrote the file")
+    raise SystemExit("old minimax exit %s\n%s" % (code, redact(out)))
+if NOTICE.encode() not in out:
+    raise SystemExit("old minimax did not explain itself\n" + redact(out))
+assert_hidden(out, GOOD, BAD)
 
 # Default .env path is ignored too. Skip into it, then status stays clean.
 os.remove(env_file)
-code, out = run([], [
-    ("Which service?", b"\n"),
-    ("Press Enter to play with AI features off:", b"\n"),
-    ("AI features are off", None),
-])
-# The case above used LUMEN_ENV_FILE. Check the default path separately.
-env = os.environ.copy()
-env["LUMEN_PLAY_NO_RUN"] = "1"
+default_cfg = os.path.join(cfg_dir, "default.toml")
+env = base_env()
 env.pop("LUMEN_ENV_FILE", None)
-env.pop("LLM_API_KEY", None)
+env["LUMEN_CONFIG"] = default_cfg
 master, slave = pty.openpty()
 proc = subprocess.Popen([play], stdin=slave, stdout=slave, stderr=slave, env=env, cwd=root)
 os.close(slave)
 out = b""
 replies = [b"\n", b"\n"]
-needles = [b"Which service?", b"Press Enter to play with AI features off:", b"AI features are off"]
+needles = [b"Press Enter to play with AI features off:", b"Music folder:", b"AI features are off"]
 step = 0
 deadline = time.time() + 12
 while time.time() < deadline and step < len(needles):
@@ -432,7 +483,10 @@ assert_ignored(default)
 if value(default, "LUMEN_LLM_OFF") != "1":
     raise SystemExit("default skip marker missing")
 os.remove(default)
+if os.path.exists(os.path.join(root, "lumen.toml")):
+    raise SystemExit("default skip wrote lumen.toml into the repo")
 
+shutil.rmtree(cfg_dir, ignore_errors=True)
 server.shutdown()
 print("play check ok")
 PY
@@ -441,6 +495,11 @@ git check-ignore -q -- .env
 status="$(git status --porcelain)"
 if printf '%s\n' "$status" | grep -E '(^|[ ])\.env($|[. ])' >/dev/null; then
   echo "env file is visible to git:" >&2
+  printf '%s\n' "$status" >&2
+  exit 1
+fi
+if printf '%s\n' "$status" | grep -E '(^|[ /])lumen\.toml$' >/dev/null; then
+  echo "lumen.toml is visible to git:" >&2
   printf '%s\n' "$status" >&2
   exit 1
 fi

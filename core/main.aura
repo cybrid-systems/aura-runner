@@ -3131,7 +3131,7 @@
     (list (provider-key llm-provider) (provider-url llm-provider) (active-model))
     (list (env-str "LLM_API_KEY")
           (let ((b (env-str "LLM_BASE_URL"))) (if (string=? b "") "https://api.deepseek.com/v1" b))
-          (let ((m (env-str "LLM_MODEL"))) (if (string=? m "") "deepseek-chat" m)))))
+          (let ((m (env-str "LLM_MODEL"))) (if (string=? m "") "deepseek-flash" m)))))
 
 (define (thing-chat sys user temp timeout-s ep)
   (let ((body (json-encode
@@ -4384,49 +4384,41 @@
 (define (provider-key name)
   (cond
     ((string=? name "deepseek") (env-str "LUMEN_DEEPSEEK_KEY"))
-    ((string=? name "minimax") (env-str "LUMEN_MINIMAX_KEY"))
     (else "")))
 
 (define (provider-url name)
   (cond
     ((string=? name "deepseek") (env-str "LUMEN_DEEPSEEK_URL"))
-    ((string=? name "minimax") (env-str "LUMEN_MINIMAX_URL"))
     (else "")))
 
 (define (provider-model name fallback)
   (let ((m (cond
              ((string=? name "deepseek") (env-str "LUMEN_DEEPSEEK_MODEL"))
-             ((string=? name "minimax") (env-str "LUMEN_MINIMAX_MODEL"))
              (else ""))))
     (if (string=? m "") fallback m)))
 
 (define (provider-ready? name)
-  (and (or (string=? name "deepseek") (string=? name "minimax"))
+  (and (string=? name "deepseek")
        (> (string-length (provider-key name)) 0)
        (> (string-length (provider-url name)) 0)))
 
 (define (ready-providers)
-  (let ((xs (list)))
-    (if (provider-ready? "deepseek") (set! xs (append xs (list "deepseek"))) #f)
-    (if (provider-ready? "minimax") (set! xs (append xs (list "minimax"))) #f)
-    xs))
+  (if (provider-ready? "deepseek") (list "deepseek") (list)))
 
 (define (choose-provider)
   (let ((want (env-str "LUMEN_LLM")))
     (cond
       ((provider-ready? want) want)
       ((provider-ready? "deepseek") "deepseek")
-      ((provider-ready? "minimax") "minimax")
       (else ""))))
 
 (define (active-model)
   (cond
-    ((string=? llm-provider "minimax") (provider-model "minimax" "MiniMax-M3.1-Flash"))
     ((string=? llm-provider "deepseek") (provider-model "deepseek" "deepseek-flash"))
     (else (env-str "LLM_MODEL"))))
 
 (define (provider-label name)
-  (if (string=? name "minimax") "Now asking MiniMax" "Now asking DeepSeek"))
+  (if (string=? name "deepseek") "Now asking DeepSeek" "Now asking DeepSeek"))
 
 (define (on-provider c msg)
   (let ((name (hash-ref msg "name" "")))

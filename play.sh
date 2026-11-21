@@ -1,22 +1,24 @@
 #!/usr/bin/env bash
 # One command from a fresh Mac to a browser tab.
-# Asks for an API key the first time, saves it in .env (mode 0600), and
-# starts the Lumen Run image. Press Enter to play with AI features off.
+# Asks for a DeepSeek key the first time, saves it in .env (mode 0600),
+# and can remember a folder of your own songs in lumen.toml.
+# Press Enter on the key to play with AI features off.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
 ENV_FILE="${LUMEN_ENV_FILE:-$ROOT/.env}"
+CONFIG_FILE="${LUMEN_CONFIG:-$ROOT/lumen.toml}"
+export LUMEN_ENV_FILE="$ENV_FILE"
+export LUMEN_CONFIG="$CONFIG_FILE"
+export LUMEN_ROOT="$ROOT"
 IMAGE="${LUMEN_IMAGE:-ghcr.io/cybrid-systems/aura-runner:latest}"
 LOCAL_IMAGE="${LUMEN_LOCAL_IMAGE:-lumen-run:local}"
-MINIMAX_URL="https://api.minimaxi.com/v1"
-MINIMAX_MODEL="MiniMax-M3.1-Flash"
 DEEPSEEK_URL="https://api.deepseek.com/v1"
 DEEPSEEK_MODEL="deepseek-flash"
-OTHER_URL="https://api.openai.com/v1"
-OTHER_MODEL="gpt-4o-mini"
 
 tmp_env=""
+run_env=""
 container_name=""
 run_pid=""
 stopping=0
@@ -39,6 +41,10 @@ stop_game() {
     rm -f "$tmp_env"
     tmp_env=""
   fi
+  if [[ -n "${run_env}" && -f "${run_env}" ]]; then
+    rm -f "$run_env"
+    run_env=""
+  fi
 }
 # HUP covers closing the terminal. SIGKILL cannot be caught; the next
 # start removes a leftover lumen-run-* container.
@@ -49,18 +55,22 @@ trap 'stop_game; exit 143' TERM
 
 usage() {
   cat >&2 << 'EOF'
-Usage: ./play.sh [--setup]
+Usage: ./play.sh [--setup] [--config]
 
 Starts Lumen Run in Docker and opens it in your browser.
-The first time, it asks which AI service to use. Press Enter to skip.
+The first time, it asks for a DeepSeek API key and, if you want, a music folder.
+Press Enter on the key to play with AI features off.
 --setup asks again and replaces the saved answers.
+--config prints the current settings. The API key is shown only as a length.
 EOF
 }
 
 setup=0
+show_config=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --setup) setup=1 ;;
+    --config) show_config=1 ;;
     -h|--help) usage; exit 0 ;;
     *)
       say "Unknown option: $1"
@@ -70,6 +80,16 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
+
+if [[ "$setup" -eq 1 && "$show_config" -eq 1 ]]; then
+  say "Use either --setup or --config."
+  usage
+  exit 1
+fi
+
+if [[ "$show_config" -eq 1 ]]; then
+  exec python3 "$ROOT/scripts/lumen_config.py" --show
+fi
 
 no_run=0
 if [[ "${LUMEN_PLAY_NO_RUN:-}" == 1 ]]; then
@@ -193,30 +213,20 @@ save_skip() {
 }
 
 save_key() {
-  local provider="$1" key="$2" url="$3" model="$4"
-  local lines
-  lines="$(printf '%s\n' \
+  local key="$1" url="$2" model="$3"
+  write_file "$(printf '%s\n' \
     '# Lumen Run API setup. Git ignores this file. Do not share it.' \
     "LLM_API_KEY=${key}" \
     "LLM_BASE_URL=${url}" \
-    "LLM_MODEL=${model}")"
-  case "$provider" in
-    minimax)
-      lines="$(printf '%s\n' "$lines" \
-        'LUMEN_LLM=minimax' \
-        "LUMEN_MINIMAX_KEY=${key}" \
-        "LUMEN_MINIMAX_URL=${url}" \
-        "LUMEN_MINIMAX_MODEL=${model}")"
-      ;;
-    deepseek)
-      lines="$(printf '%s\n' "$lines" \
-        'LUMEN_LLM=deepseek' \
-        "LUMEN_DEEPSEEK_KEY=${key}" \
-        "LUMEN_DEEPSEEK_URL=${url}" \
-        "LUMEN_DEEPSEEK_MODEL=${model}")"
-      ;;
-  esac
-  write_file "$lines"
+    "LLM_MODEL=${model}" \
+    'LUMEN_LLM=deepseek' \
+    "LUMEN_DEEPSEEK_KEY=${key}" \
+    "LUMEN_DEEPSEEK_URL=${url}" \
+    "LUMEN_DEEPSEEK_MODEL=${model}")"
+}
+
+config_py() {
+  python3 "$ROOT/scripts/lumen_config.py" "$@"
 }
 
 probe_key() {
@@ -232,87 +242,87 @@ probe_key() {
   esac
 }
 
-ask_setup() {
-  say "Lumen Run can invent new worlds with an AI service. You can skip this and still play."
-  say ""
-  say "Which service?"
-  say "  1) MiniMax"
-  say "  2) DeepSeek"
-  say "  3) Another OpenAI-compatible service"
-  printf 'Press Enter for MiniMax: ' >&2
-  read_line 0
-  local choice provider url_default model_default
-  choice="$(printf '%s' "$REPLY" | tr '[:upper:]' '[:lower:]')"
-  case "$choice" in
-    ""|1|minimax|mini) provider="minimax"; url_default="$MINIMAX_URL"; model_default="$MINIMAX_MODEL" ;;
-    2|deepseek) provider="deepseek"; url_default="$DEEPSEEK_URL"; model_default="$DEEPSEEK_MODEL" ;;
-    3|other|openai|custom) provider="other"; url_default="$OTHER_URL"; model_default="$OTHER_MODEL" ;;
-    *)
-      say "Type 1, 2, or 3, or press Enter for MiniMax."
-      exit 1
-      ;;
-  esac
+finish_without_key() {
+  save_skip
+  say "AI features are off. The game still runs."
+  say "Run ./play.sh --setup later if you get a key."
+}
 
+ask_music() {
   say ""
-  say "Paste the API key. It stays hidden and is not saved in git."
-  read_secret "Press Enter to play with AI features off: "
-  local key="$REPLY"
-  if [[ -z "$key" ]]; then
-    save_skip
-    say "AI features are off. The game still runs."
-    say "Run ./play.sh --setup later if you get a key."
+  say "Optional: a folder of your own songs (mp3, ogg, wav, m4a, or flac)."
+  say "They loop in the game. Leave this blank to keep the synthesized music."
+  printf 'Music folder: ' >&2
+  read_line 0
+  local folder="$REPLY"
+  if [[ -z "$folder" ]]; then
+    config_py --write-music ""
     return 0
   fi
-  if [[ "$key" == *$'\n'* ]]; then
-    say "That key has a line break in it. Paste it as one line. Nothing was saved."
-    exit 1
+  local music_msg music_rc
+  music_rc=0
+  music_msg="$(config_py --check-music "$folder")" || music_rc=$?
+  if [[ "$music_rc" -ne 0 ]]; then
+    say "$music_msg"
+    say "That folder was not saved."
+    return 0
   fi
+  config_py --write-music "$folder"
+  say "$music_msg"
+}
 
+ask_setup() {
+  config_py --notice
+  say "Lumen Run can invent new worlds with DeepSeek. You can skip this and still play."
   say ""
-  printf 'API address [%s]\n' "$url_default" >&2
-  printf 'Press Enter for the one in brackets: ' >&2
-  read_line 0
-  local url="${REPLY:-$url_default}"
-  url="${url%/}"
-  case "$url" in
-    http://*|https://*) ;;
-    *)
-      say "The address should start with http:// or https://. Nothing was saved."
-      exit 1
-      ;;
-  esac
-
-  printf 'Model [%s]\n' "$model_default" >&2
-  printf 'Press Enter for the one in brackets: ' >&2
-  read_line 0
-  local model="${REPLY:-$model_default}"
-  if [[ -z "$model" ]]; then
-    say "The model name was empty. Nothing was saved."
-    exit 1
+  say "Paste a DeepSeek API key. It stays hidden and is not saved in git."
+  read_secret "Press Enter to play with AI features off: "
+  local key="$REPLY"
+  local url="$DEEPSEEK_URL"
+  local model="$DEEPSEEK_MODEL"
+  if [[ -n "${LUMEN_PLAY_PROBE_URL:-}" ]]; then
+    url="${LUMEN_PLAY_PROBE_URL%/}"
   fi
-
-  say "Checking the key…"
-  local status
-  status="$(probe_key "$url" "$key" "$model")"
-  case "$status" in
-    ok)
-      save_key "$provider" "$key" "$url" "$model"
-      say "Key looks good. Saved on this computer."
-      ;;
-    auth)
-      say "That key was not accepted. Check the key and the address, then run ./play.sh --setup again. Nothing was saved."
+  if [[ -n "${LUMEN_PLAY_PROBE_MODEL:-}" ]]; then
+    model="$LUMEN_PLAY_PROBE_MODEL"
+  fi
+  if [[ -n "$key" ]]; then
+    if [[ "$key" == *$'\n'* ]]; then
+      say "That key has a line break in it. Paste it as one line. Nothing was saved."
       exit 1
-      ;;
-    *)
-      say "Could not reach that service to check the key. Check the address and your network, then run ./play.sh --setup again. Nothing was saved."
-      exit 1
-      ;;
-  esac
+    fi
+    say "Checking the key…"
+    local status
+    status="$(probe_key "$url" "$key" "$model")"
+    case "$status" in
+      ok)
+        save_key "$key" "$url" "$model"
+        say "Key looks good. Saved on this computer."
+        ;;
+      auth)
+        say "That key was not accepted. Check the key, then run ./play.sh --setup again. Nothing was saved."
+        exit 1
+        ;;
+      *)
+        say "Could not reach DeepSeek to check the key. Check your network, then run ./play.sh --setup again. Nothing was saved."
+        exit 1
+        ;;
+    esac
+  fi
+  ask_music
+  if [[ -z "$key" ]]; then
+    finish_without_key
+  fi
 }
 
 if [[ "$setup" -eq 1 || ! -s "$ENV_FILE" ]]; then
   ask_setup
 else
+  config_py --notice
+  music_line="$(config_py --music-line || true)"
+  if [[ -n "$music_line" ]]; then
+    say "$music_line"
+  fi
   if llm_off_saved; then
     say "AI features are off. The game still runs. Run ./play.sh --setup to add a key."
   else
@@ -436,12 +446,25 @@ url="http://127.0.0.1:${port}"
 container_name="lumen-run-${port}-$$"
 
 say "Starting the game…"
-# Attached, not -d. Closing the terminal sends SIGHUP to this client,
-# and the traps below remove the container if that is not enough.
-docker run --rm --name "$container_name" \
-  -p "127.0.0.1:${port}:8080" \
-  --env-file "$ENV_FILE" \
-  "$IMAGE" &
+# The container sees a mode 0600 env file built from the saved settings.
+# A music folder is mounted read-only at /music. The key is not on the
+# command line. Attached, not -d, so closing the terminal stops the game.
+run_env="$(mktemp)"
+chmod 600 "$run_env"
+music_mount=()
+music_order="shuffle"
+llm_on=0
+llm_base=""
+llm_model=""
+docker_sh="$(config_py --docker-sh --container-env "$run_env")"
+# shellcheck disable=SC2086
+eval "$docker_sh"
+args=(docker run --rm --name "$container_name" -p "127.0.0.1:${port}:8080" --env-file "$run_env")
+if [[ ${#music_mount[@]} -gt 0 ]]; then
+  args+=("${music_mount[@]}")
+fi
+args+=("$IMAGE")
+"${args[@]}" &
 run_pid=$!
 
 wait_ready() {
@@ -592,7 +615,21 @@ say "Tap or space jumps, down slides, left and right change lane."
 say "Press Ctrl-C to stop."
 say ""
 say "Copy this if you want to start it yourself later:"
-printf 'docker run --rm -p 127.0.0.1:%s:8080 --env-file %q %q\n' "$port" "$ENV_FILE" "$IMAGE" >&2
+print_replay() {
+  printf 'docker run --rm -p 127.0.0.1:%s:8080 --env-file %q' "$port" "$ENV_FILE"
+  if [[ "${llm_on:-0}" -eq 1 ]]; then
+    printf ' -e %q -e %q' "LLM_BASE_URL=${llm_base}" "LLM_MODEL=${llm_model}"
+  fi
+  if [[ ${#music_mount[@]} -gt 0 ]]; then
+    local a
+    for a in "${music_mount[@]}"; do
+      printf ' %q' "$a"
+    done
+    printf ' -e %q -e %q' "LUMEN_MUSIC_DIR=/music" "LUMEN_MUSIC_ORDER=${music_order}"
+  fi
+  printf ' %q\n' "$IMAGE"
+}
+print_replay >&2
 
 code=0
 wait "$run_pid" || code=$?

@@ -43,6 +43,7 @@ jobs:
           node --check web/hearts.mjs
           node --check web/race.mjs
           node --check bridge/server.mjs
+          node --check bridge/musiclib.mjs
           node --check scripts/smoke.mjs
           node --check scripts/check-sim.mjs
           node --check scripts/check-lanes.mjs
@@ -59,6 +60,8 @@ jobs:
           node --check scripts/check-play.mjs
           node --check scripts/check-probe.mjs
           node --check scripts/check-music.mjs
+          node --check scripts/check-musicdir.mjs
+          node --check scripts/check-config.mjs
           node --check scripts/check-voice.mjs
       - name: Physics parity with the Aura golden
         run: node scripts/check-sim.mjs
@@ -76,6 +79,10 @@ jobs:
         run: node scripts/check-probe.mjs
       - name: Tune bounds, phrase gate, and missing-file bed
         run: node scripts/check-music.mjs
+      - name: Settings file, key masking, and music mount
+        run: node scripts/check-config.mjs
+      - name: Music folder discovery and local playback files
+        run: node scripts/check-musicdir.mjs
       - name: Soft voice stays on one pitch
         run: node scripts/check-voice.mjs
 
