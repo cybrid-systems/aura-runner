@@ -87,6 +87,66 @@ export function litSky(src) {
 }
 
 const HIGH_FNS = `
+vec3 surfaceDetail(vec3 col, float dist) {
+  // Coarse on purpose. Fine grain aliases once the road starts moving.
+  // Marks fade by 20 m, where a seam would be only a few pixels tall.
+  float fade = 1.0 - smoothstep(8.0, 20.0, dist);
+  if (fade < 0.03) return col;
+  bool slab = vHalf.y < 0.1 && vHalf.x > 0.7 && vRough > 0.4 && vRough < 0.72 && vKind < 0.5;
+  bool dash = abs(vL.x) < 0.045 && abs(vL.z) < 0.24;
+  bool curb = abs(vL.x) > 0.38;
+  if (slab && !dash && !curb) {
+    float along = vL.z * vHalf.z * 2.0;
+    float across = vL.x * vHalf.x * 2.0;
+    vec3 next = col;
+    if (uGround < 0.5) {
+      vec2 uv = vec2(across * 1.1, along * 0.62);
+      vec2 cell = floor(uv);
+      vec2 f = abs(fract(uv) - 0.5);
+      float n = fract(sin(dot(cell, vec2(127.1, 311.7))) * 43758.5);
+      float mortar = smoothstep(0.34, 0.46, max(f.x, f.y));
+      next *= 0.92 + 0.1 * n;
+      next = mix(next, next * vec3(0.62, 0.58, 0.52), mortar * 0.55);
+    } else if (uGround < 1.5) {
+      float lane = smoothstep(0.22, 0.02, abs(abs(across) - 0.28));
+      float crack = smoothstep(0.025, 0.0, abs(fract(along * 0.23 + across * 0.05) - 0.5));
+      next *= 1.0 - lane * 0.1;
+      next = mix(next, next * vec3(0.4, 0.41, 0.44), crack * 0.5);
+    } else if (uGround < 2.5) {
+      float streak = 0.5 + 0.5 * sin(across * 7.0 + along * 0.22);
+      next = mix(next, next * vec3(0.84, 0.92, 1.0) + vec3(0.05, 0.07, 0.1), streak * 0.38);
+    } else if (uGround < 3.5) {
+      float rib = 0.5 + 0.5 * sin(across * 2.4 + along * 0.18);
+      next *= 0.9 + 0.12 * rib;
+    } else if (uGround < 4.5) {
+      float board = floor(across * 2.1);
+      float seam = smoothstep(0.38, 0.48, abs(fract(across * 2.1) - 0.5));
+      float grain = fract(sin(board * 17.1) * 43758.5);
+      next *= 0.9 + 0.1 * grain;
+      next = mix(next, next * 0.66, seam * 0.7);
+    } else if (uGround < 5.5) {
+      vec2 uv = vec2(across * 0.85, along * 0.55);
+      vec2 f = abs(fract(uv) - 0.5);
+      float crack = smoothstep(0.36, 0.46, max(f.x, f.y));
+      next = mix(next, vec3(1.0, 0.38, 0.06), crack * 0.5);
+    } else {
+      float blob = 0.5 + 0.5 * sin(across * 1.8) * sin(along * 1.3 + 0.6);
+      next = mix(next, next * vec3(0.92, 0.95, 1.0) + vec3(0.05), blob * 0.45);
+    }
+    float wear = smoothstep(0.46, 0.06, abs(across));
+    next *= 1.0 - wear * 0.06;
+    return mix(col, next, fade);
+  }
+  if (vRough > 0.72 && vKind < 0.5 && vHalf.x > 0.22 && vHalf.z > 0.3 && vHalf.y < 0.7) {
+    float clump = sin(vW.x * 0.7 + vCenter.z * 0.15) * sin(vW.z * 0.52);
+    return mix(col, col * (0.9 + 0.12 * clump), fade);
+  }
+  if (vShape > 0.5 && vShape < 1.5 && vRough > 0.6 && vRough < 0.74 && vHalf.x > 0.3) {
+    float leaf = sin(vW.x * 1.5 + vW.y * 1.8) * sin(vW.z * 1.4 + vW.y);
+    return mix(col, col * (0.88 + 0.16 * leaf), fade);
+  }
+  return col;
+}
 vec3 highShade(vec3 col, vec3 fogCol, float fog, float dist) {
   vec3 haze = mix(fogCol, uHaze, clamp(uAerial, 0.0, 1.0) * 0.7);
   float aerial = min(fog * (1.0 + uAerial * 0.55), 0.34 + uAerial * 0.18);
@@ -103,7 +163,7 @@ float highGloss(float rough, float kind, vec3 halfE, vec3 local) {
 }
 `;
 
-const HIGH_OUT = `vec3 hiCol = highShade(col, uFog, fog, dist);
+const HIGH_OUT = `vec3 hiCol = highShade(surfaceDetail(col, dist), uFog, fog, dist);
   float hiG = highGloss(vRough, vKind, vHalf, vL);
   if (hiG > 0.04 && vHalf.y < 0.12) {
     hiCol *= vec3(0.86, 0.91, 0.98);
@@ -119,7 +179,7 @@ export function highFragment(src) {
   if (!out.includes("uniform float uPcf;")) throw new Error("high shader pcf missing");
   out = out.replace(
     "uniform float uPcf;\n",
-    "uniform float uPcf;\nuniform float uPenumbra;\nuniform float uAerial;\nuniform float uGloss;\nuniform vec3 uHaze;\n",
+    "uniform float uPcf;\nuniform float uPenumbra;\nuniform float uAerial;\nuniform float uGloss;\nuniform float uGround;\nuniform vec3 uHaze;\n",
   );
   out = out.replace(
     "vec2 texel = 1.0 / vec2(textureSize(uShadowMap, 0));\n",

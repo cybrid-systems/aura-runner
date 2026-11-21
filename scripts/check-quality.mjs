@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { DT, makePlayer, rulesOf, step } from "../web/sim.mjs";
 import { highFragment, highSky, litAnchorsOk, litFragment, litSky, LIGHT_LINE } from "../web/lit.mjs";
 import { invertMat, meshSources } from "../web/render.mjs";
-import { BLUR_TAP_PX, blurAmount, blurTapPx, fovKick, glossFor, heroShape, laneEase, sceneGrade, shakeOffset, sunScreen, whooshNudge } from "../web/feel.mjs";
+import { BLUR_TAP_PX, blurAmount, blurTapPx, fovKick, glossFor, groundId, heroShape, laneEase, sceneGrade, shakeOffset, sunScreen, whooshNudge } from "../web/feel.mjs";
 import {
   DEFAULT_POLICY,
   POLICY_TEXT,
@@ -415,8 +415,16 @@ assert(!sky.includes("uSkyAnim"), "the knee sample stays plain");
 assert(litAnchorsOk(meshSources()), "live mesh shaders accept the lit variant");
 const highBox = highFragment(meshSources()[1]);
 assert(highBox.includes("uGloss") && highBox.includes("uPenumbra") && highBox.includes("highShade"), "high mesh adds gloss, penumbra, and haze");
+assert(highBox.includes("surfaceDetail") && highBox.includes("uGround") && highBox.includes("smoothstep(8.0, 20.0, dist)"), "high road detail is coarse and fades by 20 m");
 assert(!litFragment(meshSources()[1]).includes("uGloss"), "the medium lit shader has no gloss");
 assert(!meshSources()[1].includes("uGloss"), "the low box shader has no gloss");
+assert(!meshSources()[1].includes("surfaceDetail") && !litFragment(meshSources()[1]).includes("uGround"), "low and medium keep a plain road");
+assert(groundId({ biome: "garden", surface: "grass" }) === 0, "garden path is flagstone");
+assert(groundId({ biome: "city", surface: "stone", particles: "snow" }) === 1, "a city stays asphalt");
+assert(groundId({ biome: "aurora-ice" }) === 2 && groundId({ surface: "ice" }) === 2, "ice");
+assert(groundId({ surface: "sand" }) === 3 && groundId({ surface: "dust" }) === 3, "sand");
+assert(groundId({ surface: "plank" }) === 4 && groundId({ surface: "lava" }) === 5 && groundId({ surface: "cloud" }) === 6, "plank lava cloud");
+assert(groundId(null) === 0, "missing palette is flagstone");
 const knee = `uniform float uFlash;
 void main() {
   vec3 over = max(c - vec3(0.9), vec3(0.0));

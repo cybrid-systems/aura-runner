@@ -135,6 +135,21 @@ export function heroShape(air, land, lean, tier) {
   };
 }
 
+// High road pattern. 0 flagstone, 1 asphalt, 2 ice, 3 sand,
+// 4 planks, 5 lava, 6 cloud. A city stays asphalt in the snow.
+export function groundId(pal) {
+  const src = pal || {};
+  const surface = typeof src.surface === "string" ? src.surface : "";
+  const biome = typeof src.biome === "string" ? src.biome : "";
+  if (biome === "city") return 1;
+  if (biome === "aurora-ice" || surface === "ice" || src.particles === "snow" || src.body === "aurora") return 2;
+  if (surface === "sand" || surface === "dust") return 3;
+  if (surface === "plank") return 4;
+  if (surface === "lava") return 5;
+  if (surface === "cloud") return 6;
+  return 0;
+}
+
 // 1 on an icy road, 0.85 on a city road, 0 everywhere else.
 // High multiplies this by the reflect budget. Medium stays at 0.
 export function glossFor(pal) {

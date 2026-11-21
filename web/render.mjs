@@ -1,7 +1,7 @@
 import { drawThing, growOf, animOf, showBox } from "./thing.mjs";
 import { DEPTH_FS, highFragment, highSky, litFragment, litSky } from "./lit.mjs";
 import { POST_SOURCES, createPost, probeFloat, shaderCompiler } from "./post.mjs";
-import { blurAmount, fovKick, glossFor, heroShape, laneEase, sceneGrade, shakeOffset, sunScreen, whooshNudge } from "./feel.mjs";
+import { blurAmount, fovKick, glossFor, groundId, heroShape, laneEase, sceneGrade, shakeOffset, sunScreen, whooshNudge } from "./feel.mjs";
 import { skimmed } from "./score.mjs";
 import {
   DEFAULT_POLICY, bindContextLoss, contextPlan, createQuality, noteFbo,
@@ -1302,6 +1302,7 @@ export function createRenderer(canvas, hooks) {
       penumbra: gl.getUniformLocation(prog, "uPenumbra"),
       aerial: gl.getUniformLocation(prog, "uAerial"),
       gloss: gl.getUniformLocation(prog, "uGloss"),
+      ground: gl.getUniformLocation(prog, "uGround"),
       haze: gl.getUniformLocation(prog, "uHaze"),
     };
   }
@@ -3736,6 +3737,7 @@ export function createRenderer(canvas, hooks) {
         gl.uniform1f(locs.aerial, activeProfile.aerial || 0);
         const gloss = activeProfile.tier === "high" ? glossFor(pal) : 0;
         gl.uniform1f(locs.gloss, gloss);
+        if (locs.ground) gl.uniform1f(locs.ground, groundId(pal));
         const haze = pal.sky || pal.fog || [0.7, 0.8, 0.9];
         gl.uniform3f(locs.haze, haze[0] || 0, haze[1] || 0, haze[2] || 0);
       }
