@@ -5,7 +5,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import net from "node:net";
 import { fileURLToPath } from "node:url";
-import { discoverMusic, mimeFor, musicOrder, trackByName } from "./musiclib.mjs";
+import { mimeFor, musicFromEnv, musicOrder, trackByName } from "./musiclib.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const web = path.join(root, "web");
@@ -16,7 +16,12 @@ const auraPort = Number(process.env.AURA_RUNNER_PORT || 8765);
 const musicFile = process.env.LUMEN_MUSIC
   || "/home/dev/code/symphony/symphony_no_29_in_a_major_k_201.mp4";
 const musicDir = process.env.LUMEN_MUSIC_DIR || "";
+const musicReason = process.env.LUMEN_MUSIC_REASON || "";
 const trackOrder = musicOrder(process.env.LUMEN_MUSIC_ORDER);
+
+function currentMusic() {
+  return musicFromEnv(musicDir, musicReason);
+}
 const mime = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -200,7 +205,7 @@ const server = http.createServer((req, res) => {
     return;
   }
   if (rel === "/music.json") {
-    const found = discoverMusic(musicDir);
+    const found = currentMusic();
     const tracks = found.ok
       ? found.tracks.map((row) => ({ name: row.name, url: row.url }))
       : [];
@@ -222,7 +227,7 @@ const server = http.createServer((req, res) => {
   }
   if (rel.startsWith("/music/t/")) {
     const name = rel.slice("/music/t/".length);
-    const found = discoverMusic(musicDir);
+    const found = currentMusic();
     const track = trackByName(found, name);
     if (!track) {
       res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
@@ -273,7 +278,7 @@ server.on("upgrade", (req, socket) => {
 // 127.0.0.1 keeps ./run.sh on this machine. The container sets
 // AURA_RUNNER_BIND=0.0.0.0 so Docker's published port can reach the page.
 const bindHost = process.env.AURA_RUNNER_BIND || "127.0.0.1";
-const musicAtBoot = discoverMusic(musicDir);
+const musicAtBoot = currentMusic();
 if (musicAtBoot.message) console.log(musicAtBoot.message);
 else if (musicAtBoot.ok) console.log(`music: ${musicAtBoot.tracks.length} tracks from ${musicAtBoot.folder} (${trackOrder})`);
 else console.log("music: synthesized");

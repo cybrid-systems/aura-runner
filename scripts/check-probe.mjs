@@ -105,6 +105,19 @@ try {
   if (!closed.out.includes("MODEL=deepseek-flash")) throw new Error("unconfirmed\n" + closed.out + closed.err);
   if (!closed.err.includes("unconfirmed")) throw new Error("unconfirmed status\n" + closed.err);
 
+  const beforeOff = mock.hits.n;
+  const skipped = await run(baseEnv({
+    LUMEN_LLM_OFF: "1",
+    DEEPSEEK_KEY_FILE: deepFile,
+    DEEPSEEK_BASE_URL: mock.base,
+  }));
+  if (mock.hits.n !== beforeOff) throw new Error("skip still probed the key file");
+  if (!skipped.out.startsWith("MODEL=\n") || skipped.out.includes("PROV=deepseek")) {
+    throw new Error("skip turned AI on\n" + skipped.out);
+  }
+  if (!skipped.err.includes("AI features are off")) throw new Error("skip status\n" + skipped.err);
+  assertNoSecret(skipped.out + skipped.err, "deep-test-key", "skip printed the key file");
+
   const offline = await run(baseEnv({
     DEEPSEEK_KEY_FILE: missing,
     LUMEN_LLM: "minimax",

@@ -28,6 +28,13 @@ configure_llm() {
     echo "llm: using LLM_API_KEY from the environment" >&2
     return 0
   fi
+  # ./play.sh writes LUMEN_LLM_OFF=1 when the key prompt is skipped.
+  # That choice beats ~/code/keys/deepseek and DEEPSEEK_KEY_FILE.
+  if [[ "${LUMEN_LLM_OFF:-}" == "1" ]]; then
+    unset LUMEN_DEEPSEEK_KEY LUMEN_DEEPSEEK_URL LUMEN_DEEPSEEK_MODEL LUMEN_LLM
+    echo "llm: offline (AI features are off)" >&2
+    return 0
+  fi
 
   unset LUMEN_DEEPSEEK_KEY LUMEN_DEEPSEEK_URL LUMEN_DEEPSEEK_MODEL
   unset LLM_API_KEY LLM_BASE_URL LLM_MODEL

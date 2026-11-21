@@ -115,6 +115,25 @@ export function discoverMusic(value) {
   return { ok: true, reason: "ok", message: "", tracks, folder };
 }
 
+// Docker cannot see a host path that was never mounted. ./play.sh passes
+// LUMEN_MUSIC_REASON so the in-game notice stays the same as on the host.
+const FORCED_REASONS = new Set(["missing", "not-dir", "unreadable"]);
+
+export function musicFromEnv(dir, reason) {
+  const forced = String(reason || "").trim();
+  if (FORCED_REASONS.has(forced)) {
+    const folder = expandMusicDir(dir) || String(dir || "").trim();
+    return {
+      ok: false,
+      reason: forced,
+      message: musicMessage(forced, folder),
+      tracks: [],
+      folder,
+    };
+  }
+  return discoverMusic(dir);
+}
+
 export function trackByName(found, name) {
   if (!found || !found.ok) return null;
   const base = path.basename(String(name || ""));

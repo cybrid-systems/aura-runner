@@ -280,6 +280,7 @@ class Settings(object):
         self.music_order_source = "default"
         self.music_order_raw = ""
         self.preset = "off"
+        self.explicit_off = False
         self.minimax_notice = ""
         self.music = discover("")
         self.passthrough = {}
@@ -301,13 +302,31 @@ def resolve(environ=None, dotenv=None, config=None):
     if truthy_minimax(environ) or truthy_minimax(dotenv):
         settings.minimax_notice = NOTICE
 
-    settings.api_key, settings.api_key_source = pick((
-        (environ.get("LLM_API_KEY"), "environment"),
-        (dotenv.get("LLM_API_KEY"), ".env"),
-        (config.get("api_key"), "lumen.toml"),
-    ))
-    if not settings.api_key:
+    def nonempty(mapping, name):
+        return str((mapping or {}).get(name, "") or "").strip()
+
+    key_env = nonempty(environ, "LLM_API_KEY")
+    key_dotenv = nonempty(dotenv, "LLM_API_KEY")
+    off_env = nonempty(environ, "LUMEN_LLM_OFF") == "1"
+    off_dotenv = nonempty(dotenv, "LUMEN_LLM_OFF") == "1"
+    # A skip (LUMEN_LLM_OFF=1) beats the DeepSeek key file and a key that
+    # lives only in lumen.toml. A key in the terminal, or in the same .env,
+    # still turns AI on.
+    if off_env and not key_env:
+        settings.explicit_off = True
+    elif off_dotenv and not key_env and not key_dotenv:
+        settings.explicit_off = True
+    if settings.explicit_off:
+        settings.api_key = ""
         settings.api_key_source = "none"
+    else:
+        settings.api_key, settings.api_key_source = pick((
+            (environ.get("LLM_API_KEY"), "environment"),
+            (dotenv.get("LLM_API_KEY"), ".env"),
+            (config.get("api_key"), "lumen.toml"),
+        ))
+        if not settings.api_key:
+            settings.api_key_source = "none"
 
     url, url_source = pick((
         (environ.get("LLM_BASE_URL"), "environment"),
@@ -420,6 +439,7 @@ def public_view(settings):
         "music_message": music.get("message") or "",
         "music_reason": music.get("reason") or "unset",
         "minimax_notice": settings.minimax_notice,
+        "explicit_off": settings.explicit_off,
         "docker_mount": mount,
     }
 
@@ -482,12 +502,21 @@ def export_script(settings):
     else:
         lines.append("unset LLM_API_KEY LLM_BASE_URL LLM_MODEL")
         lines.append("unset LUMEN_LLM LUMEN_DEEPSEEK_KEY LUMEN_DEEPSEEK_URL LUMEN_DEEPSEEK_MODEL")
+        if settings.explicit_off:
+            lines.append("export LUMEN_LLM_OFF=1")
+        else:
+            lines.append("unset LUMEN_LLM_OFF")
     lines.append("unset LUMEN_MINIMAX_KEY LUMEN_MINIMAX_URL LUMEN_MINIMAX_MODEL")
     if settings.music_dir:
         lines.append("export %s" % shell_assign("LUMEN_MUSIC_DIR", settings.music_dir))
         lines.append("export %s" % shell_assign("LUMEN_MUSIC_ORDER", settings.music_order))
+        reason = (settings.music.get("reason") or "")
+        if reason in ("missing", "not-dir", "unreadable"):
+            lines.append("export %s" % shell_assign("LUMEN_MUSIC_REASON", reason))
+        else:
+            lines.append("unset LUMEN_MUSIC_REASON")
     else:
-        lines.append("unset LUMEN_MUSIC_DIR LUMEN_MUSIC_ORDER")
+        lines.append("unset LUMEN_MUSIC_DIR LUMEN_MUSIC_ORDER LUMEN_MUSIC_REASON")
     for name, value in settings.passthrough.items():
         lines.append("export %s" % shell_assign(name, value))
     lines.append("")
@@ -526,6 +555,12 @@ def container_env_body(settings):
     view = public_view(settings)
     if view["docker_mount"]:
         lines.append("LUMEN_MUSIC_DIR=%s" % CONTAINER_MUSIC)
+        lines.append("LUMEN_MUSIC_ORDER=%s" % settings.music_order)
+    elif settings.music_dir and view["music_reason"] in ("missing", "not-dir", "unreadable"):
+        # The folder is not mounted. The bridge still needs the reason so
+        # /music.json matches the notice ./play.sh already printed.
+        lines.append("LUMEN_MUSIC_DIR=%s" % settings.music_dir)
+        lines.append("LUMEN_MUSIC_REASON=%s" % view["music_reason"])
         lines.append("LUMEN_MUSIC_ORDER=%s" % settings.music_order)
     for name, value in settings.passthrough.items():
         if "\n" in value or "\r" in value:
@@ -670,6 +705,7 @@ def main(argv):
     parser.add_argument("--export-file")
     parser.add_argument("--notice", action="store_true")
     parser.add_argument("--music-line", action="store_true")
+    parser.add_argument("--preset", action="store_true")
     parser.add_argument("--check-music")
     parser.add_argument("--write-music", default=None)
     parser.add_argument("--docker-sh", action="store_true")
@@ -678,10 +714,10 @@ def main(argv):
 
     modes = [
         args.show, args.json, bool(args.export_file), args.notice, args.music_line,
-        args.check_music is not None, args.write_music is not None, args.docker_sh,
+        args.preset, args.check_music is not None, args.write_music is not None, args.docker_sh,
     ]
     if sum(1 for item in modes if item) != 1:
-        parser.error("choose one of --show, --json, --export-file, --notice, --music-line, --check-music, --write-music, --docker-sh")
+        parser.error("choose one of --show, --json, --export-file, --notice, --music-line, --preset, --check-music, --write-music, --docker-sh")
     if args.container_env and not args.docker_sh:
         parser.error("--container-env is used with --docker-sh")
 
@@ -705,6 +741,9 @@ def main(argv):
             if line:
                 guard(line, settings.api_key)
                 sys.stdout.write(line + "\n")
+            return 0
+        if args.preset:
+            sys.stdout.write(settings.preset + "\n")
             return 0
         if args.show:
             if settings.order_warning:
