@@ -91,7 +91,7 @@ try {
   }
   if (preset.base_url !== "https://api.deepseek.com/v1") throw new Error("deepseek url " + JSON.stringify(preset));
 
-  write(dir, ".env", "LUMEN_LLM_OFF=1\n");
+  write(dir, ".env", "# no key yet\n");
   write(dir, "lumen.toml", `api_key = "${TOML_KEY}"\nmodel = "deepseek-flash"\n`);
   const tomlKey = JSON.parse(must(py(["--json"], base), "toml key").stdout);
   if (tomlKey.api_key_source !== "lumen.toml" || tomlKey.api_key_length !== TOML_KEY.length) {
@@ -155,6 +155,16 @@ try {
   if (gone.music_reason !== "missing" || gone.docker_mount.length || !gone.music_message.includes("not found")) {
     throw new Error("missing folder " + JSON.stringify(gone));
   }
+  const missingEnv = path.join(dir, "missing.env");
+  const missingDocker = must(py(["--docker-sh", "--container-env", missingEnv], base), "missing docker");
+  if (!missingDocker.stdout.includes("music_mount=()")) {
+    throw new Error("missing folder was mounted\n" + missingDocker.stdout);
+  }
+  const missingBody = fs.readFileSync(missingEnv, "utf8");
+  if (!missingBody.includes("LUMEN_MUSIC_REASON=missing") || !missingBody.includes(`LUMEN_MUSIC_DIR=${missing}`)) {
+    throw new Error("container did not receive the missing reason\n" + missingBody);
+  }
+  noKey(missingDocker.stdout + missingDocker.stderr, "missing docker");
   write(dir, "lumen.toml", `music_dir = ${JSON.stringify(emptyDir)}\n`);
   const bare = JSON.parse(must(py(["--json"], base), "unsupported").stdout);
   if (bare.music_reason !== "unsupported" || !bare.music_message.includes("No supported tracks")) {
@@ -198,6 +208,42 @@ try {
   const cleared = read(dir, "lumen.toml");
   if (/^music_dir\s*=/m.test(cleared)) throw new Error("cleared music_dir stayed active\n" + cleared);
   if (!cleared.includes("keep-model")) throw new Error("clear dropped the model");
+
+  const fileKey = "sekret-file-key-123456";
+  fs.writeFileSync(path.join(dir, "deepseek-key"), fileKey + "\n");
+  write(dir, ".env", "LUMEN_LLM_OFF=1\n");
+  write(dir, "lumen.toml", `api_key = "${TOML_KEY}"\n`);
+  const offExport = path.join(dir, "off-export.sh");
+  const off = must(py(["--export-file", offExport], base), "off export");
+  noKey(off.stdout + off.stderr, "off export");
+  const offBody = fs.readFileSync(offExport, "utf8");
+  if (!offBody.includes("export LUMEN_LLM_OFF=1")) throw new Error("skip flag was not exported\n" + offBody);
+  if (offBody.includes(TOML_KEY) || offBody.includes(fileKey) || offBody.includes(KEY)) {
+    throw new Error("skip export kept a key");
+  }
+  const ran = spawnSync("bash", ["-c", `
+    set -euo pipefail
+    source "$1"
+    source "$2"
+    configure_llm
+    printf 'MODEL=%s\\nPROV=%s\\n' "\${LLM_MODEL:-}" "\${LUMEN_LLM:-}"
+  `, "bash", offExport, path.join(root, "scripts/probe-llm.sh")], {
+    env: {
+      PATH: process.env.PATH,
+      HOME: os.homedir(),
+      DEEPSEEK_KEY_FILE: path.join(dir, "deepseek-key"),
+      DEEPSEEK_BASE_URL: "http://127.0.0.1:9/v1",
+    },
+    encoding: "utf8",
+  });
+  if (ran.status !== 0) throw new Error("off configure\n" + ran.stderr + ran.stdout);
+  if (!ran.stdout.startsWith("MODEL=\n") || ran.stdout.includes("PROV=deepseek")) {
+    throw new Error("skip still turned AI on\n" + ran.stdout + ran.stderr);
+  }
+  if (!ran.stderr.includes("AI features are off")) throw new Error("skip status\n" + ran.stderr);
+  if ((ran.stdout + ran.stderr).includes(fileKey) || (ran.stdout + ran.stderr).includes(TOML_KEY)) {
+    throw new Error("skip printed a key");
+  }
 
   write(dir, "lumen.toml", "this is not toml\n");
   const broken = py(["--show"], base);

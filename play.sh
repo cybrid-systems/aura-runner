@@ -180,10 +180,6 @@ has_saved() {
   [[ -s "$ENV_FILE" ]]
 }
 
-llm_off_saved() {
-  [[ -f "$ENV_FILE" ]] && grep -q '^LUMEN_LLM_OFF=1$' "$ENV_FILE" && ! grep -q '^LLM_API_KEY=.' "$ENV_FILE"
-}
-
 write_file() {
   local body="$1"
   local dir
@@ -323,7 +319,9 @@ else
   if [[ -n "$music_line" ]]; then
     say "$music_line"
   fi
-  if llm_off_saved; then
+  # Match --config. A MiniMax-only .env has no usable key, so it is off.
+  preset="$(config_py --preset)"
+  if [[ "$preset" == "off" ]]; then
     say "AI features are off. The game still runs. Run ./play.sh --setup to add a key."
   else
     say "Using the saved API setup. Run ./play.sh --setup to change it."

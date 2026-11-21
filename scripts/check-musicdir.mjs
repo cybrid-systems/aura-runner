@@ -193,6 +193,21 @@ try {
   if (!plain.text().includes("music: synthesized")) throw new Error("synth log\n" + plain.text());
   await stop(plain.child);
 
+  // The folder exists and has tracks. The container still reports missing
+  // when ./play.sh passes LUMEN_MUSIC_REASON, matching the host notice.
+  const forced = start({ LUMEN_MUSIC_DIR: valid, LUMEN_MUSIC_REASON: "missing" });
+  servers.push(forced.child);
+  const forcedPort = await forced.ready;
+  const forcedBody = JSON.parse((await request(forcedPort, "/music.json")).body.toString("utf8"));
+  if (forcedBody.ok || forcedBody.reason !== "missing" || forcedBody.tracks.length) {
+    throw new Error("forced missing " + JSON.stringify(forcedBody));
+  }
+  if (!forcedBody.message.includes("Music folder not found") || !forcedBody.message.includes(valid)) {
+    throw new Error("forced message " + forcedBody.message);
+  }
+  if (!forced.text().includes("Music folder not found")) throw new Error("forced log\n" + forced.text());
+  await stop(forced.child);
+
   console.log("musicdir ok");
 } finally {
   for (const child of servers) await stop(child);

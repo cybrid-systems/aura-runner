@@ -444,6 +444,28 @@ if NOTICE.encode() not in out:
     raise SystemExit("old minimax did not explain itself\n" + redact(out))
 assert_hidden(out, GOOD, BAD)
 
+# MiniMax leftovers with no generic key are not a saved setup. The line
+# matches --config, which shows AI off.
+open(env_file, "w", encoding="utf-8").write(
+    "LUMEN_LLM=minimax\nLUMEN_MINIMAX_KEY=%s\n" % BAD
+)
+os.chmod(env_file, 0o600)
+code, out = run([], [("AI features are off", None)])
+if code != 0:
+    raise SystemExit("minimax-only exit %s\n%s" % (code, redact(out)))
+if b"Using the saved API setup" in out:
+    raise SystemExit("minimax-only claimed a saved setup\n" + redact(out))
+if NOTICE.encode() not in out:
+    raise SystemExit("minimax-only notice missing\n" + redact(out))
+assert_hidden(out, BAD)
+shown_off = subprocess.run(
+    [play, "--config"], cwd=root, env=base_env(), capture_output=True, text=True,
+)
+if shown_off.returncode != 0 or "AI: off" not in shown_off.stdout:
+    raise SystemExit("minimax-only config\n" + shown_off.stdout + shown_off.stderr)
+if BAD in shown_off.stdout or BAD in shown_off.stderr:
+    raise SystemExit("minimax-only config printed the key")
+
 # Default .env path is ignored too. Skip into it, then status stays clean.
 os.remove(env_file)
 default_cfg = os.path.join(cfg_dir, "default.toml")
