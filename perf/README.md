@@ -345,8 +345,25 @@ instead of stacked on the gate. check-sim golden, play-review (11/11),
 check-run, check-edsl-e2e (offline + voice biome KEEP), check-setcode,
 check-music, check-world, check-voice, check-contrast all unchanged.
 
-The chunk-spawn cost (`spawn-chunk!`/`coin-lay`, ~30-45ms) and the boot
-compile remain; those are separate steady-state costs, not the gate spike.
+**The chunk-spawn spike is now amortized too** (`core/main.aura`).
+`ensure-ahead!` fills the road to `road-horizon` (six seconds of road,
+72-160 m) in a loop of up to 12 spawns; a pace step that widens the horizon
+used to lay several ~30-45ms chunks (`spawn-chunk!` -> `pattern-chunk` +
+`string-pickups`/`coin-lay`) in one frame. `ensure-ahead!` now takes a
+spawn budget: the live tick passes 1, so at most one chunk lands per frame
+and the rest follow on later ticks. The setup callers (reset / resume /
+rewind) pass no budget and fill the whole horizon synchronously, so hello
+and resync still carry a complete road. The buffer is safe: six seconds of
+road (72-160 m) far exceeds one chunk (~8-30 m) and the per-tick advance
+(~1.4 m worst case at pace 14), so the picture never reaches the tail while
+the fill catches up. `check-play` confirms it: ten simulated minutes,
+`minAhead 1` (road always ahead), watchdog ok. On the instrumented probe
+(same seed) the worst per-tick spike drops 304ms -> 268ms and >200ms buckets
+6 -> 5 over 150s, on top of the gate fix. check-sim golden, play-review
+(11/11), check-edsl-e2e, smoke all unchanged.
+
+The boot compile (`load-slow-one`, ~7.7s) remains; that is a one-time
+startup cost, not a per-frame spike.
 
 | file | what it is |
 |---|---|

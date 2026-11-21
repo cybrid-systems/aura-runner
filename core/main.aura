@@ -1174,15 +1174,29 @@
 ; hint is where the picture already is. Fill past that, not only past
 ; the server body, or the picture reaches the last ground and waits
 ; in an empty tail while a level gate is still working.
+;
+; budget caps how many chunks one call lays. The live tick passes 1: a
+; chunk (pattern layout + coin-lay) is ~30-45ms, and a pace step that
+; widens the horizon used to lay several in one frame — the spawn spike.
+; One chunk a tick spreads that across frames. The road-horizon buffer is
+; six seconds of road (72-160 m), far more than one chunk (~8-30 m) and
+; the per-tick advance (~0.2 m), so the picture never reaches the tail
+; while the fill catches up. The setup callers (reset / resume / rewind)
+; pass no budget and fill the whole horizon synchronously, so hello and
+; resync still carry a complete road.
 (define (ensure-ahead! . rest)
   (let ((hint (if (and (pair? rest) (number? (car rest)) (> (car rest) 0.0))
                 (exact->inexact (car rest))
                 0.0))
+        (budget (if (and (pair? rest) (pair? (cdr rest))
+                         (number? (car (cdr rest))) (> (car (cdr rest)) 0))
+                  (car (cdr rest))
+                  12))
         (px (player-x player))
         (want (road-horizon)))
     (let ((from (min (+ px 80.0) (max px hint))))
       (let loop ((guard 0))
-        (if (or (>= guard 12) (> next-x (+ from want)))
+        (if (or (>= guard budget) (> next-x (+ from want)))
           #t
           (begin
             (spawn-chunk!)
@@ -4388,7 +4402,9 @@
     (maybe-dream!)
     (maybe-primer!)
     (maybe-guests!)
-    (ensure-ahead! (hash-ref msg "x" 0))
+    ; One chunk a tick: a pace step that widens the horizon lays the rest
+    ; on later frames instead of stacking several ~40ms spawns here.
+    (ensure-ahead! (hash-ref msg "x" 0) 1)
     (poll-llm! c)
     (send-new-chunks c)
     (if rules-dirty
