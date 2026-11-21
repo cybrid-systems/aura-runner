@@ -38,29 +38,25 @@ export function preferHeard(alternatives) {
   return list[0];
 }
 
-function altsOf(part) {
-  const out = [];
-  const n = part && typeof part.length === "number" ? part.length : 0;
-  for (let j = 0; j < n; j++) {
-    const bit = part[j] && part[j].transcript;
-    if (bit && String(bit).trim()) out.push(String(bit));
-  }
-  return out;
+export function missLine(error) {
+  if (error === "not-allowed" || error === "service-not-allowed") return "请允许这个页面使用麦克风";
+  if (error === "audio-capture") return "麦克风没有声音";
+  if (error === "network") return "语音服务连不上";
+  if (error === "language-not-supported") return "这个浏览器听不了中文";
+  return "没听清，按住空格再说久一点";
 }
 
-function biasCities(engine) {
-  const Phrase = typeof window !== "undefined" && window.SpeechRecognitionPhrase;
-  if (!Phrase || !engine) return;
-  try {
-    const phrases = CITY_PHRASES.map((phrase) => new Phrase(phrase, 5));
-    if (engine.phrases && typeof engine.phrases.push === "function") {
-      for (const phrase of phrases) engine.phrases.push(phrase);
-    } else {
-      engine.phrases = phrases;
-    }
-  } catch {
-    // Cloud recognition still runs when biasing is missing.
+function altsOf(part) {
+  if (!part) return [];
+  const out = [];
+  const n = typeof part.length === "number" ? part.length : 0;
+  for (let j = 0; j < n; j++) {
+    const alt = typeof part.item === "function" ? part.item(j) : part[j];
+    const bit = alt && alt.transcript;
+    if (bit && String(bit).trim()) out.push(String(bit));
   }
+  if (!out.length && part[0] && part[0].transcript) out.push(String(part[0].transcript));
+  return out;
 }
 
 export function installWish({ send }) {
@@ -70,21 +66,30 @@ export function installWish({ send }) {
   let release = false;
   let draft = "";
   let interim = "";
+  let heardError = "";
   let rec = null;
+  let epoch = 0;
+  let settle = 0;
+  let stopTimer = 0;
   const hook = { started: 0, sent: 0 };
   window.__lumenWish = hook;
 
   function show(text) {
     const clean = String(text || "").trim();
+    const body = document.getElementById("said-body");
+    const kicker = document.getElementById("said-kicker");
     if (!saidEl) return;
     if (!clean) {
       saidEl.hidden = true;
-      saidEl.textContent = "";
+      if (body) body.textContent = "";
+      else saidEl.textContent = "";
       document.documentElement.dataset.wish = "";
       return;
     }
     saidEl.hidden = false;
-    saidEl.textContent = clean;
+    if (kicker) kicker.textContent = "";
+    if (body) body.textContent = clean;
+    else saidEl.textContent = clean;
     document.documentElement.dataset.wish = clean;
   }
 
@@ -92,14 +97,31 @@ export function installWish({ send }) {
     return (draft || interim || "").trim().slice(0, 80);
   }
 
+  function clearTimers() {
+    clearTimeout(settle);
+    clearTimeout(stopTimer);
+    settle = 0;
+    stopTimer = 0;
+  }
+
+  function halt() {
+    const engine = rec;
+    if (!engine) return;
+    try { engine.stop(); } catch { /* already ended */ }
+  }
+
   function submit() {
     if (!release) return;
     release = false;
+    clearTimers();
     const clean = heard();
+    const err = heardError;
     draft = "";
     interim = "";
+    heardError = "";
+    halt();
     if (!clean) {
-      show("没听清，再按一次");
+      show(missLine(err));
       return;
     }
     const ok = send({
@@ -116,15 +138,34 @@ export function installWish({ send }) {
     document.documentElement.dataset.wish = "sent";
   }
 
+  function armSettle() {
+    clearTimeout(settle);
+    // The final transcript often arrives after onend, especially on a
+    // short hold. An empty submit before that looks like 没听清.
+    settle = setTimeout(submit, 800);
+  }
+
   function ensureRec() {
-    if (!Ctor || rec) return rec;
-    rec = new Ctor();
-    rec.continuous = true;
-    rec.interimResults = true;
-    rec.lang = "zh-CN";
-    rec.maxAlternatives = 5;
-    biasCities(rec);
-    rec.onresult = (ev) => {
+    if (!Ctor) return null;
+    epoch += 1;
+    const mine = epoch;
+    if (rec) {
+      const old = rec;
+      rec = null;
+      old.onresult = null;
+      old.onerror = null;
+      old.onend = null;
+      try { old.abort(); } catch { /* already ended */ }
+    }
+    const engine = new Ctor();
+    rec = engine;
+    engine.continuous = true;
+    engine.interimResults = true;
+    engine.lang = "zh-CN";
+    // Do not set engine.phrases. Chrome only accepts that list for
+    // on-device recognition, and zh-CN then fails every session.
+    engine.onresult = (ev) => {
+      if (mine !== epoch) return;
       let nextFinal = "";
       let nextInterim = "";
       const list = ev.results || [];
@@ -138,16 +179,23 @@ export function installWish({ send }) {
       interim = nextInterim.trim();
       const line = heard();
       if (line) show(line);
+      if (release && line) submit();
     };
-    rec.onerror = () => {
+    engine.onerror = (ev) => {
+      if (mine !== epoch) return;
+      const code = ev && ev.error ? String(ev.error) : "";
+      // stop() ends the session with aborted. That is not a miss.
+      if (code === "aborted" || code === "no-speech") return;
+      if (code) heardError = code;
       listening = false;
     };
-    rec.onend = () => {
+    engine.onend = () => {
+      if (mine !== epoch) return;
       listening = false;
-      // The last words often arrive in the same turn as the end.
-      setTimeout(submit, 80);
+      if (rec === engine) rec = null;
+      if (release) armSettle();
     };
-    return rec;
+    return engine;
   }
 
   function start() {
@@ -155,11 +203,17 @@ export function installWish({ send }) {
       show("这个浏览器听不见");
       return;
     }
-    if (listening) return;
+    clearTimers();
+    if (listening) {
+      release = false;
+      heardError = "";
+      return;
+    }
     const engine = ensureRec();
     if (!engine) return;
     draft = "";
     interim = "";
+    heardError = "";
     release = false;
     engine.lang = "zh-CN";
     try {
@@ -170,21 +224,28 @@ export function installWish({ send }) {
       show("在听");
     } catch {
       listening = false;
-      show("没听清，再按一次");
+      if (rec === engine) rec = null;
+      show(missLine("start"));
     }
   }
 
   function stop() {
-    if (!Ctor || (!listening && !rec)) return;
+    if (!Ctor || (!listening && !rec && !release)) return;
     release = true;
-    if (!rec || !listening) {
-      submit();
-      return;
-    }
-    try { rec.stop(); } catch {
-      listening = false;
-      submit();
-    }
+    clearTimeout(stopTimer);
+    // A release in the same instant as the last syllable drops the audio.
+    stopTimer = setTimeout(() => {
+      stopTimer = 0;
+      if (!rec || !listening) {
+        if (heard()) submit();
+        else armSettle();
+        return;
+      }
+      try { rec.stop(); } catch {
+        listening = false;
+        submit();
+      }
+    }, 400);
   }
 
   function typing() {
