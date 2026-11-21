@@ -440,6 +440,29 @@ the fill catches up. `check-play` confirms it: ten simulated minutes,
 The boot compile (`load-slow-one`, ~7.7s) remains; that is a one-time
 startup cost, not a per-frame spike.
 
+**The per-tick `state-msg` scan is now window-first** (`core/main.aura`).
+`obstacles-ahead` walks the whole world (pruned to ~8 m behind + the
+72-160 m horizon) but only counts obstacles in `[x0, x0+40]`. Measured on
+a 120-piece road it is ~92% of `state-msg` (1.10 ms/call; the
+`json-encode` of the ~60-field hash is 0.007 ms — negligible). The old
+walk tested `obstacle-kind?` (six `=` comparisons) before the x-range, so
+every piece paid the kind test even far outside the window. The walk now
+tests the cheap x-range first (two comparisons short-circuit the kind
+test for the ~80% of pieces outside the window) and reads `piece-x` once
+per piece: 35% faster (1.07 -> 0.70 ms/call), same count. Verified equal
+over 19k seed/position/motion combinations. An early-exit past the window
+was tried and rejected: flyers/rivals/poppers move backward, so no fixed
+margin is provably safe over a long run. check-sim, play-review (11/11),
+`aura test` (28/28), smoke and check-play unchanged.
+
+**The physics tree-walker cost is a runtime cap, not a target form.**
+`lib/phys.aura` (95 defines) runs wholly on the tree-walker because the
+runtime IR-caches at most ~63 defines per module — a module with >=64
+defines falls back wholesale (bisected: the flip is exactly at 64,
+content-independent; `force-soa` does not override). A fixed-arity
+`piece` rewrite is behavior-preserving but gives no gain (still
+`ir-calls=0`). Filed upstream as aura#5388; the fix is runtime-side.
+
 | file | what it is |
 |---|---|
 | `workload-coins.aura` | the coin-course kernel, digest, and worldline measurement |
