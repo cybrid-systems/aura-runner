@@ -681,6 +681,18 @@
   (set! edsl-form "")
   (set! edsl-spec #f))
 
+; A spoken built-in venue. Drop the mix and any dream that would
+; replace it on the next reply or the next gate.
+(define (pin-builtin! name)
+  (edsl-clear!)
+  (set! biome-now name)
+  (set! biome-pin #t)
+  (set! edsl-enter? #f)
+  (set! edsl-ready #f)
+  (set! edsl-theme-now "")
+  (set! edsl-hint "")
+  (set! rules-dirty #t))
+
 (define (edsl-remember! form id)
   (if (edsl-has? edsl-pool id)
     #f
@@ -704,6 +716,10 @@
                           (edsl-pub found)
                           #f))
         (set! biome-pin #t)
+        (set! edsl-enter? #f)
+        (set! edsl-ready #f)
+        (set! edsl-theme-now "")
+        (set! edsl-hint "")
         (set! rules-dirty #t)
         #t))))
 
@@ -728,7 +744,23 @@
                                           "constraints" viol
                                           "behavior" (hash "band" (exact->inexact band))))))))
     (if (trial-busy? trial)
-      #f
+      ; The chat token belongs to a POST already in flight. A place the
+      ; child just asked for already passed edsl-check, so install it
+      ; without taking or releasing that token. A background dream waits.
+      (if (and enter? ok)
+        (begin
+          (edsl-remember! text (hash-ref found "id"))
+          (edsl-enter-kept! text)
+          (if banner?
+            (raise-banner! "venue" (edsl-banner (hash-ref found "label")) 0)
+            #f)
+          (note! "KEEP" "fair" "biome"
+                 (if (and (string? say) (> (string-length say) 0))
+                   say
+                   (edsl-banner (hash-ref found "label")))
+                 "world")
+          #t)
+        #f)
       (begin
         (if (or (not ok) (not trial) (not (evo:trial-ok? trial)) (not (evo:feasible? trial)))
           (note! "ROLLBACK"
@@ -818,25 +850,32 @@
     (set! level-near 0)
     (set! level-overtakes 0)
     (set! goal-lock #f)
-    (set! biome-pin #f)
-    (if (env-on? "LUMEN_SKIP_DREAM")
+    ; A spoken world stays through the gate. The queued dream does not
+    ; take its place. An unpinned gate still rotates as before.
+    (if biome-pin
       (begin
-        (edsl-clear!)
-        (set! biome-now (hash-ref cross "biome" (biome-for-level level-n))))
-      (let ((ready (if (string? edsl-ready) edsl-ready #f)))
         (set! edsl-ready #f)
-        (if (and (string? ready) (edsl-enter-kept! ready))
-          #f
-          (if llm-on
-            (begin
-              (edsl-clear!)
-              (set! biome-now (hash-ref cross "biome" (biome-for-level level-n))))
-            (let ((born (begin (load-slow!) (edsl-evolve edsl-pool (+ (floor seed) level-n)))))
-              (if (and (string? born) (consider-edsl! born "" #t #f))
-                #f
-                (begin
-                  (edsl-clear!)
-                  (set! biome-now (hash-ref cross "biome" (biome-for-level level-n))))))))))
+        (set! edsl-enter? #f)
+        (set! edsl-theme-now "")
+        (set! edsl-hint ""))
+      (if (env-on? "LUMEN_SKIP_DREAM")
+        (begin
+          (edsl-clear!)
+          (set! biome-now (hash-ref cross "biome" (biome-for-level level-n))))
+        (let ((ready (if (string? edsl-ready) edsl-ready #f)))
+          (set! edsl-ready #f)
+          (if (and (string? ready) (edsl-enter-kept! ready))
+            #f
+            (if llm-on
+              (begin
+                (edsl-clear!)
+                (set! biome-now (hash-ref cross "biome" (biome-for-level level-n))))
+              (let ((born (begin (load-slow!) (edsl-evolve edsl-pool (+ (floor seed) level-n)))))
+                (if (and (string? born) (consider-edsl! born "" #t #f))
+                  #f
+                  (begin
+                    (edsl-clear!)
+                    (set! biome-now (hash-ref cross "biome" (biome-for-level level-n)))))))))))
     (set! chal-coins 0)
     (set! chal-done #f)
     (set! run-mult (hash-ref cross "mult" run-mult))
@@ -3609,6 +3648,7 @@
               (same (string=? next cur)))
          (if same
            (begin
+             (if mood? #f (pin-builtin! next))
              (raise-banner! (if mood? "mood" "venue")
                             (if mood?
                               (venue-line next run-mult wish-locale)
@@ -3619,10 +3659,7 @@
            (begin
              (if mood?
                (set! mood-now next)
-               (begin
-                 (edsl-clear!)
-                 (set! biome-now next)
-                 (set! biome-pin #t)))
+               (pin-builtin! next))
              (raise-banner! (if mood? "mood" "venue")
                             (if mood?
                               (venue-line next run-mult wish-locale)

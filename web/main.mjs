@@ -3,7 +3,7 @@ import { awardPickup, challengeFor, challengeMet, dropGrade, gradeLabel, lootWor
 import { clampMult } from "./runstate.mjs";
 import { COMBO_HEART, HEART_IFRAME, HEARTS_MAX, heartsBlank, heartsHit, heartsRecover, heartsTick } from "./hearts.mjs";
 import { raceGate, raceRead } from "./race.mjs";
-import { acceptSpec, createRenderer } from "./render.mjs";
+import { acceptSpec, createRenderer, takeVenue } from "./render.mjs";
 import { createFallback } from "./fallback.mjs";
 import { readQualityMode, writeQualityMode } from "./quality.mjs";
 import { createInput } from "./input.mjs";
@@ -691,14 +691,9 @@ function showEvo(text) {
 
 function applyVenue(msg) {
   if (typeof msg.mult === "number") runMult = clampMult(msg.mult);
-  if ("spec" in msg) {
-    if (msg.spec && typeof msg.spec === "object") {
-      const next = acceptSpec(msg.spec);
-      biomeSpec = next && next.recipe === "mix" ? next : null;
-      if (biomeSpec) biomeName = biomeSpec.id;
-    } else biomeSpec = null;
-  }
-  if (!biomeSpec && typeof msg.biome === "string" && VENUES.has(msg.biome)) biomeName = msg.biome;
+  const venue = takeVenue({ name: biomeName, spec: biomeSpec }, msg);
+  biomeName = venue.name;
+  biomeSpec = venue.spec;
   if (typeof msg.mood === "string" && MOODS.has(msg.mood)) moodName = msg.mood;
   const id = msg["banner-id"];
   if (typeof id === "number" && id !== bannerId && typeof msg.banner === "string" && msg.banner) {

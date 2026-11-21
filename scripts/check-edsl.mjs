@@ -1,6 +1,6 @@
 // Biome EDSL on the view side. A mix spec keeps obstacle colours, clamps
 // the prop budget, and does not invent a venue the gate would refuse.
-import { acceptSpec, dressPalette, palette, specInstances } from "../web/render.mjs";
+import { acceptSpec, dressPalette, palette, specInstances, takeVenue } from "../web/render.mjs";
 
 function sameObstacle(a, b) {
   for (const key of ["hurdle", "hurdleTop", "gate", "coin", "pot", "potRim"]) {
@@ -54,4 +54,36 @@ if (still.custom) throw new Error("built-in recipe left the polished path");
 if (still.biome !== "city" || still.mood !== "sunset") throw new Error("built-in venue lost");
 
 if (acceptSpec({ id: "Bad", recipe: "mix" })) throw new Error("bad id accepted");
+
+const beijing = acceptSpec({
+  id: "beijing",
+  label: "Beijing",
+  recipe: "mix",
+  sky: [0.55, 0.62, 0.78],
+  horizon: [0.95, 0.72, 0.45],
+  fog: [0.9, 0.75, 0.55],
+  fogAmt: 0.2,
+  body: "sun",
+  road: [0.35, 0.32, 0.28],
+  curb: [0.45, 0.28, 0.22],
+  ground: [0.32, 0.34, 0.3],
+  surface: "stone",
+  light: 0.8,
+  mood: 0.5,
+  particles: "none",
+  particleAmt: 0,
+  props: [{ kind: "pagoda", density: 0.2, scale: 1 }],
+});
+if (!beijing || beijing.id !== "beijing") throw new Error("beijing spec dropped");
+const fromGarden = takeVenue({ name: "garden", spec: null }, { biome: "city", spec: false });
+if (fromGarden.name !== "city" || fromGarden.spec) throw new Error("city wish kept the garden");
+const stale = takeVenue({ name: "beijing", spec: beijing }, { biome: "city" });
+if (stale.name !== "city" || stale.spec) throw new Error("city wish kept a stale mix");
+const kept = takeVenue({ name: "garden", spec: null }, { biome: "beijing", spec: beijing });
+if (!kept.spec || kept.name !== "beijing" || kept.spec.id !== "beijing") throw new Error("named city mix dropped");
+const foreign = takeVenue({ name: "garden", spec: null }, { biome: "city", spec: beijing });
+if (foreign.name !== "city" || foreign.spec) throw new Error("city message kept another mix");
+const held = takeVenue({ name: "beijing", spec: beijing }, {});
+if (!held.spec || held.name !== "beijing") throw new Error("an empty tick cleared the city");
+
 console.log("edsl view ok instances " + specInstances(lava).toFixed(1));

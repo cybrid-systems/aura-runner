@@ -154,6 +154,29 @@ export function acceptSpec(raw) {
   };
 }
 
+// Built-in garden, city, space, and coast win over a leftover mix.
+// The mix stays only when this same message accepted one whose id is
+// that venue. A mood tick, with no biome and no spec, leaves both.
+export function takeVenue(prev, msg) {
+  const prior = prev && typeof prev === "object" ? prev : {};
+  let spec = prior.spec && prior.spec.recipe === "mix" && prior.spec.id ? prior.spec : null;
+  let name = typeof prior.name === "string" && prior.name ? prior.name : "garden";
+  const body = msg && typeof msg === "object" ? msg : {};
+  if ("spec" in body) {
+    if (body.spec && typeof body.spec === "object") {
+      const next = acceptSpec(body.spec);
+      spec = next && next.recipe === "mix" ? next : null;
+      if (spec) name = spec.id;
+    } else spec = null;
+  }
+  const venue = typeof body.biome === "string" && BIOME_NAMES.includes(body.biome) ? body.biome : "";
+  if (venue && !(spec && spec.id === venue)) {
+    spec = null;
+    name = venue;
+  } else if (spec) name = spec.id;
+  return { name, spec };
+}
+
 export function specInstances(spec) {
   if (!spec) return 0;
   let n = (Number(spec.particleAmt) || 0) * 22;

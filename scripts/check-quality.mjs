@@ -444,6 +444,10 @@ assert(postText.includes("KHR_parallel_shader_compile"), "post can compile witho
 assert(postText.includes("FINISH_FS") && !postText.slice(postText.indexOf("const FINISH_FS"), postText.indexOf("const COMPOSITE_HIGH_FS")).includes("uHero"), "medium finish does not mask a hero");
 assert(postText.includes("uHero"), "high finish keeps the hero sharp");
 assert(postText.includes("uSoft") && postText.includes("8.0 / span"), "speed blur steps at most 8px on the eighth-res tail");
+const finishHigh = postText.slice(postText.indexOf("const FINISH_HIGH_FS"), postText.indexOf("const REFLECT_FS"));
+assert(finishHigh.includes("clamp(uBlur, 0.0, 1.0) * 0.36"), "speed blur scales with uBlur");
+assert(finishHigh.includes("mix(c, tail, 0.7)"), "the soft tail stays a hint of the sharp frame");
+assert(!finishHigh.includes("(1.0 - sharp) * 0.42"), "speed blur is not a flat mix of the eighth-res image");
 assert(postText.includes("DOWNSAMPLE_FS") && !postText.includes("blurPass(flat, 2 / flat.w"), "speed blur does not run four full-frame passes");
 const pageText = readFileSync(new URL("../web/main.mjs", import.meta.url), "utf8");
 assert(pageText.includes("window.__lumenForceNear"), "a recording can force one near miss");

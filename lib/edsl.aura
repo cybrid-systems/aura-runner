@@ -692,6 +692,18 @@
     (let loop ((i 0) (h 0))
       (if (>= i n) h (loop (+ i 1) (modulo (+ (* h 33) (string-ref s i)) 997))))))
 
+; 去城市 / 前往海边 name a built-in venue. The regional catch-all must
+; not turn them into visit-china. Voice still switches those worlds.
+(define (edsl-builtin-ask? text low)
+  (or (string-contains? text "城市") (string-contains? text "都市")
+      (string-contains? text "花园") (string-contains? text "草地")
+      (string-contains? text "太空") (string-contains? text "星空")
+      (string-contains? text "海边") (string-contains? text "海岸")
+      (string-contains? text "沙滩")
+      (edsl-word? low "city") (edsl-word? low "garden")
+      (edsl-word? low "space") (edsl-word? low "coast")
+      (edsl-word? low "beach") (edsl-word? low "ocean")))
+
 ; A city that is not on the curated list still gets a regional recipe.
 (define (edsl-ask text)
   (let ((low (string-downcase text)))
@@ -702,8 +714,11 @@
       ((or (string-contains? text "阿姆斯特丹") (string-contains? low "amsterdam")) "visit-canal")
       ((or (string-contains? text "布拉格") (string-contains? low "prague")) "visit-stone")
       ((or (string-contains? text "芝加哥") (string-contains? low "chicago")) "visit-us")
-      ((and (or (string-contains? text "去") (string-contains? text "前往")) (edsl-cjk? text)) "visit-china")
-      ((string-contains? low "go to ")
+      ((and (or (string-contains? text "去") (string-contains? text "前往"))
+            (edsl-cjk? text)
+            (not (edsl-builtin-ask? text low)))
+       "visit-china")
+      ((and (string-contains? low "go to ") (not (edsl-builtin-ask? text low)))
        (edsl-nth (list "visit-stone" "visit-us" "visit-asia" "visit-palm") (modulo (edsl-hash low) 4)))
       (else #f))))
 

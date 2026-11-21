@@ -270,7 +270,11 @@ void main() {
     tail += texture(uSoft, vUv + step * 2.0).rgb * 0.28;
     tail += texture(uSoft, vUv + step * 3.0).rgb * 0.22;
     tail += texture(uSoft, vUv + step * 4.0).rgb * 0.16;
-    c = mix(c, tail, (1.0 - sharp) * 0.42);
+    // The eighth-res buffer is only a streak hint. A flat weight turns
+    // the whole frame to mush as soon as speed leaves 9 m/s, while the
+    // radial step is still a fraction of a pixel. uBlur scales the mix.
+    tail = mix(c, tail, 0.7);
+    c = mix(c, tail, (1.0 - sharp) * clamp(uBlur, 0.0, 1.0) * 0.36);
   }
   o = vec4(c, 1.0);
 }`;

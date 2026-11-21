@@ -39,6 +39,7 @@ place-next london
 place-china beijing
 place-guilin visit-china
 place-prague visit-stone
+place-city 0
 steer-next london
 steer-bare 0
 steer-night beijing

@@ -94,6 +94,7 @@
 (show "place-china" (edsl-place "去中国" "garden"))
 (show "place-guilin" (edsl-place "去桂林" "garden"))
 (show "place-prague" (edsl-place "go to Prague" "garden"))
+(show "place-city" (if (edsl-place "去城市" "garden") 1 0))
 (show "steer-next" (edsl-steer "下一个城市" "paris"))
 (show "steer-bare" (if (edsl-steer "城市" "garden") 1 0))
 (show "steer-night" (edsl-steer "北京的夜晚" "garden"))
