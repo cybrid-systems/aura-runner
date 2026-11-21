@@ -78,7 +78,7 @@ budget-used 0
 ## The run on aura v0.2.5 with the LLVM JIT
 
 The runtime under test is a **release build of the current `main`** with
-the LLVM JIT (23.1.5, from the `aura-ci:v0.1.1` root) linked in:
+the LLVM JIT (23.1.6, from the `aura-ci:latest` root) linked in:
 
 ```sh
 cd ~/aura && git pull
