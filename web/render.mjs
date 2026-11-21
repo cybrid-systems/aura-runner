@@ -1008,7 +1008,10 @@ void main() {
     n = normalize(sn + vec3(0.0001));
   } else if (asBox) {
     float edge = min(min(0.5 - abs(vL.x), 0.5 - abs(vL.y)), 0.5 - abs(vL.z));
-    n = normalize(vN + vL * smoothstep(0.16, 0.0, edge) * 0.85);
+    // A wide deck tile is one face of a run. Bending by local position
+    // put a separate highlight pillow on every slab.
+    bool deck = vHalf.y < 0.12 && vHalf.x > 0.7;
+    n = normalize(deck ? vN : vN + vL * smoothstep(0.16, 0.0, edge) * 0.85);
   }
   vec3 viewDir = normalize(uEye - vW);
   vec3 L = normalize(uLight);
@@ -1086,7 +1089,10 @@ void main() {
     return;
   }
   float edge = min(min(0.5 - abs(vL.x), 0.5 - abs(vL.y)), 0.5 - abs(vL.z));
-  vec3 n = normalize(vN + vL * smoothstep(0.16, 0.0, edge) * 0.85);
+  // A wide deck tile is one face of a run. Bending by local position
+  // put a separate highlight pillow on every slab.
+  bool deck = vHalf.y < 0.12 && vHalf.x > 0.7;
+  vec3 n = normalize(deck ? vN : vN + vL * smoothstep(0.16, 0.0, edge) * 0.85);
   vec3 L = normalize(uLight);
   float ndl = max(dot(n, L), 0.0);
   float hemi = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);
@@ -2717,7 +2723,8 @@ export function createRenderer(canvas, hooks) {
           if (end - cursor > 0.04) {
             const mid = (cursor + end) / 2;
             const tile = onRoad(mid, lat);
-            const vary = (laneHash(mid * 0.23 + lane * 17.2) - 0.5) * 0.09;
+            // A tenth of a step made each 2 m slab a different flat colour.
+            const vary = (laneHash(mid * 0.23 + lane * 17.2) - 0.5) * 0.03;
             const top = vary >= 0 ? mix3(baseTop, [1, 1, 1], vary) : mix3(baseTop, [0.16, 0.18, 0.1], -vary);
             const len = end - cursor;
             const grass = lane !== 1 && dist > -2 && dist < 4 ? (pal.custom && (pal.surface === "stone" || pal.surface === "plank" || pal.surface === "lava") ? 3 : pal.custom && (pal.surface === "ice" || pal.surface === "cloud") ? 5 : 4) : 0;

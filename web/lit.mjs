@@ -99,10 +99,15 @@ float shadeNoise(vec2 p) {
     mix(shadeHash(i + vec2(0.0, 1.0)), shadeHash(i + vec2(1.0, 1.0)), u.x),
     u.y);
 }
+// Fine marks live near the runner. Past 7 m, or once a repeat is only
+// about a pixel wide, they drop out so speed does not shimmer.
+float fineAmt(vec2 uv, float dist) {
+  float near = 1.0 - smoothstep(2.0, 7.0, dist);
+  float px = length(fwidth(uv));
+  return near * (1.0 - smoothstep(0.45, 1.15, px));
+}
 vec3 surfaceDetail(vec3 col, float dist) {
-  // Smooth and wide on purpose. A hard cell used to restart on every
-  // slab and read as coarse blocks once the road moved. Marks still
-  // fade by 20 m, where a seam would be only a few pixels tall.
+  // Broad tint fades by 20 m. The finer octave is gated by fineAmt.
   float fade = 1.0 - smoothstep(8.0, 20.0, dist);
   if (fade < 0.03) return col;
   bool slab = vHalf.y < 0.1 && vHalf.x > 0.7 && vRough > 0.4 && vRough < 0.72 && vKind < 0.5;
@@ -111,47 +116,64 @@ vec3 surfaceDetail(vec3 col, float dist) {
   if (slab && !dash && !curb) {
     vec2 world = vW.xz;
     float side = vL.x * vHalf.x * 2.0;
+    vec2 uv = world * 1.45;
+    float amt = fineAmt(uv, dist);
+    float broad = shadeNoise(world * 0.28);
+    float grain = shadeNoise(uv + 8.0);
     vec3 next = col;
     if (uGround < 0.5) {
-      float tone = shadeNoise(world * 0.38);
-      vec2 g = abs(fract(world * 0.42) - 0.5);
-      float joint = smoothstep(0.44, 0.5, max(g.x, g.y));
-      next *= 0.975 + 0.04 * tone;
-      next = mix(next, next * vec3(0.84, 0.80, 0.74), joint * 0.22);
+      vec2 cell = world * 1.05;
+      float w = clamp(length(fwidth(cell)), 0.008, 0.06);
+      vec2 g = abs(fract(cell) - 0.5);
+      float joint = smoothstep(0.5 - w, 0.5, max(g.x, g.y));
+      next *= 0.97 + 0.035 * broad + 0.055 * grain * amt;
+      next = mix(next, next * vec3(0.78, 0.74, 0.68), joint * 0.34 * amt);
     } else if (uGround < 1.5) {
       float lane = smoothstep(0.36, 0.1, abs(abs(side) - 0.32));
-      next *= 0.98 + 0.035 * shadeNoise(world * 0.2);
+      next *= 0.975 + 0.03 * broad + 0.045 * grain * amt;
       next *= 1.0 - lane * 0.05;
     } else if (uGround < 2.5) {
-      float streak = 0.5 + 0.5 * sin(side * 2.6 + world.y * 0.12);
-      next = mix(next, next * vec3(0.92, 0.97, 1.0) + vec3(0.02, 0.03, 0.05), streak * 0.16);
+      float streak = 0.5 + 0.5 * sin(side * 2.2 + world.y * 0.1);
+      next = mix(next, next * vec3(0.93, 0.97, 1.0) + vec3(0.02, 0.03, 0.05), streak * 0.14);
+      next *= 0.98 + 0.04 * grain * amt;
     } else if (uGround < 3.5) {
-      next *= 0.97 + 0.05 * shadeNoise(world * 0.28);
+      next *= 0.97 + 0.04 * broad + 0.05 * grain * amt;
     } else if (uGround < 4.5) {
-      float boardUv = side * 1.15 + 0.8;
-      float seam = smoothstep(0.46, 0.5, abs(fract(boardUv) - 0.5));
-      float grain = shadeNoise(vec2(floor(boardUv) * 0.7, world.y * 0.18));
-      next *= 0.975 + 0.04 * grain;
-      next = mix(next, next * 0.86, seam * 0.28);
+      float boardUv = side * 1.7 + 0.4;
+      float seamW = clamp(fwidth(boardUv), 0.012, 0.08);
+      float seam = smoothstep(0.5 - seamW, 0.5, abs(fract(boardUv) - 0.5));
+      next *= 0.975 + 0.03 * broad + 0.04 * grain * amt;
+      next = mix(next, next * 0.84, seam * 0.32 * max(amt, 0.25));
     } else if (uGround < 5.5) {
-      vec2 g = abs(fract(world * 0.36) - 0.5);
-      float crust = smoothstep(0.42, 0.5, max(g.x, g.y));
-      next = mix(next, vec3(1.0, 0.45, 0.1), crust * 0.22);
+      vec2 cell = world * 0.72;
+      float w = clamp(length(fwidth(cell)), 0.008, 0.06);
+      vec2 g = abs(fract(cell) - 0.5);
+      float crust = smoothstep(0.5 - w, 0.5, max(g.x, g.y));
+      next *= 0.975 + 0.03 * broad;
+      next = mix(next, vec3(1.0, 0.46, 0.1), crust * 0.26 * max(amt, 0.35));
     } else {
-      float blob = shadeNoise(world * 0.22);
-      next = mix(next, next * vec3(0.95, 0.97, 1.0) + vec3(0.025), blob * 0.18);
+      next = mix(next, next * vec3(0.95, 0.97, 1.0) + vec3(0.02), (broad * 0.16 + grain * amt * 0.22));
     }
+    vec3 halfV = normalize(normalize(uLight) + normalize(uEye - vW));
+    vec3 gn = normalize(vN + vec3(dFdx(grain), 0.0, dFdy(grain)) * 1.6);
+    float glint = pow(max(dot(gn, halfV), 0.0), 32.0);
+    next += vec3(1.0, 0.97, 0.9) * glint * 0.04 * amt;
     float wear = smoothstep(0.46, 0.06, abs(side));
     next *= 1.0 - wear * 0.04;
     return mix(col, next, fade);
   }
   if (vRough > 0.72 && vKind < 0.5 && vHalf.x > 0.22 && vHalf.z > 0.3 && vHalf.y < 0.7) {
+    // Spheres discard, so derivatives stay on the box lawn.
+    float amt = vShape < 0.5 ? fineAmt(vW.xz * 12.0, dist) : (1.0 - smoothstep(2.0, 7.0, dist));
     float clump = sin(vW.x * 0.42) * sin(vW.z * 0.33);
-    return mix(col, col * (0.97 + 0.04 * clump), fade);
+    float blades = sin(vW.x * 13.0 + vW.z * 4.0) * sin(vW.z * 11.0);
+    return mix(col, col * (0.97 + 0.035 * clump + 0.055 * blades * amt), fade);
   }
   if (vShape > 0.5 && vShape < 1.5 && vRough > 0.6 && vRough < 0.74 && vHalf.x > 0.3) {
-    float leaf = sin(vW.x * 0.85 + vW.y * 0.55) * sin(vW.z * 0.7 + vW.y * 0.4);
-    return mix(col, col * (0.96 + 0.05 * leaf), fade);
+    float near = 1.0 - smoothstep(2.0, 7.0, dist);
+    float leaf = sin(vW.x * 0.8 + vW.y * 0.5) * sin(vW.z * 0.7 + vW.y * 0.4);
+    float vein = sin(vW.x * 9.0 + vW.y * 6.0) * sin(vW.z * 8.0);
+    return mix(col, col * (0.965 + 0.04 * leaf + 0.05 * vein * near), fade);
   }
   return col;
 }
