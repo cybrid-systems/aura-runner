@@ -1,0 +1,95 @@
+; The coin-course workload: lay coins across many levels, the way the
+; server's add-chunk! / begin-level! do. Appended to lib/coins.aura (on top
+; of lib/phys.aura + lib/gen.aura) to form the seed, so the define a
+; candidate rebinds (coin-open-level!) lives in the mutated module.
+;
+; The kernel returns a digest of every coin laid (x, lane, worth) plus the
+; per-level coin counts. A candidate that changes the placement by one coin
+; changes the digest, so the checksum is the digest.
+
+(define COIN-LEVELS 60)
+(define COIN-CHUNKS-PER-LEVEL 3)
+
+; One level: open the coin window, then lay COIN-CHUNKS-PER-LEVEL chunks.
+; Mirrors begin-level! (coin-open-level!) + add-chunk! (coin-set-origin!,
+; coin-span!, string-pickups). Returns the placed pieces.
+(define (coin-level lvl x0 id)
+  (coin-open-level! x0 (+ x0 128.0))
+  (let loop ((k 0) (xx x0) (ii id) (acc (list)))
+    (if (>= k COIN-CHUNKS-PER-LEVEL)
+        (list xx ii acc)
+        (let* ((ch (chunk-or-fallback (pattern-chunk 42 ii (modulo lvl 5) 8.0) 8.0))
+               (pieces (hash-ref ch "pieces" (list)))
+               (span (hash-ref ch "x1" 8.0)))
+          (coin-set-origin! xx)
+          (coin-span! (+ xx span))
+          (let ((placed (shift-pieces
+                         (string-pickups pieces (modulo lvl 5) span 1 25.0
+                                         (coin-chunk-seed 42 ii (modulo lvl 5))
+                                         (coin-blank))
+                         xx)))
+            (loop (+ k 1) (+ xx span) (+ ii 1) (append acc placed)))))))
+
+; The digest: every coin's (x, lane, worth), in placement order.
+(define (coin-digest pieces)
+  (let loop ((ps pieces) (acc ""))
+    (if (null? ps)
+        acc
+        (let ((q (car ps)))
+          (loop (cdr ps)
+                (if (= (piece-k q) 5.0)
+                    (string-append acc
+                                   (number->string (piece-x q)) ","
+                                   (number->string (piece-lane q)) ","
+                                   (number->string (piece-nth q 6 0.0)) ";")
+                    acc))))))
+
+; The kernel the runtime measures. n = number of levels. Returns the digest
+; of all coins laid across the first n levels (resetting the course each run
+; so the measurement is repeatable).
+(define (coin-kernel n)
+  (coin-reset-course!)
+  (let loop ((lvl 1) (x 0.0) (id 0) (acc ""))
+    (if (> lvl n)
+        acc
+        (let ((r (coin-level lvl x id)))
+          (loop (+ lvl 1) (car r) (car (cdr r))
+                (string-append acc (coin-digest (car (cdr (cdr r))))))))))
+
+; Inputs: a list of level counts. The oracle reads the same order.
+(define (coin-inputs n)
+  (let loop ((i 1) (acc '()))
+    (if (> i n) (reverse acc)
+        (loop (+ i 1) (cons (* i COIN-LEVELS) acc)))))
+
+; The worldline measurement: time coin-open-level! and coin-window-counts
+; (the two defines that walk coin-closed) over one kernel run.
+(define (perf-worldline-measure kernel xs)
+  (let* ((saved-open coin-open-level!)
+         (saved-window coin-window-counts)
+         (box (hash "open" 0 "window" 0 "open-ms" 0 "window-ms" 0)))
+    (set! coin-open-level!
+      (lambda (x0 x1)
+        (let ((t0 (monotonic-ms)))
+          (let ((v (saved-open x0 x1)))
+            (hash-set! box "open" (+ (hash-ref box "open" 0) 1))
+            (hash-set! box "open-ms" (+ (hash-ref box "open-ms" 0) (- (monotonic-ms) t0)))
+            v))))
+    (set! coin-window-counts
+      (lambda (x)
+        (let ((t0 (monotonic-ms)))
+          (let ((v (saved-window x)))
+            (hash-set! box "window" (+ (hash-ref box "window" 0) 1))
+            (hash-set! box "window-ms" (+ (hash-ref box "window-ms" 0) (- (monotonic-ms) t0)))
+            v))))
+    (try (kernel xs) (catch (e) #f))
+    (set! coin-open-level! saved-open)
+    (set! coin-window-counts saved-window)
+    (list (hash "name" "coin-open-level!"
+                "calls" (hash-ref box "open" 0)
+                "task-clock" (hash-ref box "open-ms" 0)
+                "stack" (list "coin-kernel" "coin-open-level!"))
+          (hash "name" "coin-window-counts"
+                "calls" (hash-ref box "window" 0)
+                "task-clock" (hash-ref box "window-ms" 0)
+                "stack" (list "coin-kernel" "coin-window-counts")))))

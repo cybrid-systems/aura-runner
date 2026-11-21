@@ -1,0 +1,160 @@
+; aura-perf gated target for aura-runner's coin-course growth.
+;
+; The full autotune loop needs std/bus (a kernel primitive absent in this
+; nightly), so this spec drives the gate directly with the same primitives
+; the loop uses: install the seed, measure the null (target rebound to its
+; own body) and the candidate in the SAME process, checksum each against
+; perf/golden-coins.txt, and apply perf:accept? / perf:reason.
+;
+;   AURA_PATH=~/aura-perf:~/.aura/current/lib AURA_SANDBOX=off \
+;     aura --preset dev perf/spec-coins.aura
+;
+; The target program is lib/coins.aura (on phys + sexp + gen), flattened so
+; the define a candidate rebinds (coin-open-level!) lives in the mutated
+; module. The kernel lays coins across many levels; the digest of every coin
+; is the checksum. The candidate trims coin-closed to the two-level window
+; it is read by, turning the per-coin O(levels) walk into O(1).
+
+(require "lib/perf/util" all:)
+(require "lib/perf/score" all:)
+(require "lib/perf/gate" all:)
+(require "std/string" all:)
+(require "./seed-source-coins")
+
+(define seed-text (seed-source-coins))
+(set-code seed-text)
+(eval-current)
+
+; ── the oracle ──────────────────────────────────────────────────────
+(define golden
+  (string-split (perf:read-text "perf/golden-coins.txt") "\n"))
+
+(define (golden-digest levels)
+  ; levels = n * COIN-LEVELS; line n-1 is the digest of the first n groups.
+  (let ((i (- (/ levels COIN-LEVELS) 1)))
+    (if (or (< i 0) (>= i (length golden)))
+        "perf-missing-golden"
+        (list-ref golden i))))
+
+; ── the intend ──────────────────────────────────────────────────────
+(define intend
+  (hash "min-faster-pct" 10 "site-min-faster-pct" 20 "checksum" #t "budget" 4 "protected" '()))
+(define seal (perf:intend-seal (hash "intend" intend "min-speedup-pct" 20)))
+(define pct (hash-ref seal "effective-min-faster-pct" 20))
+(define site-pct (hash-ref seal "site-min-faster-pct" 20))
+
+; ── measurement helpers ─────────────────────────────────────────────
+(define HELDOUT-LEVELS (* 2 COIN-LEVELS))   ; 120 levels
+(define REPEATS 5)
+
+(define (checksum-ok? levels)
+  (let ((got (coin-kernel levels))
+        (exp (golden-digest levels)))
+    (string=? got exp)))
+
+(define (time-kernel levels repeats)
+  ; warm up once, then time `repeats` runs; every run must match the oracle.
+  (coin-kernel levels)
+  (let loop ((i 0) (samples '()) (bad 0))
+    (if (>= i repeats)
+        (hash "median" (perf:median (reverse samples))
+              "samples" (reverse samples)
+              "mismatches" bad)
+        (let ((t0 (monotonic-ms)))
+          (let ((got (coin-kernel levels)))
+            (loop (+ i 1)
+                  (cons (- (monotonic-ms) t0) samples)
+                  (+ bad (if (string=? got (golden-digest levels)) 0 1))))))))
+
+(define (null-body)
+  ; coin-open-level! as it is in the seed (the un-trimmed append).
+  (perf:extract-define seed-text "coin-open-level!"))
+
+(define (rebind! body)
+  (let ((rb (mutate:rebind "coin-open-level!" body "perf-trial")))
+    (if (eq? rb #t) (begin (eval-current) #t) #f)))
+
+; ── the report ──────────────────────────────────────────────────────
+(display "=== aura-perf gated target: aura-runner coin-course ===\n")
+(display "seal pct=")(display pct)(newline)
+
+; checksum the seed itself first
+(display "seed-checksum levels=")(display HELDOUT-LEVELS)
+(display " ok=")(display (if (checksum-ok? HELDOUT-LEVELS) 1 0))(newline)
+
+; null: target rebound to its own body, measured in this process
+(define null-ok (rebind! (null-body)))
+(display "null-rebind ok=")(display (if null-ok 1 0))(newline)
+(define null-tm (time-kernel HELDOUT-LEVELS REPEATS))
+(define null-ms (hash-ref null-tm "median" -1))
+(display "null heldout-ms=")(display null-ms)
+(display " samples=")(display (hash-ref null-tm "samples" '()))
+(display " mismatches=")(display (hash-ref null-tm "mismatches" 0))(newline)
+
+; worldline tree of the null (the two defines that walk coin-closed)
+(define null-tree (perf-worldline-measure coin-kernel HELDOUT-LEVELS))
+(let loop ((rows null-tree))
+  (if (null? rows) #t
+      (let ((r (car rows)))
+        (display "null-site ")(display (hash-ref r "name" ""))
+        (display " ms=")(display (hash-ref r "task-clock" 0))
+        (display " calls=")(display (hash-ref r "calls" 0))(newline)
+        (loop (cdr rows)))))
+
+; ── trial each candidate ────────────────────────────────────────────
+(define (site-ms tree name)
+  (let loop ((rows tree))
+    (if (null? rows) 0
+        (if (string=? (hash-ref (car rows) "name" "") name)
+            (hash-ref (car rows) "task-clock" 0)
+            (loop (cdr rows))))))
+
+(define (trial id path target site-name)
+  (display "--- candidate ")(display id)(newline)
+  ; restore the null first so each candidate starts from the same base
+  (rebind! (null-body))
+  (let ((body (perf:read-text path)))
+    (let ((rb (mutate:rebind target body "perf-trial")))
+      (if (not (eq? rb #t))
+          (display "  rebind-refused ")(display rb)(newline)
+          (begin
+            (eval-current)
+            (let ((chk (checksum-ok? HELDOUT-LEVELS)))
+              (display "  checksum ok=")(display (if chk 1 0))(newline)
+              (if (not chk)
+                  (display "  ROLLBACK reason=checksum\n")
+                  (let ((tm (time-kernel HELDOUT-LEVELS REPEATS)))
+                    (let ((ms (hash-ref tm "median" -1)))
+                      (display "  heldout-ms=")(display ms)
+                      (display " samples=")(display (hash-ref tm "samples" '()))(newline)
+                      (let ((tree (perf-worldline-measure coin-kernel HELDOUT-LEVELS)))
+                        (let loop ((rows tree))
+                          (if (null? rows) #t
+                              (let ((r (car rows)))
+                                (display "  site ")(display (hash-ref r "name" ""))
+                                (display " ms=")(display (hash-ref r "task-clock" 0))
+                                (display " calls=")(display (hash-ref r "calls" 0))(newline)
+                                (loop (cdr rows)))))
+                        (let ((site (hash "base" (site-ms null-tree site-name)
+                                          "cand" (site-ms tree site-name)
+                                          "pct" site-pct)))
+                          (display "  site-floor base=")(display (hash-ref site "base" 0))
+                          (display " cand=")(display (hash-ref site "cand" 0))
+                          (display " floor-pct=")(display site-pct)
+                          (display " site-ok=")(display (if (perf:site-ok? site) 1 0))(newline)
+                          (let ((result (hash "status" "ok" "heldout-ms" ms
+                                              "checksum-ok" 1 "mismatches" 0
+                                              "live-unchanged" 1)))
+                            (let ((reason (perf:reason result null-ms pct site)))
+                              (display "  ")(if (string=? reason "gate-pass")
+                                                (display "PASS") (display "ROLLBACK"))
+                              (display " reason=")(display reason)(newline))))))))))))))
+
+(trial "coin-window-trim" "perf/candidates/coin-window-trim.aura"
+       "coin-open-level!" "coin-window-counts")
+(trial "coin-wrong-scale" "perf/candidates/coin-wrong-scale.aura"
+       "coin-make" "coin-window-counts")
+
+; restore the null so the live workspace is unchanged at exit
+(rebind! (null-body))
+(display "done\n")

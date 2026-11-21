@@ -1,0 +1,132 @@
+; aura-perf mining target for aura-runner's SERVER TICK hot path.
+;
+; The full autotune loop needs std/bus (a kernel primitive absent in this
+; nightly), so this spec drives the mining core directly: install the real
+; physics seed, collect a region-timer CCT over the tick's own defines, and
+; run perf:mine. The report is the mined class / hot-node / site / prefix.
+;
+;   AURA_PATH=~/aura-perf:~/.aura/current/lib AURA_SANDBOX=off \
+;     aura --preset dev perf/mine-tick.aura
+;
+; The seed is lib/phys.aura + perf/workload.aura (the same seed perf/spec.aura
+; uses), so the defines timed here are the ones the server tick runs.
+
+(require "lib/perf/util" all:)
+(require "lib/perf/score" all:)
+(require "lib/perf/profile" all:)
+(require "lib/perf/cct" all:)
+(require "lib/perf/query" all:)
+(require "lib/perf/gate" all:)
+(require "lib/perf/gene" all:)
+(require "std/string" all:)
+
+; ── install the real physics seed ───────────────────────────────────
+(define (seed-source)
+  (let ((phys (perf:read-text "lib/phys.aura")))
+    (string-append
+     (string-replace
+      (string-replace
+       (string-replace phys "0.0000001" "(/ 1.0 (* 1000.0 10000.0))")
+       "0.0008" "(/ 8.0 10000.0)")
+      "0.0001" "(/ 1.0 10000.0)")
+     "\n"
+     (perf:read-text "perf/workload.aura"))))
+
+(set-code (seed-source))
+(eval-current)
+
+; ── regions: the tick's own defines, timed in-process ───────────────
+(define course (perf-course 0))
+(define p (make-player 0.4))
+
+(define (regions)
+  (list
+    (hash "name" "bench-kernel" "calls" 1 "workload" #t
+          "stack" (list "bench-kernel")
+          "thunk" (lambda () (bench-kernel (perf-courses 2))))
+    (hash "name" "step" "calls" 1200
+          "stack" (list "bench-kernel" "step")
+          "thunk" (lambda ()
+                    (let loop ((i 0))
+                      (if (>= i 1200) 0
+                          (begin (step p course PERF-RULES PHYS-DT) (loop (+ i 1)))))))
+    (hash "name" "collide" "calls" 1200
+          "stack" (list "bench-kernel" "step" "collide")
+          "thunk" (lambda ()
+                    (let loop ((i 0))
+                      (if (>= i 1200) 0
+                          (begin (collide p course PERF-RULES) (loop (+ i 1)))))))
+    (hash "name" "step-poppers" "calls" 1200
+          "stack" (list "bench-kernel" "step" "step-poppers")
+          "thunk" (lambda ()
+                    (let loop ((i 0))
+                      (if (>= i 1200) 0
+                          (begin (step-poppers course p PHYS-DT) (loop (+ i 1)))))))
+    (hash "name" "nudge-flyers" "calls" 1200
+          "stack" (list "bench-kernel" "step" "nudge-flyers")
+          "thunk" (lambda ()
+                    (let loop ((i 0))
+                      (if (>= i 1200) 0
+                          (begin (nudge-flyers course PHYS-DT) (loop (+ i 1)))))))
+    (hash "name" "over-gap?" "calls" 1200
+          "stack" (list "bench-kernel" "step" "over-gap?")
+          "thunk" (lambda ()
+                    (let loop ((i 0))
+                      (if (>= i 1200) 0
+                          (begin (over-gap? 5.0 1.0 course) (loop (+ i 1)))))))
+    (hash "name" "pset" "calls" 15600
+          "stack" (list "bench-kernel" "step" "pset")
+          "thunk" (lambda ()
+                    (let loop ((i 0))
+                      (if (>= i 15600) 0
+                          (begin (pset p 0 0.5) (loop (+ i 1)))))))
+    (hash "name" "pxs" "calls" 36000
+          "stack" (list "bench-kernel" "step" "pxs")
+          "thunk" (lambda ()
+                    (let loop ((i 0))
+                      (if (>= i 36000) 0
+                          (begin (pxs p 14) (loop (+ i 1)))))))))
+
+; ── collect + mine ──────────────────────────────────────────────────
+(define profile (perf:collect (regions) (hash "repeats" 3)))
+
+(display "=== aura-perf mining: aura-runner server-tick physics ===\n")
+(display "tool=")(display (hash-ref profile "tool" ""))(newline)
+(let loop ((hs (hash-ref profile "hotspots" '())))
+  (if (null? hs) #t
+      (let ((h (car hs)))
+        (display "hotspot ")(display (hash-ref h "name" ""))
+        (display " self-ms=")(display (hash-ref h "self-ms" 0))
+        (display " calls=")(display (hash-ref h "calls" 0))
+        (display " share=")(display (hash-ref h "share" 0))
+        (display " stack=")(display (hash-ref h "stack" '()))
+        (newline)
+        (loop (cdr hs)))))
+
+(define mined (perf:mine profile))
+(display "mine class=")(display (hash-ref mined "class" ""))(newline)
+(display "mine hot-node=")(display (hash-ref mined "hot-node" ""))(newline)
+(display "mine site=")(display (hash-ref mined "site" ""))(newline)
+(display "mine prefix=")(display (hash-ref mined "prefix" '()))(newline)
+(display "mine hot-ms=")(display (hash-ref mined "hot-ms" 0))(newline)
+(display "mine sibling-ms=")(display (hash-ref mined "sibling-ms" 0))(newline)
+(display "mine actionable=")(display (hash-ref mined "actionable" '()))(newline)
+
+; ── heap-growth evidence beside the profile ─────────────────────────
+(define (snap label)
+  (let ((gh (stats:get "gc-heap-stats"))
+        (cs (stats:get "closure:stats"))
+        (em (engine:metrics)))
+    (let ((ck (hash-ref em "compiler" (hash))))
+      (display label)
+      (display " pairs=")(display (hash-ref gh "pairs" -1))
+      (display " pairs-free=")(display (hash-ref gh "pairs-free" -1))
+      (display " tw-calls=")(display (hash-ref cs "tw-calls" -1))
+      (display " ir-calls=")(display (hash-ref cs "ir-calls" -1))
+      (display " env-size=")(display (hash-ref ck "env_frames_size_total" -1))
+      (newline))))
+(snap "heap-before")
+(bench-kernel (perf-courses 2))
+(bench-kernel (perf-courses 2))
+(snap "heap-after-2-kernels")
+(display "done\n")

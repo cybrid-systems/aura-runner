@@ -1,0 +1,36 @@
+; Writes perf/golden-coins.txt: the expected digest of the coin-course
+; workload. The oracle of the coin spec reads this file, so a candidate is
+; compared against a value that does not come from the code under test.
+;
+;   AURA_SANDBOX=off aura --preset dev perf/make-golden-coins.aura
+;
+; Line n is the digest of the first n level-groups (each group = COIN-LEVELS
+; levels). A candidate that changes the placement by one coin changes the
+; digest, and the checksum rejects it.
+
+(require "./seed-source-coins")
+
+(set-code (seed-source-coins))
+(eval-current)
+
+(define GOLDEN-GROUPS 3)
+
+(define lines
+  (let loop ((n 1) (acc '()))
+    (if (> n GOLDEN-GROUPS)
+        (reverse acc)
+        (loop (+ n 1) (cons (coin-kernel (* n COIN-LEVELS)) acc)))))
+
+(define text
+  (let loop ((xs lines) (acc ""))
+    (if (null? xs)
+        acc
+        (loop (cdr xs) (string-append acc (car xs) "\n")))))
+
+(if (> (length lines) 0)
+    (begin
+      (write-file "perf/golden-coins.txt" text)
+      (display "wrote perf/golden-coins.txt ")
+      (display (length lines))
+      (display " lines\n"))
+    (display "no lines\n"))

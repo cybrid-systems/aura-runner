@@ -1,0 +1,6 @@
+; wrong-scale candidate for the coin-course target: shift every coin's x by
+; +1.0 on the way in. The digest covers x, so the checksum must reject it.
+; Rebinds coin-make (the single constructor every placed coin goes through).
+
+(define (coin-make x lane y)
+  (piece 5.0 (+ x 1.0) 0.42 0.42 y lane))

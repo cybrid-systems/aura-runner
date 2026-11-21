@@ -1,0 +1,54 @@
+; The seed of the coin-course target: phys + sexp + gen + coins + workload,
+; flattened into one module so the define a candidate rebinds
+; (coin-open-level!) lives in the module the runtime mutates.
+;
+; gen.aura's load-coins! does a (require "lib/coins"); in the flattened seed
+; coins is already present, so that require is replaced with a no-op #t.
+; The three scientific-notation float literals of phys.aura are written as
+; exact quotients (cybrid-systems/aura#5295), bit-for-bit the same double.
+
+(define (seed-source-coins)
+  (let ((phys (read-file "lib/phys.aura"))
+        (sexp (read-file "lib/sexp.aura"))
+        (gen (read-file "lib/gen.aura"))
+        (coins (read-file "lib/coins.aura")))
+    ; coin-open is #f or a 5-element list. The post-mutate typechecker reads
+    ; the #f init as Bool and rejects car/cdr on it ("expected (? -> ?), got
+    ; Bool"), which blocks EVERY rebind in this seed. Narrow the guards to
+    ; (pair? coin-open): behavior-preserving (a list is the only truthy value
+    ; coin-open takes), and it lets the checker see the else-branch is a pair.
+    ; Same shape as the phys seed's exact-quotient float rewrite (#5295): a
+    ; seed-only transform that does not change the running program's values.
+    (let ((coins-guarded
+           (string-replace
+            (string-replace
+             (string-replace
+              (string-replace
+               (string-replace coins
+                "(define (coin-open-triple)\n  (list (car (cdr (cdr coin-open)))\n        (car (cdr (cdr (cdr coin-open))))\n        (car (cdr (cdr (cdr (cdr coin-open)))))))"
+                "(define (coin-open-triple)\n  (if (pair? coin-open)\n      (list (car (cdr (cdr coin-open)))\n            (car (cdr (cdr (cdr coin-open))))\n            (car (cdr (cdr (cdr (cdr coin-open))))))\n      (list 0 0 0)))")
+               "(define (coin-span! x1)\n  (if (and coin-course-on coin-open (number? x1))"
+               "(define (coin-span! x1)\n  (if (and coin-course-on (pair? coin-open) (number? x1))")
+              "(define (coin-bump-open lane)\n  (let ((n0 (car (cdr (cdr coin-open))))\n        (n1 (car (cdr (cdr (cdr coin-open)))))\n        (n2 (car (cdr (cdr (cdr (cdr coin-open)))))))\n    (set! coin-open\n      (list (car coin-open) (car (cdr coin-open))\n            (if (< lane 0.5) (+ n0 1) n0)\n            (if (and (>= lane 0.5) (< lane 1.5)) (+ n1 1) n1)\n            (if (>= lane 1.5) (+ n2 1) n2)))))"
+              "(define (coin-bump-open lane)\n  (if (pair? coin-open)\n      (let ((n0 (car (cdr (cdr coin-open))))\n            (n1 (car (cdr (cdr (cdr coin-open)))))\n            (n2 (car (cdr (cdr (cdr (cdr coin-open)))))))\n        (set! coin-open\n          (list (car coin-open) (car (cdr coin-open))\n                (if (< lane 0.5) (+ n0 1) n0)\n                (if (and (>= lane 0.5) (< lane 1.5)) (+ n1 1) n1)\n                (if (>= lane 1.5) (+ n2 1) n2))))\n      #f))")
+             "(define (coin-note! x lane)\n  (if (or (not coin-course-on) (not coin-note-on) (not coin-open))"
+             "(define (coin-note! x lane)\n  (if (or (not coin-course-on) (not coin-note-on) (not (pair? coin-open)))")
+            "(define (coin-window-counts x)\n  (if (or (not coin-course-on) (not coin-note-on) (not coin-open))"
+            "(define (coin-window-counts x)\n  (if (or (not coin-course-on) (not coin-note-on) (not (pair? coin-open)))")))
+      (string-append
+       (string-replace
+        (string-replace
+         (string-replace phys "0.0000001" "(/ 1.0 (* 1000.0 10000.0))")
+         "0.0008" "(/ 8.0 10000.0)")
+        "0.0001" "(/ 1.0 10000.0)")
+       "\n"
+       sexp "\n"
+       (string-replace
+        (string-replace
+         (string-replace gen "(require \"lib/phys\")\n" "")
+         "(require \"lib/sexp\")\n" "")
+        "(require \"lib/coins\")" "#t")
+       "\n"
+       (string-replace coins-guarded "(require \"lib/phys\")\n" "")
+       "\n"
+       (read-file "perf/workload-coins.aura")))))

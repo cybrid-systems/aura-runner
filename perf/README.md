@@ -232,3 +232,92 @@ time; the rest is the physics step, the same code the server tick runs.
 And a single define can only win a few percent of the target, so a gate
 with a program-wide floor can never pass it - see
 <aura-perf/docs/roadmap.md>.
+
+## The coin-course target (long-run growth)
+
+    AURA_PATH=~/aura-perf:~/.aura/current/lib AURA_SANDBOX=off \
+      aura --preset dev perf/spec-coins.aura
+
+The physics and autopilot targets measure STEADY-STATE cost. The reported
+symptom — frames stutter after the run has been up a while — is time-dependent,
+so this target measures the part that grows: the coin course. The seed is
+`lib/coins.aura` on `lib/phys.aura` + `lib/sexp.aura` + `lib/gen.aura`,
+flattened (`seed-source-coins.aura`), so `coin-open-level!` lives in the
+mutated module. The kernel lays coins across 120 levels; the checksum is the
+digest of every coin's `(x, lane, worth)` (`golden-coins.txt`).
+
+`coin-closed` was appended once per level and never trimmed, while
+`coin-window-counts` reads only `(coin-last coin-closed 1)` / `(... 2)`. Every
+older entry was walked by `coin-len` / `coin-drop-n` on every coin placed but
+never summed: O(levels) per coin, unbounded over a long run. The candidate
+`coin-window-trim` keeps just the two-level window. It is provably
+behavior-preserving (the 180-level placement digest is byte-identical) and
+wins its own site 4.3x:
+
+```
+null-site coin-window-counts ms=308 calls=1358
+candidate coin-window-trim checksum ok=1 heldout-ms=3405
+  site coin-window-counts ms=72 calls=1358
+  site-floor base=308 cand=72 floor-pct=20 site-ok=1
+  PASS reason=gate-pass
+candidate coin-wrong-scale checksum ok=0 ROLLBACK reason=checksum
+```
+
+The whole 120-level kernel only drops 6.3% (3635->3405ms), below the 20%
+program floor, so the candidate is kept on the SITE floor — the per-define
+bar aura-perf added for exactly this shape. The fix is now the library's body
+(`lib/coins.aura`).
+
+Two seed-only transforms make the target rebindable on this nightly, both
+behavior-preserving (the golden is unchanged):
+- the three scientific-notation float literals of `lib/phys.aura` are written
+  as exact quotients (`#5295`), as in `spec.aura`;
+- `coin-open` is `#f` or a list; the post-mutate typechecker reads the `#f`
+  init as `Bool` and rejects `car`/`cdr` on it (`expected (? -> ?), got Bool`),
+  which blocks EVERY rebind in the seed. The guards are narrowed to
+  `(pair? coin-open)` — a list is the only truthy value `coin-open` takes, so
+  the running program's values do not change.
+
+### The stutter, attributed
+
+`perf/mine-tick.aura` drives the aura-perf mining core (`perf:collect` +
+`perf:mine`) over the tick's own defines on this nightly. The full autotune
+loop needs `std/bus` (the `bus-call` kernel primitive), which this nightly
+(`9e2b4ecd`) does not ship; the mining core loads without it.
+
+```
+mine class=flat-hot hot-node=step site=bench-kernel prefix=(bench-kernel step)
+hotspot step    self-ms=2898 share=35   stack=bench-kernel>step
+hotspot collide self-ms=1047 share=12   stack=bench-kernel>step>collide
+```
+
+The physics runs entirely on the tree-walker (`closure:stats`: ~13M tw-calls,
+0 ir-calls per kernel) — `main.aura`'s `set!`/`cond`/`while`/`json-encode`
+force the fallback, and the physics defines are reached as TW closures.
+
+The time-dependent part is a runtime leak, not a target define: every float
+op on the general TW path boxes a double into the process-global
+`g_float_pool` (`aura_alloc_float`), which is append-only and cleared only at
+session reset. The TW/IR heap reclaim frees pairs/cells/vectors/strings but
+never the float pool. A float loop that defeats the `#5302` raw-double fast
+path (list accumulator + `or` test + helper call — the physics shape) leaks
+~16MB RSS per 2M ops with the evaluator pair heap flat; over 40M ops RSS
+climbs 144MB->461MB linearly. The `#5302` fast path keeps a bare-comparison
+float accumulator unboxed and does NOT leak — the physics loops miss it
+because of their list accumulators and `or`/`and` tests. On this 16GB VM the
+per-op latency effect is small within 40M ops, so the leak is a memory bug
+first; on a long session it is the mechanism that degrades the run. The
+recurring 100-300ms spikes are the level gate (trials + rebind + eval-current
++ roster-evolve) and chunk spawn, every ~5s; the boot stall is the deferred
+module compile (`load-slow-one`, ~7.7s).
+
+| file | what it is |
+|---|---|
+| `workload-coins.aura` | the coin-course kernel, digest, and worldline measurement |
+| `seed-source-coins.aura` | flattens phys+sexp+gen+coins+workload; the two seed-only transforms |
+| `spec-coins.aura` | the gated target: null vs candidate, checksum, program + site floor |
+| `make-golden-coins.aura` | writes `golden-coins.txt`; run after `lib/coins.aura` changes |
+| `golden-coins.txt` | the expected coin-placement digest |
+| `mine-tick.aura` | drives `perf:collect` + `perf:mine` over the tick's defines |
+| `candidates/coin-window-trim.aura` | the kept fix: trim `coin-closed` to the window |
+| `candidates/coin-wrong-scale.aura` | negative control: shift coin x; checksum rejects |

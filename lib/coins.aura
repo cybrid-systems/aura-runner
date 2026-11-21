@@ -756,7 +756,13 @@
 (define (coin-open-level! x0 x1)
   (set! coin-course-on #t)
   (if coin-open
-    (set! coin-closed (append coin-closed (list (coin-open-triple))))
+    ; coin-window-counts only ever reads (coin-last coin-closed 1) or
+    ; (coin-last coin-closed 2). Older entries were walked by coin-len /
+    ; coin-drop-n on every coin placed but never summed, so the walk was
+    ; O(levels) per coin and grew without bound over a long run. Keep just
+    ; the two-level window: behavior-preserving, O(1) per coin.
+    (set! coin-closed
+          (coin-last (append coin-closed (list (coin-open-triple))) 2))
     #f)
   (set! coin-open (list (exact->inexact x0) (exact->inexact x1)
                         (car coin-ahead)

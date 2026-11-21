@@ -1,0 +1,22 @@
+; The candidate: trim coin-closed to the two-level window it is read by.
+;
+; coin-window-counts only ever reads (coin-last coin-closed 1) or
+; (coin-last coin-closed 2). Every older entry is walked by coin-len /
+; coin-drop-n on every coin placed, but never contributes to the sum. Keeping
+; only the last two entries is exactly behavior-preserving and turns the
+; per-coin walk from O(levels) into O(1).
+;
+; This rebinds coin-open-level! (the only writer that appends to coin-closed).
+; The body is identical except the append keeps the last two entries.
+
+(define (coin-open-level! x0 x1)
+  (set! coin-course-on #t)
+  (if coin-open
+    (set! coin-closed
+          (coin-last (append coin-closed (list (coin-open-triple))) 2))
+    #f)
+  (set! coin-open (list (exact->inexact x0) (exact->inexact x1)
+                        (car coin-ahead)
+                        (car (cdr coin-ahead))
+                        (car (cdr (cdr coin-ahead)))))
+  (set! coin-ahead (list 0 0 0)))
