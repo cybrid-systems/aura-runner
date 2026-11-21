@@ -448,6 +448,9 @@ const finishHigh = postText.slice(postText.indexOf("const FINISH_HIGH_FS"), post
 assert(finishHigh.includes("clamp(uBlur, 0.0, 1.0) * 0.36"), "speed blur scales with uBlur");
 assert(finishHigh.includes("mix(c, tail, 0.7)"), "the soft tail stays a hint of the sharp frame");
 assert(!finishHigh.includes("(1.0 - sharp) * 0.42"), "speed blur is not a flat mix of the eighth-res image");
+assert(finishHigh.includes("edge * 0.46 * (1.0 - body)"), "fxaa stays off the runner");
+assert(finishHigh.includes("/ 255.0"), "the finish dithers under one colour step");
+assert(postText.includes("RGBA16F is filterable"), "the scene buffer samples linearly");
 assert(postText.includes("DOWNSAMPLE_FS") && !postText.includes("blurPass(flat, 2 / flat.w"), "speed blur does not run four full-frame passes");
 const pageText = readFileSync(new URL("../web/main.mjs", import.meta.url), "utf8");
 assert(pageText.includes("window.__lumenForceNear"), "a recording can force one near miss");

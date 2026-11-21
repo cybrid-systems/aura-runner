@@ -113,6 +113,7 @@ export function createAudio() {
       mode: book.current.mode,
       pending: book.pending ? book.pending.op : "",
       pendingId: book.pending ? book.pending.phrase.id : "",
+      track: document.documentElement.dataset.musicTrack || "",
       previous: book.previous.id,
       effect: fxKind,
       tempo: book.current.tempo,
@@ -204,6 +205,7 @@ export function createAudio() {
     }
     bedKnown = true;
     bed = unlocked ? "synth" : "wait";
+    delete document.documentElement.dataset.musicTrack;
     if (unlocked) {
       mark("synth");
       applyGains();
@@ -250,6 +252,8 @@ export function createAudio() {
       return;
     }
     const gen = ++playGen;
+    const label = track.name || track.url;
+    if (label) document.documentElement.dataset.musicTrack = String(label);
     song.loop = playState.tracks.length === 1;
     song.onended = () => {
       if (gen !== playGen || song.loop) return;

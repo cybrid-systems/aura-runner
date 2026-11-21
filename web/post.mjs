@@ -166,8 +166,18 @@ void main() {
       dir = dir / max(length(dir), 1e-4) * px;
       vec3 a = texture(uTex, vUv + dir * 0.75).rgb;
       vec3 b = texture(uTex, vUv - dir * 0.75).rgb;
-      c = mix(c, (a + b) * 0.5, edge * 0.72);
+      c = mix(c, (a + b) * 0.5, edge * 0.46);
     }
+  }
+  // Quiet frames only. A speed tail is already soft, and sharpening it
+  // reprints the edge the blur just joined.
+  if (uBlur < 0.02 && uFxaa > 0.5) {
+    vec2 sp = 1.0 / max(uRes, vec2(1.0));
+    vec3 avg = texture(uTex, vUv + vec2(sp.x, 0.0)).rgb;
+    avg += texture(uTex, vUv - vec2(sp.x, 0.0)).rgb;
+    avg += texture(uTex, vUv + vec2(0.0, sp.y)).rgb;
+    avg += texture(uTex, vUv - vec2(0.0, sp.y)).rgb;
+    c += (c - avg * 0.25) * 0.18;
   }
   if (uBlur > 0.001) {
     vec2 dir = (vUv - uFocus) * uBlur * 0.035;
@@ -178,7 +188,10 @@ void main() {
     acc += texture(uTex, vUv - dir * 2.0).rgb * 0.1;
     c = acc;
   }
-  o = vec4(c, 1.0);
+  // One step of interleaved gradient noise. Flat sky and fog stop banding
+  // on an 8-bit target, and the amplitude stays under one code value.
+  c += (fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) - 0.5) / 255.0;
+  o = vec4(clamp(c, 0.0, 1.0), 1.0);
 }`;
 
 const COMPOSITE_HIGH_FS = COMPOSITE_FS
@@ -225,9 +238,9 @@ void main() {
   o = vec4(c * 0.25, 1.0);
 }`;
 
-// High finish. The medium finish source stays FINISH_FS. FXAA matches
-// that pass. The speed tail is four samples of the eighth-res image,
-// only along the line away from the runner.
+// High finish. The medium finish source stays FINISH_FS. FXAA is lighter
+// here and stays off the runner. The speed tail is four samples of the
+// eighth-res image, only along the line away from the runner.
 const FINISH_HIGH_FS = `#version 300 es
 precision highp float;
 uniform sampler2D uTex;
@@ -242,6 +255,8 @@ out vec4 o;
 float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
 void main() {
   vec3 c = texture(uTex, vUv).rgb;
+  vec2 hero = clamp(uHero, vec2(0.0), vec2(1.0));
+  float body = 1.0 - smoothstep(0.045, 0.18, length((vUv - hero) * vec2(0.78, 1.35)));
   if (uFxaa > 0.5) {
     vec2 px = 1.0 / max(uRes, vec2(1.0));
     float lL = luma(texture(uTex, vUv + vec2(-px.x, 0.0)).rgb);
@@ -254,12 +269,19 @@ void main() {
       dir = dir / max(length(dir), 1e-4) * px;
       vec3 a = texture(uTex, vUv + dir * 0.75).rgb;
       vec3 b = texture(uTex, vUv - dir * 0.75).rgb;
-      c = mix(c, (a + b) * 0.5, edge * 0.72);
+      // The runner stays on the sharp sample. Scenery edges soften a little.
+      c = mix(c, (a + b) * 0.5, edge * 0.46 * (1.0 - body));
     }
   }
+  if (uBlur < 0.02) {
+    vec2 sp = 1.0 / max(uRes, vec2(1.0));
+    vec3 avg = texture(uTex, vUv + vec2(sp.x, 0.0)).rgb;
+    avg += texture(uTex, vUv - vec2(sp.x, 0.0)).rgb;
+    avg += texture(uTex, vUv + vec2(0.0, sp.y)).rgb;
+    avg += texture(uTex, vUv - vec2(0.0, sp.y)).rgb;
+    c += (c - avg * 0.25) * 0.22 * (1.0 - body);
+  }
   if (uBlur > 0.001) {
-    vec2 hero = clamp(uHero, vec2(0.0), vec2(1.0));
-    float body = 1.0 - smoothstep(0.045, 0.18, length((vUv - hero) * vec2(0.78, 1.35)));
     float z = texture(uDepth, vUv).r;
     float nearZ = 1.0 - smoothstep(0.97, 0.995, z);
     float sharp = clamp(max(body, nearZ * 0.9), 0.0, 1.0);
@@ -276,7 +298,8 @@ void main() {
     tail = mix(c, tail, 0.7);
     c = mix(c, tail, (1.0 - sharp) * clamp(uBlur, 0.0, 1.0) * 0.36);
   }
-  o = vec4(c, 1.0);
+  c += (fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) - 0.5) / 255.0;
+  o = vec4(clamp(c, 0.0, 1.0), 1.0);
 }`;
 
 // Quarter-resolution reflection. Gloss is the scene alpha written by the
@@ -472,9 +495,10 @@ export const POST_SOURCES = {
 function colorTex(gl, w, h, hdr) {
   const tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
-  const filter = hdr ? gl.NEAREST : gl.LINEAR;
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+  // RGBA16F is filterable in WebGL2. Linear sampling keeps bloom and
+  // the light shafts off the texel grid. Depth stays nearest.
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   if (hdr) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);

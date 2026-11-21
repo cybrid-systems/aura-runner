@@ -17,7 +17,8 @@
 # the synthesized music.
 # music_dir = "/Users/you/Music/lumen"
 
-# shuffle (the default) or ordered.
+# shuffle (the default) picks a different song when one ends.
+# ordered keeps the file-name order. One song still loops.
 # music_order = "shuffle"
 
 # Another OpenAI-compatible service. Leave these unset for DeepSeek V4.1 Flash

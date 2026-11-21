@@ -671,7 +671,10 @@ def check_music(folder):
         except ConfigError:
             order = "shuffle"
         noun = "track" if count == 1 else "tracks"
-        sys.stdout.write("%d %s will loop (%s).\n" % (count, noun, order))
+        if count > 1 and order != "ordered":
+            sys.stdout.write("%d %s will play at random (%s).\n" % (count, noun, order))
+        else:
+            sys.stdout.write("%d %s will loop (%s).\n" % (count, noun, order))
         return 0
     sys.stdout.write(found["message"] + "\n")
     return 0

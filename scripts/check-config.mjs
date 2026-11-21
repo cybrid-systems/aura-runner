@@ -256,7 +256,7 @@ try {
     throw new Error("check missing " + missingCheck.status + " " + missingCheck.stdout);
   }
   const okCheck = py(["--check-music", songs], base);
-  if (okCheck.status !== 0 || !okCheck.stdout.includes("2 tracks will loop")) {
+  if (okCheck.status !== 0 || !okCheck.stdout.includes("2 tracks will play at random")) {
     throw new Error("check songs " + okCheck.status + " " + okCheck.stdout);
   }
   const emptyCheck = py(["--check-music", emptyDir], base);

@@ -540,9 +540,8 @@ export function chordRoot(phrase, step) {
 }
 
 // A folder of the player's own tracks. shuffle is the default. ordered
-// keeps the file-name order. One track loops; several tracks advance,
-// and a shuffle pass does not open the next cycle on the track that
-// just ended.
+// keeps the file-name order. One track loops. Several tracks in shuffle
+// start on a shuffled song, and each ending song starts a different one.
 export function arrangeTracks(tracks, order, random = Math.random) {
   const list = Array.isArray(tracks) ? tracks.slice() : [];
   if (order === "ordered") return list;
@@ -559,11 +558,6 @@ export function arrangeTracks(tracks, order, random = Math.random) {
   return list;
 }
 
-function trackId(track) {
-  if (track && typeof track === "object") return String(track.url || track.name || "");
-  return String(track);
-}
-
 export function freshPlaylist(tracks, order, random = Math.random) {
   const mode = order === "ordered" ? "ordered" : "shuffle";
   const list = Array.isArray(tracks) ? tracks : [];
@@ -574,6 +568,20 @@ export function freshPlaylist(tracks, order, random = Math.random) {
     failed: 0,
     action: list.length ? "play" : "synth",
   };
+}
+
+// A uniform draw over every track except the one that just played.
+// random() of 0 picks the first remaining slot. A bad draw does the same.
+export function pickNextIndex(count, index, random = Math.random) {
+  const n = count | 0;
+  if (n <= 1) return 0;
+  const i = ((index % n) + n) % n;
+  const raw = Number(random());
+  const u = Number.isFinite(raw) ? raw : 0;
+  let span = Math.floor(u * (n - 1));
+  if (span < 0) span = 0;
+  if (span > n - 2) span = n - 2;
+  return span >= i ? span + 1 : span;
 }
 
 export function advancePlaylist(state, event, random = Math.random) {
@@ -591,15 +599,14 @@ export function advancePlaylist(state, event, random = Math.random) {
     return { order, tracks, index: (index + 1) % count, failed: nextFailed, action: "play" };
   }
   if (count === 1) return { order, tracks, index: 0, failed: 0, action: "play" };
-  let nextTracks = tracks;
-  let nextIndex = (index + 1) % count;
-  if (order === "shuffle" && nextIndex === 0) {
-    const last = trackId(tracks[index]);
-    nextTracks = arrangeTracks(tracks, "shuffle", random);
-    if (nextTracks.length > 1 && trackId(nextTracks[0]) === last) {
-      nextTracks = nextTracks.slice(1).concat(nextTracks[0]);
-    }
-    nextIndex = 0;
+  if (order === "shuffle") {
+    return {
+      order,
+      tracks,
+      index: pickNextIndex(count, index, random),
+      failed: 0,
+      action: "play",
+    };
   }
-  return { order, tracks: nextTracks, index: nextIndex, failed: 0, action: "play" };
+  return { order, tracks, index: (index + 1) % count, failed: 0, action: "play" };
 }

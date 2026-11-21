@@ -3,7 +3,7 @@
 import {
   HOME, LIMITS, MAX_VOICES,
   acceptPhrase, advancePlaylist, arrangeTracks, audibleAfterGesture, atBar, check, chooseBed, createBook, effectFor, emit, evolve,
-  freshPlaylist, layersFor, liftKey, offerKeep, offerRollback, quantize, recoverTime, rolesAt,
+  freshPlaylist, layersFor, liftKey, offerKeep, offerRollback, pickNextIndex, quantize, recoverTime, rolesAt,
   stepTime, tempoFor, volumeFromStore,
 } from "../web/music.mjs";
 
@@ -154,8 +154,18 @@ const wrapped = advancePlaylist({ order: "ordered", tracks: ordered.tracks, inde
 checkOk("playlist-wrap", wrapped.index === 0 && wrapped.tracks.join() === "a.mp3,b.ogg,c.wav");
 const shuffled = arrangeTracks(["a", "b", "c", "d"], "shuffle", () => 0);
 checkOk("playlist-shuffle", shuffled.join() === "b,c,d,a");
-const reshuffle = advancePlaylist({ order: "shuffle", tracks: ["a", "b"], index: 1, failed: 0 }, "end", () => 0);
-checkOk("playlist-reshuffle", reshuffle.action === "play" && reshuffle.index === 0 && reshuffle.tracks[0] === "a");
+const randomNext = advancePlaylist({ order: "shuffle", tracks: ["a", "b", "c", "d"], index: 2, failed: 0 }, "end", () => 0);
+checkOk("playlist-random-next", randomNext.action === "play" && randomNext.index === 0 && randomNext.tracks.join() === "a,b,c,d");
+const randomHigh = advancePlaylist({ order: "shuffle", tracks: ["a", "b", "c", "d"], index: 0, failed: 0 }, "end", () => 0.999);
+checkOk("playlist-random-high", randomHigh.index === 3 && randomHigh.tracks[0] === "a");
+checkOk("playlist-random-skip", pickNextIndex(4, 1, () => 0) === 0 && pickNextIndex(4, 1, () => 0.999) === 3);
+let stayed = false;
+for (let i = 0; i < 4; i += 1) {
+  for (let u = 0; u < 8; u += 1) {
+    if (pickNextIndex(4, i, () => u / 8) === i) stayed = true;
+  }
+}
+checkOk("playlist-no-repeat", !stayed);
 let skipped = freshPlaylist(["a", "b"], "ordered");
 skipped = advancePlaylist(skipped, "error");
 checkOk("playlist-skip", skipped.action === "play" && skipped.index === 1 && skipped.failed === 1);
