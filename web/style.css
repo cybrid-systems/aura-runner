@@ -629,6 +629,7 @@ html, body {
   cursor: pointer;
 }
 #model[hidden] { display: none; }
+#model[aria-disabled="true"] { cursor: default; }
 #again {
   position: fixed;
   left: 50%;

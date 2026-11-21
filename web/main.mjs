@@ -272,10 +272,15 @@ function applyHero(msg) {
 
 function paintModel() {
   const label = provider === "deepseek" ? "DeepSeek" : "";
-  modelBtn.hidden = providers.length < 2 || !label;
+  const canSwitch = providers.length >= 2 && !!label;
+  // One provider used to hide the button, so a live DeepSeek run looked offline.
+  modelBtn.hidden = !label;
   modelBtn.textContent = label || "Model";
   const which = modelName || label;
-  modelBtn.setAttribute("aria-label", which ? `Switch model, now ${which}` : "Switch model");
+  modelBtn.setAttribute("aria-disabled", canSwitch ? "false" : "true");
+  modelBtn.setAttribute("aria-label", canSwitch
+    ? `Switch model, now ${which}`
+    : (which ? `Asking ${which}` : "Model"));
 }
 
 function applyProvider(msg) {

@@ -808,8 +808,11 @@
          (start-pick (coin-choose-lane params rng hazards pace table x0 y0 name))
          (start (car start-pick))
          (rng1 (cadr start-pick)))
+    ; A shaped chain with no open first lane used to return two values.
+    ; coin-lay then took car of () and the core exited, so the road
+    ; ahead stopped and the picture ran out of obstacles.
     (if (and (not spread) (< start -0.1))
-      (list (list) rng1)
+      (list (list) rng1 counts0)
       (let ((end-pick (if (string=? name "switch")
                         (coin-other params rng1 start)
                         (list start rng1))))
@@ -868,7 +871,11 @@
           (if (null? gs)
             acc
             (let ((made (coin-one hazards pace span step cap params table rg (car gs) counts)))
-              (loop (cdr gs) (append acc (car made)) (cadr made) (car (cdr (cdr made)))))))))))
+              ; A short reply must not kill the tick. Skip that group
+              ; and keep the hazards already laid.
+              (if (and (pair? made) (pair? (cdr made)) (pair? (cdr (cdr made))))
+                (loop (cdr gs) (append acc (car made)) (cadr made) (car (cdr (cdr made))))
+                (loop (cdr gs) acc rg counts)))))))))
 
 (define (coin-near? pieces q)
   (let ((x (piece-x q))

@@ -122,6 +122,28 @@
                              (coin-reachable? early-line early-speed)))
 (expect "zig-clear" (and (coin-clear? zig) (coin-reachable? zig pace8)))
 
+; A zig whose first coin has no open lane. coin-emit used to hand back
+; two values, and coin-lay died on car of (). The core then stopped,
+; and the road ahead had no more obstacles.
+(define blocked-emit
+  (coin-emit (list) pace8 (list) blank (make-random 1) "zig" 2.0 4 1.2 0.7 (list 0 0 0)))
+(expect "blocked-emit"
+  (and (pair? blocked-emit)
+       (pair? (cdr blocked-emit))
+       (pair? (cdr (cdr blocked-emit)))
+       (null? (car blocked-emit))
+       (equal? (car (cdr (cdr blocked-emit))) (list 0 0 0))))
+(define blocked-wall
+  (list (piece 5.0 2.0 0.42 0.42 0.7 1.0)
+        (piece 7.0 0.2 6.0 1.65 0.0 -1.0 0.0)))
+(define blocked-laid
+  (coin-lay blocked-wall pace8 24.0 1.2 6
+            (hash "left" 0.34 "center" 0.33 "right" 0.33
+                  "mix" 0.2 "density" 0.4 "arc" 0.2
+                  "knob" 0 "prev" #f "force" "zig")
+            11))
+(expect "blocked-lay" (and (pair? blocked-laid) (coin-clear? blocked-laid)))
+
 (define again (forced "zig" flat))
 (expect "replay" (equal? (coin-rows zig) (coin-rows again)))
 (define other (lay-text flat 0 8 (hash "left" 0.34 "center" 0.33 "right" 0.33
