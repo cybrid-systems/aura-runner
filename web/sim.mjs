@@ -4,7 +4,7 @@
 // Pot, toy and gate footprints match the mesh (web/render.mjs).
 
 import { FLY_HALF, FLY_REACH, POT_HALF, POT_REACH, POT_TOP, gateBarDepth } from "./render.mjs";
-import { paceOnGrade, roadGrade, roadHeight } from "./road.mjs";
+import { gradeForPace, paceOnGrade, roadGrade, roadHeight } from "./road.mjs";
 
 export { roadGrade, roadHeight };
 
@@ -325,7 +325,7 @@ function stepPoppers(pieces, p, dt) {
   }
 }
 
-export function step(p, pieces, rules, dt) {
+export function step(p, pieces, rules, dt, maxX = Infinity) {
   if (p[5] <= 0) return "dead";
   nudgeFlyers(pieces, dt);
   stepRivals(pieces, p, dt);
@@ -336,7 +336,7 @@ export function step(p, pieces, rules, dt) {
   const air = rulesAir(rules);
   const floor0 = roadHeight(p[0], pieces);
   const grade = roadGrade(p[0], pieces);
-  const speed = paceOnGrade(runSpeed(rules.speed, p), grade);
+  const speed = paceOnGrade(runSpeed(rules.speed, p), gradeForPace(p[0], pieces));
   const slideDur = rules.slide;
   const coyoteMax = rules.coyote;
   tickTimers(p, dt);
@@ -353,7 +353,9 @@ export function step(p, pieces, rules, dt) {
   const groundJump = buffered && canGround;
   const airJump = buffered && !groundJump && bank >= 1;
   if (groundJump || airJump) {
-    p[2] = 0;
+    // Leave the slope with the same hop a flat road would give. Grade 0
+    // starts from rest, which is the flat jump the trace checks.
+    p[2] = groundJump ? speed * grade : 0;
     p[4] = 0;
     p[7] = 0;
     p[3] = 0;
@@ -381,13 +383,27 @@ export function step(p, pieces, rules, dt) {
     p[2] = p[2] - g * dt;
   }
   p[1] = p[1] + p[2] * dt;
-  p[0] = p[0] + speed * dt;
+  // A stop past the sent road used to rewind x after the landing, so the
+  // body kept the floor of a hill it was not allowed to enter and hung there.
+  const x0 = p[0];
+  let x = x0 + speed * dt;
+  const cap = Number.isFinite(maxX) ? maxX : Infinity;
+  if (x0 >= cap) x = x0;
+  else if (x > cap) x = cap;
+  p[0] = x;
   // Downhill drops faster than one frame of gravity. Stay on the new
-  // floor unless this step is a jump. Grade 0 keeps the floor at 0.
+  // floor unless this step is a jump. The matched speed is the grade at
+  // the new point, not the raw change in height: a step would otherwise
+  // read as a vertical speed of tens of metres. Grade 0 keeps it at 0.
   const floor1 = roadHeight(p[0], pieces);
-  if (grounded && p[2] <= 0 && p[14] <= 0 && !overGap(p[0], bodyLane(p), pieces)) {
+  const grade1 = roadGrade(p[0], pieces);
+  // Unclamped motion uses speed * grade, the same product as lib/phys.aura.
+  // A clamped step uses only the distance that was actually travelled.
+  const climb = p[0] <= x0 || dt <= 0 ? 0
+    : (x0 + speed * dt <= cap ? speed * grade1 : grade1 * ((p[0] - x0) / dt));
+  if (grounded && p[2] <= climb + 1e-4 && p[14] <= 0 && !overGap(p[0], bodyLane(p), pieces)) {
     p[1] = floor1;
-    p[2] = 0;
+    p[2] = climb;
   }
   let ev = "ok";
   if (p[1] <= floor1 && overGap(p[0], bodyLane(p), pieces)) {
@@ -405,12 +421,13 @@ export function step(p, pieces, rules, dt) {
     if (ev === "oops") p[12] = 0;
   } else {
     if (p[1] <= floor1) {
-      // Rising into the next part of the hill must not cancel the jump.
-      // Falling still snaps, which is the flat landing the trace checks.
-      const rising = p[2] > 0 || p[14] > 1e-7;
+      // Rising means leaving the surface, not merely moving upward while
+      // the hill rises faster. Falling settles onto the slope. On a flat
+      // road climb is 0, so this is the landing the trace checks.
+      const rising = p[14] > 1e-7 || p[2] > climb + 0.02;
       p[1] = floor1;
       if (!rising) {
-        p[2] = 0;
+        p[2] = climb;
         p[14] = 0;
       }
     }

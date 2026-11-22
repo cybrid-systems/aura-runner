@@ -379,6 +379,17 @@
 (define (road-grade x pieces)
   (car (cdr (road-at x pieces))))
 
+; Pace looks a step ahead and behind so a crest does not lurch the speed
+; in one frame. A fully flat sample stays exactly 0, which keeps the
+; golden trace on the unscaled pace. Twin of gradeForPace in web/road.mjs.
+(define (grade-for-pace x pieces)
+  (let ((g (road-grade x pieces))
+        (a (road-grade (- x 2.0) pieces))
+        (b (road-grade (+ x 2.0) pieces)))
+    (if (and (= g 0.0) (= a 0.0) (= b 0.0))
+      0.0
+      (+ (* g 0.5) (* a 0.25) (* b 0.25)))))
+
 ; Uphill eases the pace. Downhill adds a little. Grade 0 must return
 ; the speed unchanged, or a flat step stops matching the golden trace.
 (define (pace-on-grade speed grade)
@@ -516,7 +527,7 @@
            (air (rules-air rules))
            (floor0 (road-height (player-x p) pieces))
            (grade (road-grade (player-x p) pieces))
-           (speed (pace-on-grade (run-speed (hash-ref rules "speed") p) grade))
+           (speed (pace-on-grade (run-speed (hash-ref rules "speed") p) (grade-for-pace (player-x p) pieces)))
            (slide-dur (hash-ref rules "slide"))
            (coyote-max (hash-ref rules "coyote"))
            (p0 (tick-timers p dt))
@@ -535,8 +546,10 @@
            (bank (if (< air 1.0) 0.0 (if grounded 1.0 (pxs p3 15))))
            (ground-jump (and buffered can-ground))
            (air-jump (and buffered (not ground-jump) (>= bank 1.0)))
+           ; A ground jump starts at the slope's vertical speed, then the
+           ; thrust adds the same hop as on a flat road. Grade 0 starts at 0.
            (p4 (cond
-                 (ground-jump (launch-jump p3 (if (>= air 1.0) 1.0 0.0) floor0))
+                 (ground-jump (pset (launch-jump p3 (if (>= air 1.0) 1.0 0.0) floor0) 2 (* speed grade)))
                  (air-jump (launch-jump p3 0.0 floor0))
                  ((and (>= air 1.0) grounded) (pset p3 15 1.0))
                  (else p3)))
@@ -564,20 +577,24 @@
            (x (+ (player-x p6) (* speed dt)))
            ; Downhill drops faster than one frame of gravity. A runner who
            ; was on the road, and is not jumping, stays on the new floor.
-           ; Grade 0 makes that floor 0, which is the snap finish-step
-           ; already applied.
+           ; Grade 0 makes that floor 0 and the matched speed 0, which is
+           ; the snap finish-step already applied on a flat road.
            (floor1 (road-height x pieces))
+           ; The surface speed is the grade here, not the raw change in
+           ; height. A step up would otherwise become a huge vertical speed.
+           ; Grade 0 keeps it at 0, which is the flat landing.
+           (climb (if (> dt 0.0) (* (road-grade x pieces) speed) 0.0))
            (sticky (and grounded
-                       (<= vy 0.0)
+                       (<= vy (+ climb 0.0001))
                        (<= thrust1 0.0)
                        (not (over-gap? x (body-lane p6) pieces))))
            (y2 (if sticky floor1 y))
-           (vy2 (if sticky 0.0 vy))
+           (vy2 (if sticky climb vy))
            (p7 (pset (pset (pset (pset p6 0 x) 1 y2) 2 vy2) 14 thrust1)))
-      (let ((done (finish-step p7 pieces rules)))
+      (let ((done (finish-step p7 pieces rules climb)))
         (list (ease-lane (car done) dt) (car (cdr done)) (car (cdr (cdr done)))))))))
 
-(define (finish-step p7 pieces rules)
+(define (finish-step p7 pieces rules climb)
   (let ((floor (road-height (player-x p7) pieces)))
     (if (and (<= (player-y p7) floor)
              (over-gap? (player-x p7) (body-lane p7) pieces))
@@ -591,16 +608,16 @@
                (ev (if (string=? ev0 "bump") "bump" (if fresh "oops" ev0)))
                (body (if (string=? ev "oops") (pset (car hit) 12 0.0) (car hit))))
           (list body (car (cdr hit)) ev)))
-      ; A rising floor used to zero the launch, so a jump onto a hill
-      ; stuck to the slope. Keep the upward speed and only sit the feet
-      ; on the surface. Falling still ends the jump, as on a flat road.
+      ; Rising means leaving the surface, not moving up more slowly than
+      ; the hill. Falling settles onto the slope. Climb is 0 on a flat
+      ; road, so that landing still zeroes the vertical speed.
       (let* ((vy (player-vy p7))
              (thrust (pxs p7 14))
-             (rising (or (> vy 0.0) (> thrust 0.0)))
+             (rising (or (> vy (+ climb 0.02)) (> thrust 0.0)))
              (landed (if (<= (player-y p7) floor)
                        (if rising
                          (pset p7 1 floor)
-                         (pset (pset (pset p7 1 floor) 2 0.0) 14 0.0))
+                         (pset (pset (pset p7 1 floor) 2 climb) 14 0.0))
                        p7)))
         (collide landed pieces rules)))))
 

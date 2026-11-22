@@ -1793,9 +1793,11 @@ export function createRenderer(canvas, hooks) {
     roadKeys.push({ s: at, bend: amp });
   }
   let camY = 2.15;
-  // Lags the road height so a climb rises into the frame before the eye
-  // catches it. Flat ground stays at 0, which is the old camera.
+  // Eye height follows the road under the camera. Look height follows the
+  // road ahead, so the view pitches by the hill itself. Flat ground keeps
+  // both at 0, which is the old camera.
   let camFloor = 0;
+  let camLook = 0;
   let camFloorSeen = false;
   let camFov = 0.92;
   let camLatVel = 0;
@@ -2433,17 +2435,19 @@ export function createRenderer(canvas, hooks) {
     backT = Math.max(0, backT - frameDt / 0.55);
     camS += (drawS - camS) * followS;
     const floorCam = roadHeight(camS, roadPieces);
+    const lookAhead = Math.max(6, speed * 1.3);
+    const floorLook = roadHeight(drawS + lookAhead, roadPieces);
+    // A head follows the path. The same ease on both heights keeps the
+    // pitch equal to the slope between them.
+    const followH = reduced ? 1 : 0.16;
     if (!camFloorSeen) {
       camFloor = floorCam;
+      camLook = floorLook;
       camFloorSeen = true;
     } else {
-      camFloor += (floorCam - camFloor) * (reduced ? 1 : 0.07);
+      camFloor += (floorCam - camFloor) * followH;
+      camLook += (floorLook - camLook) * followH;
     }
-    const gradeHere = roadGrade(drawS, roadPieces);
-    const gradeAhead = roadGrade(drawS + 8, roadPieces);
-    let gradeFeel = gradeHere * 0.6 + gradeAhead * 0.4;
-    if (gradeFeel > 0.2) gradeFeel = 0.2;
-    else if (gradeFeel < -0.2) gradeFeel = -0.2;
     const floaty = Math.max(0, (32 - grav) * 0.03);
     const wantY = 2.25 + floaty + (rel > 0.4 ? 0.18 : 0) - land * 0.16;
     camY += (wantY - camY) * (reduced ? 1 : 0.08);
@@ -2478,11 +2482,11 @@ export function createRenderer(canvas, hooks) {
     }
     drawFov = camFov - (hitStop > 0 ? (activeProfile.shake || 0.04) * (hitStop / 0.07) * 1.4 : 0);
     // One beat ahead, so the next move sits in the view. The eye stays
-    // 4.7 m behind, and a bend still rebases only past 8 m.
-    const lookAhead = speed * 1.3;
+    // 4.7 m behind, and a bend still rebases only past 8 m. The look
+    // height is the road there, so an uphill tips the view by that grade.
     const at = [
       basis.x + ox * 0.22 + Math.sin(psi) * lookAhead,
-      0.95 + Math.max(0, rel) * 0.18 + floaty * 0.4 + camFloor + gradeFeel * 13.6,
+      0.95 + Math.max(0, rel) * 0.18 + floaty * 0.4 + camLook,
       basis.z + oz * 0.22 + Math.cos(psi) * lookAhead,
     ];
     perspective(proj, drawFov, w / h, 0.08, 96);
@@ -2573,6 +2577,8 @@ export function createRenderer(canvas, hooks) {
     // one lollipop. Scale, offset and side stay stable as the camera moves.
     function drawTree(along, lat, kind, scale, near, sway) {
       const at = onRoad(along, lat);
+      const savedLift = deckLift;
+      deckLift = roadHeight(along, pieces);
       const swayX = sway * Math.cos(at.psi);
       const swayZ = -sway * Math.sin(at.psi);
       const leaf = mix3(pal.leaf, pal.leaf2, kind === 2 ? 0.2 : 0.62);
@@ -2603,6 +2609,7 @@ export function createRenderer(canvas, hooks) {
         push(top[0], 1.12 * scale, top[1], 0.98 * scale, 0.88 * scale, 0.98 * scale, near ? 1 : 0, leaf, 0.72, 0.02, at.psi);
         if (near) push(top[0] + 0.16, 1.22 * scale, top[1], 0.11, 0.11, 0.11, 1, [0.95, 0.34, 0.3], 0.32, 0.16, at.psi);
       }
+      deckLift = savedLift;
     }
     function drawCityMark(at, kind, scale, pal) {
       const s = scale;
@@ -2903,11 +2910,15 @@ export function createRenderer(canvas, hooks) {
               const mid = (s + e) * 0.5;
               const tile = onRoad(mid, lat);
               // A tenth of a step made each 2 m slab a different flat colour.
-              const vary = (laneHash(mid * 0.23 + lane * 17.2) - 0.5) * 0.03;
-              const top = vary >= 0 ? mix3(baseTop, [1, 1, 1], vary) : mix3(baseTop, [0.16, 0.18, 0.1], -vary);
               const deck = roadHeight(mid, pieces);
               const grade = roadGrade(mid, pieces);
-              push(tile.x, deck + 0.02, tile.z, 1.74, 0.12, e - s + 0.02, 0, top, lane === 1 ? 0.55 : 0.8, pal.custom && lane === 1 ? 0.08 : 0, tile.psi, 0, grade, grass);
+              // A ramp is one surface. The flat patchwork stays, and a slope
+              // overlaps less so the tilted ends do not flicker.
+              let vary = (laneHash(mid * 0.23 + lane * 17.2) - 0.5) * 0.03;
+              if (Math.abs(grade) > 0.001) vary *= 0.4;
+              const top = vary >= 0 ? mix3(baseTop, [1, 1, 1], vary) : mix3(baseTop, [0.16, 0.18, 0.1], -vary);
+              const lip = Math.abs(grade) > 0.001 ? 0.004 : 0.02;
+              push(tile.x, deck + 0.02, tile.z, 1.74, 0.12, e - s + lip, 0, top, lane === 1 ? 0.55 : 0.8, pal.custom && lane === 1 ? 0.08 : 0, tile.psi, 0, grade, grass);
             }
           }
           if (i < spans.length) cursor = spans[i][1];
@@ -3623,6 +3634,9 @@ export function createRenderer(canvas, hooks) {
     const squash = !alive ? 1 : shaped.squash;
     const widen = !alive ? 1 : shaped.widen;
     const leanLat = reduced ? 0 : shaped.lean;
+    // Uphill leans the body forward, downhill leans it back. The feet stay
+    // on the road. Flat grade leaves the pose where it was.
+    const posture = air || sliding || reduced ? 0 : Math.max(-0.14, Math.min(0.14, roadGrade(drawS, roadPieces) * 1.05));
     const spot = (ds, dlat) => sample(drawS + ds, px + dlat);
     const hero = st.hero || {};
     const heroPlan = hero.plan || "keeper";
@@ -3655,12 +3669,12 @@ export function createRenderer(canvas, hooks) {
           push(legL.x, py + 0.22, legL.z, 0.14, 0.4, 0.15, 0, pal.bodyDeep, 0.45, 0.02);
           push(legR.x, py + 0.22, legR.z, 0.14, 0.4, 0.15, 0, pal.bodyDeep, 0.45, 0.02);
         }
-        const torsoY = py + (sliding ? 0.3 : 0.5 * squash);
+        const torsoY = py + (sliding ? 0.3 : 0.5 * squash) - posture * 0.12;
         const torso = sliding ? 0.52 : 0.46 * widen;
-        const hip = spot(0, leanLat);
+        const hip = spot(posture * 0.4, leanLat);
         push(hip.x, torsoY, hip.z, torso, sliding ? 0.3 : 0.42 * squash, sliding ? 0.62 : 0.4, 0, pal.body, 0.35, 0.14);
-        const hy = torsoY + (sliding ? 0.16 : 0.34 * squash);
-        const head = spot(sliding ? 0.16 : 0, leanLat * 0.2);
+        const hy = torsoY + (sliding ? 0.16 : 0.34 * squash) - posture * 0.2;
+        const head = spot(sliding ? 0.16 : posture, leanLat * 0.2);
         push(head.x, hy, head.z, sliding ? 0.32 : 0.44, sliding ? 0.26 : 0.4, sliding ? 0.3 : 0.4, 1, pal.head, 0.2, 0.28);
         if (!sliding) {
           const flame = reduced ? 0 : Math.sin(st.time * 11) * 0.035;

@@ -529,16 +529,17 @@ function crest(pieces, x0) {
   }
   return { peak, y: p[1], vy: p[2], x: p[0], floor: roadHeight(p[0], pieces) };
 }
+const flatJump = crest([[1, 0, 80, 0.45, 0, -1]], 0.4);
 const hillJump = crest(upRoad, 0.4);
-assert(hillJump.peak > 0.7, `a jump on a hill leaves the road, peak ${hillJump.peak.toFixed(3)}`);
-assert(hillJump.vy === 0 && Math.abs(hillJump.y - hillJump.floor) < 0.02, "the hill jump comes back down");
+assert(hillJump.peak > flatJump.peak * 0.65, `an uphill hop stays close to a flat hop, ${hillJump.peak.toFixed(3)} vs ${flatJump.peak.toFixed(3)}`);
+assert(Math.abs(hillJump.y - hillJump.floor) < 0.05, "the hill jump comes back down");
 const shelf = [[1, 0, 3, 0.45, 0, -1], [1, 3, 30, 0.45, 1.5, -1]];
 const stepUp = crest(shelf, 2.7);
 assert(stepUp.peak > 0.4, `a rising floor does not cancel the jump, peak ${stepUp.peak.toFixed(3)}`);
 assert(stepUp.vy === 0 && Math.abs(stepUp.y - stepUp.floor) < 0.02, "the step-up jump lands");
 
-// The page used to skip step() once x reached the end of the sent road,
-// so a jump froze in the air. Gravity still runs; x does not run past.
+// The stop is applied before the floor sample. A shelf just past it must
+// not lift a runner who is still on the sent road, and a jump still falls.
 const roadStop = 40;
 const hung = makePlayer(roadStop - 0.05);
 pressJump(hung);
@@ -546,10 +547,7 @@ const sent = [[1, 0, roadStop + 12, 0.45, 0, -1]];
 let hungPeak = 0;
 let hungHigh = 0;
 for (let frame = 0; frame < 100; frame++) {
-  const heldX = hung[0];
-  step(hung, sent, slopeRules, DT);
-  if (heldX >= roadStop) hung[0] = heldX;
-  else if (hung[0] > roadStop) hung[0] = roadStop;
+  step(hung, sent, slopeRules, DT, roadStop);
   const rel = hung[1] - roadHeight(hung[0], sent);
   if (rel > hungPeak) hungPeak = rel;
   if (rel > 0.3) hungHigh++;
@@ -558,8 +556,14 @@ assert(hungPeak > 0.8, `a jump at the end of the road still rises, peak ${hungPe
 assert(hungHigh < 80, "a jump at the end of the road does not stay up");
 assert(hung[2] === 0 && hung[1] <= 0.02, "a jump at the end of the road comes back down");
 assert(hung[0] <= roadStop + 1e-9, "the run does not pass the sent road");
-assert(pageText.includes("heldX >= roadStop"), "the page keeps stepping at the end of the sent road");
+const trap = [[1, 0, roadStop + 0.5, 0.45, 0, -1], [1, roadStop + 0.5, 16, 0.45, 1.8, -1]];
+const parked = makePlayer(roadStop - 0.02);
+for (let frame = 0; frame < 40; frame++) step(parked, trap, slopeRules, DT, roadStop);
+assert(parked[0] <= roadStop + 1e-9, "the stop holds the runner");
+assert(parked[1] < 0.25, `a hill past the stop does not lift the runner, y ${parked[1].toFixed(3)}`);
+assert(pageText.includes("step(player, pieces, rules, DT, roadStop)"), "the page clamps inside the step");
 assert(!pageText.includes("player[0] < roadStop"), "the page does not skip the step at the end of the road");
+assert(!pageText.includes("heldX >= roadStop"), "the page does not rewind onto a future floor");
 
 // Positive grade raises local +Z. After yaw, local +Z is the road tangent
 // (sin ψ, 0, cos ψ), which is increasing arc length.
@@ -579,19 +583,20 @@ const turned = deckVertex(Math.PI / 2, 0.12, [0, 0.5, 0.5], slab);
 assert(turned[0] > 0.9 && turned[1] > front[1] - 1e-9, "the raised front follows the road tangent");
 assert(renderSrc.includes("local.y += local.z * grade"), "the deck shader shears with the grade");
 assert(renderSrc.includes("0, grade, grass"), "a road slab stores its grade");
-const feel = renderSrc.match(/gradeFeel \* ([0-9.]+)/);
-assert(feel, "the camera pitches with the grade");
-const pitchK = Number(feel[1]);
-function viewPitch(gradeFeel) {
-  const eyeY = 2.25;
-  const lookY = 0.95 + gradeFeel * pitchK;
-  const ahead = 4.7 + 8 * 1.3;
-  return Math.atan2(lookY - eyeY, ahead) * 180 / Math.PI;
+assert(renderSrc.includes("roadHeight(drawS + lookAhead, roadPieces)"), "the view looks along the road ahead");
+assert(!renderSrc.includes("gradeFeel"), "the view does not add a separate pitch");
+// Eye sits 2.25 m over the road at the camera. Look sits 0.95 m over the
+// road one span ahead. The change in pitch is the hill's own angle.
+function viewPitch(grade) {
+  const span = 4.7 + Math.max(6, 8 * 1.3);
+  const lookY = 0.95 + grade * span;
+  return Math.atan2(lookY - 2.25, span) * 180 / Math.PI;
 }
 const flatPitch = viewPitch(0);
-const upPitch = viewPitch(0.12);
-const downPitch = viewPitch(-0.12);
-assert(upPitch > flatPitch + 4, `uphill should tip the view up, ${upPitch.toFixed(2)} vs ${flatPitch.toFixed(2)}`);
-assert(downPitch < flatPitch - 4, `downhill should tip the view down, ${downPitch.toFixed(2)} vs ${flatPitch.toFixed(2)}`);
+const upPitch = viewPitch(0.08);
+const downPitch = viewPitch(-0.08);
+const hill = Math.atan(0.08) * 180 / Math.PI;
+assert(Math.abs((upPitch - flatPitch) - hill) < 1.2, `uphill pitch should match the grade, ${upPitch.toFixed(2)} vs ${flatPitch.toFixed(2)}`);
+assert(Math.abs((flatPitch - downPitch) - hill) < 1.2, `downhill pitch should match the grade, ${downPitch.toFixed(2)} vs ${flatPitch.toFixed(2)}`);
 
 console.log(`quality ok tier-hysteresis fbo-fallback context-loss persist sim-steps ${at60.steps} x ${at60.x.toFixed(3)}`);

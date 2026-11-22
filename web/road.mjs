@@ -36,6 +36,17 @@ export function roadGrade(x, pieces) {
   return roadAt(x, pieces).grade;
 }
 
+// Pace looks a step ahead and behind so a crest does not lurch the speed
+// in one frame. A fully flat sample stays exactly 0, which keeps the
+// golden trace on the unscaled pace.
+export function gradeForPace(x, pieces) {
+  const g = roadGrade(x, pieces);
+  const a = roadGrade(x - 2, pieces);
+  const b = roadGrade(x + 2, pieces);
+  if (g === 0 && a === 0 && b === 0) return 0;
+  return g * 0.5 + a * 0.25 + b * 0.25;
+}
+
 // Uphill eases the pace. Downhill adds a little. A flat step must not
 // multiply, or the golden trace moves.
 export function paceOnGrade(speed, grade) {

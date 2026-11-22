@@ -323,8 +323,8 @@
 ; down before the next hazard. A rest is only a pause or a close.
 ; Band 0 teaches one move at a time: slide under the gate, then step
 ; off a centre block, then one jump. A full beat separates those moves.
-; The rest before the flyer is a low hill and the matching way down, so
-; the opening is not a flat ribbon. The first gate stays on flat ground.
+; The rest before the flyer is a jogging hill, about five degrees, and
+; the matching way down. The first gate stays on flat ground.
 ; The coin marks are only the beat. lib/coins.aura lays the lanes from
 ; a seed, so a centre crate does not pin every coin to the right.
 ; The flyer has its own beat, off the gate and off that coin line.
@@ -337,28 +337,29 @@
           (list "ground" 10.4) (list "block" 1.0 1.0 "stump")
           (list "coin-lane" 2.0 0.7) (list "ground" 1.2)
           (list "coin-lane" 2.0 0.7) (list "ground" 1.2)
-          (list "coin-lane" 2.0 0.7) (list "slope" 0.12 5.2) (list "slope" -0.12 5.2)
+          (list "coin-lane" 2.0 0.7) (list "slope" 0.08 5.2) (list "slope" -0.08 5.2)
           (list "flyer" "plane" 1.0 0.7) (list "ground" 10.4)
           (list "hurdle" 0.36 0.6 "log") (list "ground" 10.4))
     (list (list "ground" 10.4) (list "gate" 0.82 0.8 "vine") (list "ground" 4.8)
           (list "ground" 10.4) (list "block" 1.0 1.1 "mushroom")
           (list "coin-lane" 2.0 0.7) (list "ground" 1.2)
           (list "coin-lane" 2.0 0.7) (list "ground" 1.2)
-          (list "coin-lane" 2.0 0.7) (list "slope" 0.12 5.2) (list "slope" -0.12 5.2)
+          (list "coin-lane" 2.0 0.7) (list "slope" 0.08 5.2) (list "slope" -0.08 5.2)
           (list "flyer" "bubble" 0.0 0.65) (list "ground" 10.4)
           (list "gap" 0.95) (list "ground" 10.4))
     (list (list "ground" 10.4) (list "gate" 0.80 0.9 "lights") (list "ground" 4.8)
           (list "ground" 10.4) (list "block" 1.0 1.0 "bush")
           (list "coin-lane" 2.0 0.7) (list "ground" 1.2)
           (list "coin-lane" 2.0 0.7) (list "ground" 1.2)
-          (list "coin-lane" 2.0 0.7) (list "slope" 0.12 5.2) (list "slope" -0.12 5.2)
+          (list "coin-lane" 2.0 0.7) (list "slope" 0.08 5.2) (list "slope" -0.08 5.2)
           (list "flyer" "lantern" 1.0 0.75) (list "ground" 10.4)
           (list "hurdle" 0.34 0.6 "bloom") (list "ground" 10.4))))
 
 ; From band 1 the road climbs and comes back down. The pair replaces
 ; two grounds of the same authored length, so the hazards keep their
 ; places. The hill sits between moves, and the lip of a gap stays flat.
-; A higher band uses a steeper grade. A dream may nudge that grade.
+; A higher band uses a steeper grade, still a path a person could run.
+; A dream may nudge that grade.
 (define patterns-1
   (list
     (list (list "slope" 0.06 10.4) (list "block" 1.0 1.0 "crate") (list "ground" 4.8)
@@ -390,12 +391,12 @@
   (list
     (list (list "ground" 10.4) (list "block" 1.0 1.05 "crate") (list "ground" 4.8)
           (list "gap" 1.6) (list "ground" 10.4)
-          (list "hurdle" 0.7 0.7 "drum") (list "slope" 0.10 10.4)
-          (list "flyer" "lantern" 2.0 0.7) (list "slope" -0.10 10.4)
+          (list "hurdle" 0.7 0.7 "drum") (list "slope" 0.08 10.4)
+          (list "flyer" "lantern" 2.0 0.7) (list "slope" -0.08 10.4)
           (list "gate" 0.64 0.7 "scarf")
           (list "coin" 1.6) (list "ground" 10.4) (list "gap" 1.55)
           (list "ground" 4.8) (list "spring" 0.75) (list "ground" 4.8))
-    (list (list "slope" 0.10 10.4) (list "block" 1.0 1.0 "mushroom") (list "slope" -0.10 10.4)
+    (list (list "slope" 0.08 10.4) (list "block" 1.0 1.0 "mushroom") (list "slope" -0.08 10.4)
           (list "gate" 0.62 0.7 "vine") (list "ground" 10.4)
           (list "flyer" "leaf" 0.0 0.74) (list "ground" 10.4)
           (list "gap" 1.7) (list "ground" 10.4) (list "hurdle" 0.75 0.7 "log")
@@ -404,14 +405,14 @@
 
 (define patterns-4
   (list
-    (list (list "slope" 0.12 10.4) (list "block" 1.0 1.0 "stump") (list "slope" -0.12 10.4)
+    (list (list "slope" 0.09 10.4) (list "block" 1.0 1.0 "stump") (list "slope" -0.09 10.4)
           (list "hurdle" 0.82 0.68 "fence") (list "flyer" "lantern" 1.0 0.68)
           (list "ground" 10.4) (list "gap" 1.85) (list "ground" 10.4)
           (list "gate" 0.62 0.68 "ribbon")
           (list "ground" 4.8) (list "spring" 0.7) (list "ground" 10.4)
           (list "gap" 1.7) (list "ground" 4.8) (list "coin" 1.6)
           (list "ground" 4.8))
-    (list (list "slope" 0.12 10.4) (list "block" 1.0 1.0 "bush") (list "slope" -0.12 10.4)
+    (list (list "slope" 0.09 10.4) (list "block" 1.0 1.0 "bush") (list "slope" -0.09 10.4)
           (list "gap" 1.9) (list "ground" 10.4)
           (list "gate" 0.6 0.66 "lights") (list "ground" 10.4)
           (list "flyer" "bubble" 2.0 0.7) (list "ground" 10.4)

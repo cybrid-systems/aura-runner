@@ -1478,12 +1478,11 @@ function frame(now) {
     while (acc >= DT && guard < 4) {
       const before = player[2];
       const wasY = player[1];
-      const heldX = player[0];
       const scoreBefore = player[6];
       hearts = heartsTick(hearts, DT);
-      const ev0 = step(player, pieces, rules, DT);
-      if (heldX >= roadStop) player[0] = heldX;
-      else if (player[0] > roadStop) player[0] = roadStop;
+      // Clamp inside the step, before the floor is sampled. Rewinding x
+      // afterwards left the body on a hill it had not reached.
+      const ev0 = step(player, pieces, rules, DT, roadStop);
       const wasWard = wardReady;
       const ward = wardStep(wardReady, wardLeft, ev0, DT);
       wardReady = ward.ready;
