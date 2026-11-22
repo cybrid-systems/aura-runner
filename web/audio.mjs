@@ -277,7 +277,17 @@ export function createAudio() {
 
   // Same step as a track ending: shuffle avoids the song that just played,
   // ordered wraps, and one file starts again.
+  let skipQueued = false;
   function skip() {
+    if (bedPlan === "pending") {
+      skipQueued = true;
+      loadCatalog().then(() => {
+        if (!skipQueued) return;
+        skipQueued = false;
+        skip();
+      });
+      return true;
+    }
     if (!playState || playState.action === "synth" || !playState.tracks.length) return false;
     stepPlaylist("end");
     return true;

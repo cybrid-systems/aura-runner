@@ -5,7 +5,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import net from "node:net";
 import { fileURLToPath } from "node:url";
-import { mimeFor, musicFromEnv, musicOrder, trackByName } from "./musiclib.mjs";
+import { discoverMusic, mimeFor, musicFromEnv, musicOrder, trackByName } from "./musiclib.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const web = path.join(root, "web");
@@ -15,7 +15,20 @@ const auraPort = Number(process.env.AURA_RUNNER_PORT || 8765);
 // page plays the synthesized tune instead.
 const musicFile = process.env.LUMEN_MUSIC
   || "/home/dev/code/symphony/symphony_no_29_in_a_major_k_201.mp4";
-const musicDir = process.env.LUMEN_MUSIC_DIR || "";
+// No music_dir: one recording stays on /symphony.mp4. Several recordings
+// in that same folder become the shuffled playlist, including mp4.
+function playlistDir() {
+  const set = process.env.LUMEN_MUSIC_DIR;
+  if (set) return set;
+  let dir = path.dirname(musicFile);
+  try {
+    dir = path.dirname(fs.realpathSync(musicFile));
+  } catch { /* the single file is absent; dirname is only a candidate */ }
+  const found = discoverMusic(dir);
+  if (found.ok && found.tracks.length > 1) return dir;
+  return "";
+}
+const musicDir = playlistDir();
 const musicReason = process.env.LUMEN_MUSIC_REASON || "";
 const trackOrder = musicOrder(process.env.LUMEN_MUSIC_ORDER);
 

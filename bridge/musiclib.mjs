@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-export const AUDIO_EXTS = Object.freeze([".mp3", ".ogg", ".wav", ".m4a", ".flac"]);
+export const AUDIO_EXTS = Object.freeze([".mp3", ".ogg", ".wav", ".m4a", ".flac", ".mp4"]);
 const EXT_SET = new Set(AUDIO_EXTS);
 
 export function musicOrder(value) {
@@ -19,6 +19,7 @@ export function mimeFor(name) {
     case ".wav": return "audio/wav";
     case ".m4a": return "audio/mp4";
     case ".flac": return "audio/flac";
+    case ".mp4": return "video/mp4";
     default: return "";
   }
 }
@@ -27,8 +28,8 @@ export function musicMessage(reason, folder) {
   if (reason === "missing") return `Music folder not found (${folder}). Using synthesized music.`;
   if (reason === "not-dir") return `Music path is not a folder (${folder}). Using synthesized music.`;
   if (reason === "unreadable") return `Music folder could not be read (${folder}). Using synthesized music.`;
-  if (reason === "empty") return "Music folder is empty. Add mp3, ogg, wav, m4a, or flac files. Using synthesized music.";
-  if (reason === "unsupported") return "No supported tracks in that folder (mp3, ogg, wav, m4a, flac). Using synthesized music.";
+  if (reason === "empty") return "Music folder is empty. Add mp3, ogg, wav, m4a, flac, or mp4 files. Using synthesized music.";
+  if (reason === "unsupported") return "No supported tracks in that folder (mp3, ogg, wav, m4a, flac, mp4). Using synthesized music.";
   return "";
 }
 

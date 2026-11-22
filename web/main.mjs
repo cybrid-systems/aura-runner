@@ -9,7 +9,7 @@ import { readQualityMode, writeQualityMode } from "./quality.mjs";
 import { createInput } from "./input.mjs";
 import { createAudio } from "./audio.mjs";
 import { volumeFromStore } from "./music.mjs";
-import { installWish } from "./wish.mjs";
+import { installWish, mentionsSong } from "./wish.mjs";
 import { validThing } from "./thing.mjs";
 import { installThingHud } from "./thinghud.mjs";
 import { adoptDecision, loadWorld, paintWorld, saveWorld } from "./world.mjs";
@@ -1145,7 +1145,10 @@ function connect() {
         if (msg.kind === "KEEP") audio.tuneKeep(msg.tune);
         else if (msg.kind === "ROLLBACK") audio.tuneRollback(msg.tune);
       }
-      if (msg.arm === "music" && msg.kind === "KEEP") audio.skip();
+      if (msg.arm === "music" && msg.kind === "KEEP") {
+        if (songSkips > 0) songSkips -= 1;
+        else audio.skip();
+      }
       if (msg.arm === "rule") endPrimerWait();
       if (window.__lumenOnDecision) window.__lumenOnDecision(msg);
       if (msg.kind === "KEEP" && (msg.arm === "motif" || msg.arm === "scene" || msg.arm === "pals")) audio.keep();
@@ -2190,18 +2193,26 @@ window.addEventListener("keydown", (e) => {
 
 if (renderer) renderer.resize();
 window.addEventListener("resize", () => renderer && renderer.resize());
+let songSkips = 0;
+function requestSongSkip(text) {
+  if (!mentionsSong(text)) return;
+  if (audio.skip()) songSkips += 1;
+}
 installWish({
   send(payload) {
     if (!ws || ws.readyState !== 1) return false;
     ws.send(JSON.stringify(payload));
     return true;
   },
+  onSong: requestSongSkip,
 });
 window.__lumenSay = (text, lang) => {
   if (!ws || ws.readyState !== 1) return false;
+  const clean = String(text || "").slice(0, 80);
+  requestSongSkip(clean);
   ws.send(JSON.stringify({
     op: "wish",
-    text: String(text || "").slice(0, 80),
+    text: clean,
     lang: lang === "zh" ? "zh-CN" : "en",
     source: "voice",
   }));

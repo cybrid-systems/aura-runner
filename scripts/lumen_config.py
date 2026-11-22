@@ -21,7 +21,7 @@ import sys
 DEEPSEEK_URL = "https://api.deepseek.com/v1"
 DEEPSEEK_MODEL = "deepseek-flash"
 NOTICE = "MiniMax is no longer a preset. Using saved API settings if present, otherwise playing offline."
-AUDIO_EXTS = (".mp3", ".ogg", ".wav", ".m4a", ".flac")
+AUDIO_EXTS = (".mp3", ".ogg", ".wav", ".m4a", ".flac", ".mp4")
 CONTAINER_MUSIC = "/music"
 KNOWN = ("music_dir", "music_order", "base_url", "model", "api_key")
 ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
@@ -174,12 +174,12 @@ def music_message(reason, folder):
         return "Music folder could not be read (%s). Using synthesized music." % folder
     if reason == "empty":
         return (
-            "Music folder is empty. Add mp3, ogg, wav, m4a, or flac files. "
+            "Music folder is empty. Add mp3, ogg, wav, m4a, flac, or mp4 files. "
             "Using synthesized music."
         )
     if reason == "unsupported":
         return (
-            "No supported tracks in that folder (mp3, ogg, wav, m4a, flac). "
+            "No supported tracks in that folder (mp3, ogg, wav, m4a, flac, mp4). "
             "Using synthesized music."
         )
     return ""

@@ -76,7 +76,8 @@ async function stop(child) {
 
 if (mimeFor("a.mp3") !== "audio/mpeg" || mimeFor("a.ogg") !== "audio/ogg"
   || mimeFor("a.wav") !== "audio/wav" || mimeFor("a.m4a") !== "audio/mp4"
-  || mimeFor("a.flac") !== "audio/flac" || mimeFor("a.txt") !== "") {
+  || mimeFor("a.flac") !== "audio/flac" || mimeFor("a.mp4") !== "video/mp4"
+  || mimeFor("a.txt") !== "") {
   throw new Error("mime map");
 }
 
@@ -183,7 +184,7 @@ try {
   if (junkBody.reason !== "unsupported") throw new Error("junk json " + JSON.stringify(junkBody));
   await stop(junkSrv.child);
 
-  const plain = start({});
+  const plain = start({ LUMEN_MUSIC: path.join(dir, "missing-single.mp4") });
   servers.push(plain.child);
   const plainPort = await plain.ready;
   const plainBody = JSON.parse((await request(plainPort, "/music.json")).body.toString("utf8"));
@@ -192,6 +193,24 @@ try {
   if (symphony.status !== 204) throw new Error("missing single file should stay 204, got " + symphony.status);
   if (!plain.text().includes("music: synthesized")) throw new Error("synth log\n" + plain.text());
   await stop(plain.child);
+
+  const bundle = path.join(dir, "bundle");
+  fs.mkdirSync(bundle);
+  fs.writeFileSync(path.join(bundle, "b.mp4"), "mp4-b");
+  fs.writeFileSync(path.join(bundle, "a.mp4"), "mp4-a");
+  const bundled = start({ LUMEN_MUSIC: path.join(bundle, "a.mp4") });
+  servers.push(bundled.child);
+  const bundlePort = await bundled.ready;
+  const bundleBody = JSON.parse((await request(bundlePort, "/music.json")).body.toString("utf8"));
+  if (!bundleBody.ok || bundleBody.order !== "shuffle" || bundleBody.tracks.map((row) => row.name).join() !== "a.mp4,b.mp4") {
+    throw new Error("sibling playlist " + JSON.stringify(bundleBody));
+  }
+  const sibling = await request(bundlePort, bundleBody.tracks[1].url);
+  if (sibling.status !== 200 || sibling.body.toString() !== "mp4-b") throw new Error("sibling bytes " + sibling.status);
+  if (!bundled.text().includes("2 tracks") || !bundled.text().includes("(shuffle)")) {
+    throw new Error("sibling log\n" + bundled.text());
+  }
+  await stop(bundled.child);
 
   // The folder exists and has tracks. The container still reports missing
   // when ./play.sh passes LUMEN_MUSIC_REASON, matching the host notice.

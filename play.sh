@@ -246,7 +246,7 @@ finish_without_key() {
 
 ask_music() {
   say ""
-  say "Optional: a folder of your own songs (mp3, ogg, wav, m4a, or flac)."
+  say "Optional: a folder of your own songs (mp3, ogg, wav, m4a, flac, or mp4)."
   say "They loop in the game. Leave this blank to keep the synthesized music."
   printf 'Music folder: ' >&2
   read_line 0

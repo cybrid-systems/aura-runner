@@ -12,7 +12,7 @@
 # The API key stays in .env (mode 0600). Do not put it in a file you commit.
 # ./play.sh --config prints the key only as a character count.
 
-# A folder of your own songs: mp3, ogg, wav, m4a, or flac.
+# A folder of your own songs: mp3, ogg, wav, m4a, flac, or mp4.
 # Files sit in that folder (not in subfolders). Leave this unset for
 # the synthesized music.
 # music_dir = "/Users/you/Music/lumen"

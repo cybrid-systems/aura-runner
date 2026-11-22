@@ -73,7 +73,7 @@ function altsOf(part) {
   return out;
 }
 
-export function installWish({ send }) {
+export function installWish({ send, onSong }) {
   const saidEl = document.getElementById("said");
   const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition;
   let listening = false;
@@ -138,6 +138,7 @@ export function installWish({ send }) {
       show(missLine(err));
       return;
     }
+    if (typeof onSong === "function" && mentionsSong(clean)) onSong(clean);
     const ok = send({
       op: "wish",
       text: clean,

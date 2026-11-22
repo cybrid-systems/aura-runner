@@ -33,7 +33,7 @@ The image is `ghcr.io/cybrid-systems/aura-runner`. If that download is not avail
 
 `./play.sh --config` prints the settings that are in effect. The API key is shown only as a character count.
 
-Copy [`lumen.toml.example`](lumen.toml.example) to `lumen.toml` (git ignores that copy) to change them by hand. A value already exported in the terminal wins, then `lumen.toml`, then `.env`, then the built-in default. The key is the exception: the terminal wins, then `.env`, then `lumen.toml`, so `./play.sh --setup` replaces a key left in the config. Keep the key in `.env`.
+Copy [`lumen.toml.example`](lumen.toml.example) to `lumen.toml` in this directory, next to `./run.sh`. Git ignores that copy. Edit it by hand. A value already exported in the terminal wins, then `lumen.toml`, then `.env`, then the built-in default. The key is the exception: the terminal wins, then `.env`, then `lumen.toml`, so `./play.sh --setup` replaces a key left in the config. Keep the key in `.env`.
 
 DeepSeek V4.1 Flash (`deepseek-flash`, `https://api.deepseek.com/v1`) is the preset. For another OpenAI-compatible service, set `base_url` and `model` in `lumen.toml`, or export `LLM_BASE_URL`, `LLM_MODEL`, and `LLM_API_KEY`.
 
@@ -91,7 +91,7 @@ A proposal is kept only after evo:trial (edsl-gate).
 
 ## Music
 
-With no music folder, the page plays a synthesized tune. Set `music_dir` in `lumen.toml` (or paste the folder when `./play.sh` asks) to play your own mp3, ogg, wav, m4a, or flac files. One file loops. Several files use `music_order`: `shuffle` (the default) opens on any of the tracks, and when a track ends it starts a different one; `ordered` keeps the file-name order from the first file. Hold Space and say 下一首, 换一首, 切歌, or next song to start another track under those same rules. `./play.sh` mounts that folder read-only at `/music` in the container. `./run.sh` reads the same path on this computer. The files stay on your machine: the bridge serves them, and nothing is uploaded or added to git. An empty folder, or one with no supported files, keeps the synthesized tune and prints a short message.
+With no `music_dir`, a single recording plays on a loop, and several recordings in that same folder (mp3, ogg, wav, m4a, flac, or mp4) become the playlist. Set `music_dir` in `lumen.toml` (the file next to `./run.sh`, or paste the folder when `./play.sh` asks) to play a different folder. One file loops. Several files use `music_order`: `shuffle` (the default) opens on any of the tracks, and when a track ends it starts a different one; `ordered` keeps the file-name order from the first file. Hold Space and say 下一首, 下一首歌, 换一首, 切歌, or next song to start another track under those same rules. `./play.sh` mounts that folder read-only at `/music` in the container. `./run.sh` reads the same path on this computer. The files stay on your machine: the bridge serves them, and nothing is uploaded or added to git. An empty folder, or one with no supported files, keeps the synthesized tune and prints a short message.
 
 A single file in `LUMEN_MUSIC` still plays when no folder is set. A missing file is HTTP 204, and a play error does the same. The first key, tap, or click starts the sound. Mute and the volume slider sit in the corner.
 
