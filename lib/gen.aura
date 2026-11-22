@@ -323,6 +323,8 @@
 ; down before the next hazard. A rest is only a pause or a close.
 ; Band 0 teaches one move at a time: slide under the gate, then step
 ; off a centre block, then one jump. A full beat separates those moves.
+; The rest before the flyer is a low hill and the matching way down, so
+; the opening is not a flat ribbon. The first gate stays on flat ground.
 ; The coin marks are only the beat. lib/coins.aura lays the lanes from
 ; a seed, so a centre crate does not pin every coin to the right.
 ; The flyer has its own beat, off the gate and off that coin line.
@@ -335,21 +337,21 @@
           (list "ground" 10.4) (list "block" 1.0 1.0 "stump")
           (list "coin-lane" 2.0 0.7) (list "ground" 1.2)
           (list "coin-lane" 2.0 0.7) (list "ground" 1.2)
-          (list "coin-lane" 2.0 0.7) (list "ground" 10.4)
+          (list "coin-lane" 2.0 0.7) (list "slope" 0.12 5.2) (list "slope" -0.12 5.2)
           (list "flyer" "plane" 1.0 0.7) (list "ground" 10.4)
           (list "hurdle" 0.36 0.6 "log") (list "ground" 10.4))
     (list (list "ground" 10.4) (list "gate" 0.82 0.8 "vine") (list "ground" 4.8)
           (list "ground" 10.4) (list "block" 1.0 1.1 "mushroom")
           (list "coin-lane" 2.0 0.7) (list "ground" 1.2)
           (list "coin-lane" 2.0 0.7) (list "ground" 1.2)
-          (list "coin-lane" 2.0 0.7) (list "ground" 10.4)
+          (list "coin-lane" 2.0 0.7) (list "slope" 0.12 5.2) (list "slope" -0.12 5.2)
           (list "flyer" "bubble" 0.0 0.65) (list "ground" 10.4)
           (list "gap" 0.95) (list "ground" 10.4))
     (list (list "ground" 10.4) (list "gate" 0.80 0.9 "lights") (list "ground" 4.8)
           (list "ground" 10.4) (list "block" 1.0 1.0 "bush")
           (list "coin-lane" 2.0 0.7) (list "ground" 1.2)
           (list "coin-lane" 2.0 0.7) (list "ground" 1.2)
-          (list "coin-lane" 2.0 0.7) (list "ground" 10.4)
+          (list "coin-lane" 2.0 0.7) (list "slope" 0.12 5.2) (list "slope" -0.12 5.2)
           (list "flyer" "lantern" 1.0 0.75) (list "ground" 10.4)
           (list "hurdle" 0.34 0.6 "bloom") (list "ground" 10.4))))
 
@@ -1131,8 +1133,8 @@
                 (loop (cdr ss) (cons sp acc))))))))))
 
 ; The same seeded pattern the offline chunk lays out, as one s-expression
-; the fairness gate can trial. Band 0 has no slope, so its text is the
-; table. Later bands nudge the grade, and a phrase the run cannot clear
+; the fairness gate can trial. A phrase with no slope stays the table.
+; A hill, including the opening one, is nudged with the seed. A phrase the run cannot clear
 ; is refused by the same gate as any other motif.
 (define (pattern-form seed index band)
   (let* ((rng (make-random (modulo (+ seed (* index 9973) (* band 13)) 2147483646)))

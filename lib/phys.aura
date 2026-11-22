@@ -591,9 +591,17 @@
                (ev (if (string=? ev0 "bump") "bump" (if fresh "oops" ev0)))
                (body (if (string=? ev "oops") (pset (car hit) 12 0.0) (car hit))))
           (list body (car (cdr hit)) ev)))
-      (let ((landed (if (<= (player-y p7) floor)
-                      (pset (pset (pset p7 1 floor) 2 0.0) 14 0.0)
-                      p7)))
+      ; A rising floor used to zero the launch, so a jump onto a hill
+      ; stuck to the slope. Keep the upward speed and only sit the feet
+      ; on the surface. Falling still ends the jump, as on a flat road.
+      (let* ((vy (player-vy p7))
+             (thrust (pxs p7 14))
+             (rising (or (> vy 0.0) (> thrust 0.0)))
+             (landed (if (<= (player-y p7) floor)
+                       (if rising
+                         (pset p7 1 floor)
+                         (pset (pset (pset p7 1 floor) 2 0.0) 14 0.0))
+                       p7)))
         (collide landed pieces rules)))))
 
 ; Spans sit inside the authored box, give or take a few centimetres.

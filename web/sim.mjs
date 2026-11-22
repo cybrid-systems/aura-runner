@@ -405,9 +405,14 @@ export function step(p, pieces, rules, dt) {
     if (ev === "oops") p[12] = 0;
   } else {
     if (p[1] <= floor1) {
+      // Rising into the next part of the hill must not cancel the jump.
+      // Falling still snaps, which is the flat landing the trace checks.
+      const rising = p[2] > 0 || p[14] > 1e-7;
       p[1] = floor1;
-      p[2] = 0;
-      p[14] = 0;
+      if (!rising) {
+        p[2] = 0;
+        p[14] = 0;
+      }
     }
     ev = collide(p, pieces, rules);
   }

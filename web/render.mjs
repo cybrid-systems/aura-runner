@@ -1,4 +1,4 @@
-import { roadHeight } from "./road.mjs";
+import { roadGrade, roadHeight } from "./road.mjs";
 import { drawThing, growOf, animOf, showBox } from "./thing.mjs";
 import { DEPTH_FS, highFragment, highSky, litFragment, litSky } from "./lit.mjs";
 import { POST_SOURCES, createPost, probeFloat, shaderCompiler } from "./post.mjs";
@@ -956,13 +956,19 @@ flat out float vSheen;
 flat out float vKind;
 void main() {
   // Yaw is roadPoint psi. Local +Z becomes the road tangent (sin ψ, 0, cos ψ).
+  // A thin wide deck stores its grade in sheen. Positive grade raises the
+  // front of the slab (local +Z). Zero leaves every other mesh unchanged.
   float c = cos(iYaw.x);
   float s = sin(iYaw.x);
   vec3 local = aPos * iSize.xyz;
+  float grade = 0.0;
+  if (iPos.w < 0.5 && iSize.y < 0.2 && iSize.x > 1.15 && abs(iYaw.z) < 0.22) grade = iYaw.z;
+  local.y += local.z * grade;
   vec3 spun = vec3(c * local.x + s * local.z, local.y, -s * local.x + c * local.z);
   vec3 world = spun + iPos.xyz;
+  vec3 nrm = vec3(aNrm.x, aNrm.y, aNrm.z - aNrm.y * grade);
   vL = aPos;
-  vN = vec3(c * aNrm.x + s * aNrm.z, aNrm.y, -s * aNrm.x + c * aNrm.z);
+  vN = vec3(c * nrm.x + s * nrm.z, nrm.y, -s * nrm.x + c * nrm.z);
   vW = world;
   vC = iColor.rgb;
   vCenter = iPos.xyz;
@@ -972,7 +978,7 @@ void main() {
   vEmit = iColor.a;
   vYaw = iYaw.x;
   vMetal = iYaw.y;
-  vSheen = iYaw.z;
+  vSheen = grade != 0.0 ? 0.0 : iYaw.z;
   vKind = iYaw.w;
   gl_Position = uProj * uView * vec4(world, 1.0);
 }`;
@@ -1787,6 +1793,10 @@ export function createRenderer(canvas, hooks) {
     roadKeys.push({ s: at, bend: amp });
   }
   let camY = 2.15;
+  // Lags the road height so a climb rises into the frame before the eye
+  // catches it. Flat ground stays at 0, which is the old camera.
+  let camFloor = 0;
+  let camFloorSeen = false;
   let camFov = 0.92;
   let camLatVel = 0;
   let shakeAmp = 0;
@@ -2423,6 +2433,17 @@ export function createRenderer(canvas, hooks) {
     backT = Math.max(0, backT - frameDt / 0.55);
     camS += (drawS - camS) * followS;
     const floorCam = roadHeight(camS, roadPieces);
+    if (!camFloorSeen) {
+      camFloor = floorCam;
+      camFloorSeen = true;
+    } else {
+      camFloor += (floorCam - camFloor) * (reduced ? 1 : 0.07);
+    }
+    const gradeHere = roadGrade(drawS, roadPieces);
+    const gradeAhead = roadGrade(drawS + 8, roadPieces);
+    let gradeFeel = gradeHere * 0.6 + gradeAhead * 0.4;
+    if (gradeFeel > 0.2) gradeFeel = 0.2;
+    else if (gradeFeel < -0.2) gradeFeel = -0.2;
     const floaty = Math.max(0, (32 - grav) * 0.03);
     const wantY = 2.25 + floaty + (rel > 0.4 ? 0.18 : 0) - land * 0.16;
     camY += (wantY - camY) * (reduced ? 1 : 0.08);
@@ -2438,7 +2459,7 @@ export function createRenderer(canvas, hooks) {
     const leanWorld = lean * 0.15;
     const eye = [
       basis.x + ox * 0.62 - Math.sin(psi) * 4.7 + leanWorld * Math.cos(psi),
-      camY + bob + floorCam,
+      camY + bob + camFloor,
       basis.z + oz * 0.62 - Math.cos(psi) * 4.7 - leanWorld * Math.sin(psi),
     ];
     if (shakeAmp > 0) {
@@ -2461,7 +2482,7 @@ export function createRenderer(canvas, hooks) {
     const lookAhead = speed * 1.3;
     const at = [
       basis.x + ox * 0.22 + Math.sin(psi) * lookAhead,
-      0.95 + Math.max(0, rel) * 0.18 + floaty * 0.4 + floorCam,
+      0.95 + Math.max(0, rel) * 0.18 + floaty * 0.4 + camFloor + gradeFeel * 13.6,
       basis.z + oz * 0.22 + Math.cos(psi) * lookAhead,
     ];
     perspective(proj, drawFov, w / h, 0.08, 96);
@@ -2872,9 +2893,10 @@ export function createRenderer(canvas, hooks) {
             const yA = roadHeight(cursor, pieces);
             const yB = roadHeight(end, pieces);
             const span = end - cursor;
-            // A grade steps in 1 m slabs so the deck follows the rise.
-            // A flat span stays one slab at the old height.
-            const step = Math.abs(yB - yA) > 0.02 ? 1 : span;
+            // A steady grade is one ramp. A crest, where the grade changes,
+            // breaks into shorter slabs so the ends still meet.
+            const gradeSplit = Math.abs(roadGrade(cursor, pieces) - roadGrade(Math.max(cursor, end - 0.05), pieces)) > 0.015;
+            const step = Math.abs(yB - yA) > 0.02 && gradeSplit ? 1 : span;
             const grass = lane !== 1 && dist > -2 && dist < 4 ? (pal.custom && (pal.surface === "stone" || pal.surface === "plank" || pal.surface === "lava") ? 3 : pal.custom && (pal.surface === "ice" || pal.surface === "cloud") ? 5 : 4) : 0;
             for (let s = cursor; s < end - 0.001; s += step) {
               const e = Math.min(end, s + step);
@@ -2884,7 +2906,8 @@ export function createRenderer(canvas, hooks) {
               const vary = (laneHash(mid * 0.23 + lane * 17.2) - 0.5) * 0.03;
               const top = vary >= 0 ? mix3(baseTop, [1, 1, 1], vary) : mix3(baseTop, [0.16, 0.18, 0.1], -vary);
               const deck = roadHeight(mid, pieces);
-              push(tile.x, deck + 0.02, tile.z, 1.74, 0.12, e - s + 0.02, 0, top, lane === 1 ? 0.55 : 0.8, pal.custom && lane === 1 ? 0.08 : 0, tile.psi, 0, 0, grass);
+              const grade = roadGrade(mid, pieces);
+              push(tile.x, deck + 0.02, tile.z, 1.74, 0.12, e - s + 0.02, 0, top, lane === 1 ? 0.55 : 0.8, pal.custom && lane === 1 ? 0.08 : 0, tile.psi, 0, grade, grass);
             }
           }
           if (i < spans.length) cursor = spans[i][1];
@@ -2910,6 +2933,7 @@ export function createRenderer(canvas, hooks) {
           }
         }
       }
+      deckLift = roadHeight(cz, pieces);
       const heldPal = pal;
       if (blendFrom && blendT < 1) pal = cz > propWave(pz, blendT) ? blendTo : blendFrom;
       const sceneGarden = !pal.custom && pal.biome === "garden";
@@ -3024,6 +3048,7 @@ export function createRenderer(canvas, hooks) {
         }
       }
       pal = heldPal;
+      deckLift = 0;
     }
     if (!pal.custom && !(pal.biome === "garden" && pal.mood === "day") && n < MAX - 12) {
       const motes = reduced ? 3 : 6;
@@ -3180,7 +3205,10 @@ export function createRenderer(canvas, hooks) {
       for (let i = 0; i < nSeg; i++) {
         const s = a + (i + 0.5) * step;
         const at = onRoad(s, lat);
-        push(at.x, 0.05, at.z, 1.2, 0.022, step * 0.92, 0, rgb, 0.35, 0.55, at.psi);
+        const savedLift = deckLift;
+        deckLift = 0;
+        push(at.x, roadHeight(s, pieces) + 0.05, at.z, 1.2, 0.022, step * 0.92, 0, rgb, 0.35, 0.55, at.psi, 0, roadGrade(s, pieces));
+        deckLift = savedLift;
       }
     }
 
@@ -3545,7 +3573,9 @@ export function createRenderer(canvas, hooks) {
       const nose = onRoad(pz + 16.7, sway);
       push(nose.x, y, nose.z, 0.2, 0.2, 0.2, 1, [1, 0.74, 0.38], 0.28, 0.28, yaw);
     }
+    deckLift = roadHeight(Number(st.goal) || 0, roadPieces);
     drawFinish(st.goal);
+    deckLift = 0;
 
     const heading = feet.psi;
     const ax = roadAxes(heading);
@@ -3658,7 +3688,7 @@ export function createRenderer(canvas, hooks) {
           const ribbon = spot(-0.7 - t * step, leanLat * 0.15);
           const emit = highTrail ? (0.55 + fade * 0.4) * (0.8 + speedK * 0.85 + combo * 0.06) : 0.55 + fade * 0.4;
           const depth = highTrail ? (0.34 * fade + 0.12) * (1 + speedK * 0.7) : 0.34 * fade + 0.12;
-          push(ribbon.x, 0.28 + fade * 0.22, ribbon.z, 0.05, 0.04 + fade * 0.06, depth, 0, pal.cape, 0.18, emit, feet.psi);
+          push(ribbon.x, floorDraw + 0.28 + fade * 0.22, ribbon.z, 0.05, 0.04 + fade * 0.06, depth, 0, pal.cape, 0.18, emit, feet.psi);
         }
       }
       }

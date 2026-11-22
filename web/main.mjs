@@ -1472,12 +1472,18 @@ function frame(now) {
     // Stay on the road that has been sent. Stepping past it draws an
     // empty track, and once past the end the picture would not come back.
     const roadStop = roadEnd > 24 ? roadEnd - 10 : Infinity;
-    while (acc >= DT && guard < 4 && player[0] < roadStop) {
+    // Stopping the whole step at the end of the sent road froze a jump
+    // in the air until the next chunk arrived. Keep falling, and do not
+    // run past the road that has actually been sent.
+    while (acc >= DT && guard < 4) {
       const before = player[2];
       const wasY = player[1];
+      const heldX = player[0];
       const scoreBefore = player[6];
       hearts = heartsTick(hearts, DT);
       const ev0 = step(player, pieces, rules, DT);
+      if (heldX >= roadStop) player[0] = heldX;
+      else if (player[0] > roadStop) player[0] = roadStop;
       const wasWard = wardReady;
       const ward = wardStep(wardReady, wardLeft, ev0, DT);
       wardReady = ward.ready;
@@ -1557,7 +1563,7 @@ function frame(now) {
           }
         }
       }
-      if (wasY > 0.2 && player[1] <= 0.001 && player[5] > 0) audio.land();
+      if (wasY > player[1] + 0.2 && player[2] === 0 && player[5] > 0) audio.land();
       if (hearPoppers(pieces)) audio.pop();
       if (scanNear(now)) {
         paySkill(nearMiss(grade, gradeBank, runMult), false);
