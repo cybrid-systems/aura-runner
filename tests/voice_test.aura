@@ -350,4 +350,7 @@
                    (string=? (voice-line "music-next" "" "fair" "en") "Next song"))))
 (newline)
 
+(show-intent "reef-voice" "海底城市")
+(show-intent "desert-voice" "去沙漠")
+
 (void)

@@ -544,7 +544,7 @@ function resetLocal() {
   document.documentElement.dataset.reward = "0";
   if (wardEl) wardEl.classList.remove("boost");
   runMult = 1;
-  biomeName = params.get("venue") && VENUES.has(params.get("venue")) ? params.get("venue") : "garden";
+  biomeName = venueId(params.get("venue")) ? params.get("venue") : "garden";
   biomeSpec = null;
   moodName = params.get("mood") && MOODS.has(params.get("mood")) ? params.get("mood") : "day";
   bannerId = 0;
@@ -683,7 +683,12 @@ function applyLevel(msg) {
 }
 
 const VENUES = new Set(["garden", "city", "space", "coast"]);
+const VENUE_ID = /^[a-z][a-z0-9-]{1,23}$/;
 const MOODS = new Set(["day", "night", "sunset", "neon"]);
+
+function venueId(s) {
+  return typeof s === "string" && VENUE_ID.test(s);
+}
 
 function showEvo(text) {
   if (!evoEl || !text) return;
@@ -735,15 +740,22 @@ function sanitizeRecord(raw) {
   const cleanRuns = clampInt(raw.cleanRuns, 0, 9999, 0);
   const crests = clampInt(raw.crests, 0, 9999, 0);
   const mult = clampInt(raw.mult, 1, 8, Math.max(1, Math.min(8, level)));
-  const biome = typeof raw.biome === "string" && VENUES.has(raw.biome) ? raw.biome : "garden";
+  const spec = acceptRecordSpec(raw.spec);
+  const biome = spec ? spec.id : (venueId(raw.biome) ? raw.biome : "garden");
   const mood = typeof raw.mood === "string" && MOODS.has(raw.mood) ? raw.mood : "day";
   const playerWinsN = clampInt(raw.playerWins, 0, 9999, 0);
   const rivalWinsN = clampInt(raw.rivalWins, 0, 9999, 0);
   const bestStreak = clampInt(raw.bestStreak, 0, 999, 0);
   return {
     level, form, points, grade, bank, bestLevel, bestPoints, bestCombo, cleanRuns, crests,
-    mult, biome, mood, playerWins: playerWinsN, rivalWins: rivalWinsN, bestStreak,
+    mult, biome, mood, spec, playerWins: playerWinsN, rivalWins: rivalWinsN, bestStreak,
   };
+}
+
+function acceptRecordSpec(raw) {
+  const spec = acceptSpec(raw);
+  if (!spec || spec.recipe !== "mix") return null;
+  return spec;
 }
 
 function readRecord() {
@@ -809,12 +821,19 @@ function paintChallenge() {
   challengeEl.textContent = (challengeDone ? "Done · " : missed ? "Miss · " : "Try · ") + ch.text;
 }
 
+function specMark(rec) {
+  const s = rec && rec.spec;
+  if (!s || typeof s !== "object") return "";
+  return [s.id || "", s.surface || "", s.particles || "", s.mood, s.fogAmt].join("|");
+}
+
 function sameRecord(a, b) {
   return a.level === b.level && a.form === b.form && a.points === b.points
     && a.grade === b.grade && a.bank === b.bank
     && a.bestLevel === b.bestLevel && a.bestPoints === b.bestPoints
     && a.bestCombo === b.bestCombo && a.cleanRuns === b.cleanRuns && a.crests === b.crests
     && a.mult === b.mult && a.biome === b.biome && a.mood === b.mood
+    && specMark(a) === specMark(b)
     && a.playerWins === b.playerWins && a.rivalWins === b.rivalWins && a.bestStreak === b.bestStreak;
 }
 
@@ -836,6 +855,7 @@ function syncRecord() {
     mult: clampInt(runMult, 1, 8, 1),
     biome: biomeName,
     mood: moodName,
+    spec: biomeSpec && biomeSpec.recipe === "mix" ? biomeSpec : null,
     playerWins: record.playerWins | 0,
     rivalWins: record.rivalWins | 0,
     bestStreak: Math.max(record.bestStreak | 0, winStreak > 0 ? winStreak : 0),
@@ -1084,15 +1104,19 @@ function connect() {
     } else {
       const seedParam = params.get("seed");
       const hello = { op: "hello", seed: seedParam ? Number(seedParam) : 42 };
-      if (record.level > 1 || record.form > 0 || record.points > 0) {
+      const resumeWorld = record.level > 1 || record.form > 0 || record.points > 0
+        || (record.spec && record.spec.id)
+        || (venueId(record.biome) && !VENUES.has(record.biome));
+      if (resumeWorld) {
         hello.resume = {
           level: record.level,
           form: record.form,
           points: record.points,
           mult: record.mult,
-          biome: record.biome,
+          biome: record.spec && record.spec.id ? record.spec.id : record.biome,
           mood: record.mood,
         };
+        if (record.spec && record.spec.recipe === "mix") hello.resume.spec = record.spec;
         carry = { grade: record.grade, bank: record.bank, level: record.level };
       }
       if (params.get("venue")) hello.venue = params.get("venue");
@@ -1363,7 +1387,8 @@ function restart() {
       cleanRuns: record.cleanRuns | 0,
       crests: record.crests | 0,
       mult: 1,
-      biome: params.get("venue") && VENUES.has(params.get("venue")) ? params.get("venue") : "garden",
+      biome: venueId(params.get("venue")) ? params.get("venue") : "garden",
+      spec: null,
       mood: params.get("mood") && MOODS.has(params.get("mood")) ? params.get("mood") : "day",
       playerWins: record.playerWins | 0,
       rivalWins: record.rivalWins | 0,

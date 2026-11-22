@@ -95,7 +95,7 @@
   "You change one friendly companion in a children's 3D endless runner called Lumen Run. No markdown. Restyle a friend who is already here by keeping the same name, or add one new gentle friend. Form: (pal KIND NAME R G B MOTION). KIND is kitten, car, van, racer, taxi, wagon, bunny, bird, butterfly, frog, duck, puppy, fox, turtle, bee, or a new gentle word of 3 to 12 letters. NAME is 2 to 12 letters. R G B are 0.25 to 1 and the colour stays bright. MOTION is hop, pace, float, follow, side, near, cheer, or pace-ahead. near, cheer, and pace-ahead only change where the friend is drawn, never the hit. No violence, fear, weapons, or scary words. Always restyle the runner in that same answer with (hero KIND R G B), alone or as one clause inside (pals ...). Pick a KIND different from the runner's current look. KIND is keeper, kitten, car, van, racer, taxi, wagon, bunny, bird, butterfly, frog, duck, puppy, fox, turtle, or bee. keeper is the light-keeper. R G B stay bright, from 0.25 to 1. A hero clause changes the runner only and does not add a friend. First write one short bright English sentence with no parentheses, then the s-expression. That sentence is what the child reads. Example: (pal bird lark 0.95 0.86 0.35 float)")
 
 (define BIOME-SYS
-  "You invent one bright place for a children's running game. No markdown. Reply with one short cheerful sentence, then one s-expression: (biome ID (label WORD) (sky ZR ZG ZB HR HG HB) (fog FR FG FB AMT) (body BODY) (road R G B) (curb R G B) (ground R G B) (surface SURFACE) (light L) (mood M) (particles KIND DENSITY) (props (PROP DENSITY SCALE) ...) (recipe mix)). ID and WORD are lowercase hyphenated words. BODY is sun, moon, stars, aurora, or none. SURFACE is grass, stone, dust, sand, ice, cloud, lava, reef, or plank. KIND is fireflies, stardust, snow, embers, rain, sparkles, or none. PROP is tree, tower, arch, crystal, rock, coral, or ring. Use one to four props. Every colour is 0 to 1. Fog AMT is at most 0.38. Light is 0.50 to 1. Density is 0.05 to 0.55. The road colour must differ from the shoulders. No violence, fear, or scary words.")
+  "You invent one bright place for a children's running game. No markdown. Reply with one short cheerful sentence, then one s-expression: (biome ID (label WORD) (sky ZR ZG ZB HR HG HB) (fog FR FG FB AMT) (body BODY) (road R G B) (curb R G B) (ground R G B) (surface SURFACE) (light L) (mood M) (particles KIND DENSITY) (props (PROP DENSITY SCALE) ...) (recipe mix)). ID and WORD are lowercase hyphenated words. BODY is sun, moon, stars, aurora, or none. SURFACE is grass, stone, dust, sand, ice, cloud, lava, reef, or plank. KIND is fireflies, stardust, snow, embers, rain, sparkles, or none. PROP is tree, tower, arch, crystal, rock, coral, ring, pagoda, palace-gate, pearl-tower, spire, bridge-tower, eiffel-tower, clock-tower, colonnade, bamboo, palm, stone-bridge, battlement, willow, cypress, or sakura. Use one to four props. Every colour is 0 to 1. Fog AMT is at most 0.38. Light is 0.50 to 1. Density is 0.05 to 0.55. The road colour must differ from the shoulders. No violence, fear, or scary words.")
 
 (define opening-feel (feel-for 0))
 (define g-now (feel-g opening-feel))
@@ -373,6 +373,20 @@
       sp
       (max 1.6 (- cap 0.05)))))
 
+; A custom id stays in the badge. A mix mood is the spec's number, so a
+; night that is not one of the four names does not read back as day.
+; The live mood stays a name. Many readers assume that.
+(define (snap-biome)
+  (cond
+    ((biome-name? biome-now) biome-now)
+    ((and slow-mods (string? biome-now) (edsl-id? biome-now)) biome-now)
+    (else "garden")))
+
+(define (snap-mood)
+  (if (and slow-mods (hash? edsl-spec) (number? (hash-ref edsl-spec "mood" #f)))
+    (edsl-2 (hash-ref edsl-spec "mood"))
+    mood-now))
+
 (define (world-snap-now)
   (hash "seed" seed
         "level" level-n
@@ -404,8 +418,9 @@
         "density" density-now
         "light" light-now
         "fog" fog-now
-        "biome" (if (biome-name? biome-now) biome-now "garden")
-        "mood" mood-now))
+        "biome" (snap-biome)
+        "mood" (snap-mood)
+        "spec" edsl-spec))
 
 (define (note! kind why arm . rest)
   (let ((cue (if (and (pair? rest) (string? (car rest))) (car rest) ""))
@@ -633,6 +648,9 @@
 (define edsl-hint "")
 (define edsl-theme-now "")
 (define edsl-enter? #f)
+(define wish-hold #f)
+(define edsl-fallback-form "")
+(define edsl-held #f)
 (define edsl-busy #f)
 (define edsl-working #f)
 (define edsl-asked-at -1.0)
@@ -717,7 +735,9 @@
 
 (define (edsl-clear!)
   (set! edsl-form "")
-  (set! edsl-spec #f))
+  (set! edsl-spec #f)
+  (set! edsl-held #f)
+  (set! edsl-fallback-form ""))
 
 ; A spoken built-in venue. Drop the mix and any dream that would
 ; replace it on the next reply or the next gate.
@@ -729,6 +749,11 @@
   (set! edsl-ready #f)
   (set! edsl-theme-now "")
   (set! edsl-hint "")
+  (set! wish-hold #f)
+  ; Drop a place the model was still painting. The reply must not
+  ; land on the venue the child just named.
+  (set! edsl-accept -1)
+  (set! edsl-busy #f)
   (set! rules-dirty #t))
 
 (define (edsl-remember! form id)
@@ -819,21 +844,21 @@
           (not (archive-ready? world-archive)))
     (if speak?
       (begin
-        (note! "ROLLBACK" "cap" "biome" "还是原来的世界" "world")
+        (note! "ROLLBACK" "cap" "biome" (world-stay) "world")
         #f)
       #f)
     (let ((child (archive-child world-archive)))
       (if (not (string? child))
         (if speak?
           (begin
-            (note! "ROLLBACK" "shape" "biome" "还是原来的世界" "world")
+            (note! "ROLLBACK" "shape" "biome" (world-stay) "world")
             #f)
           #f)
         (begin
           (set! archive-offers (+ archive-offers 1))
           (if (and llm-slot (not (channel:try-recv llm-slot)))
             (begin
-              (note! "ROLLBACK" "busy" "biome" "还是原来的世界" "world")
+              (note! "ROLLBACK" "busy" "biome" (world-stay) "world")
               #f)
             (begin
               (set! slot-mine #t)
@@ -848,7 +873,7 @@
                     (note-fork! (note! "KEEP" "fair" "biome" "这个世界长大了一点" "world") #t))
                   (note! "ROLLBACK"
                          (if (hash? gate) (hash-ref gate "why" "trial") "trial")
-                         "biome" "还是原来的世界" "world"))
+                         "biome" (world-stay) "world"))
                 (release-slot!)
                 (and (hash? gate) (string=? (hash-ref gate "verdict" "") "KEEP"))))))))))
 
@@ -910,7 +935,7 @@
         (if (not ok)
           (note! "ROLLBACK"
                  (hash-ref found "why" "shape")
-                 "biome" "The world stayed")
+                 "biome" (world-stay))
           (if (or enter? (and trial (evo:trial-ok? trial) (evo:feasible? trial)))
             (begin
               (edsl-remember! text (hash-ref found "id"))
@@ -921,7 +946,7 @@
                 (raise-banner! "venue" cue 0)
                 #f)
               (note! "KEEP" "fair" "biome" (if enter? cue "") "world"))
-            (note! "ROLLBACK" "trial" "biome" "The world stayed")))
+            (note! "ROLLBACK" "trial" "biome" (world-stay))))
         (release-slot!)
         ok))))
 
@@ -997,12 +1022,15 @@
     ; the venue for this level (garden, city, space, coast). The scene
     ; below follows how the run went. A recombined world is offered on a
     ; later tick, from two kept places, and a dream is not started on a clock.
-    (if biome-pin
+    (if (or biome-pin (pair? wish-hold))
       (begin
         (set! edsl-ready #f)
-        (set! edsl-enter? #f)
-        (set! edsl-theme-now "")
-        (set! edsl-hint ""))
+        (if (not (and edsl-held edsl-busy))
+          (begin
+            (set! edsl-enter? #f)
+            (set! edsl-theme-now "")
+            (set! edsl-hint ""))
+          #f))
       (let ((ready (if (and (not (env-on? "LUMEN_SKIP_DREAM")) (string? edsl-ready))
                      edsl-ready
                      #f)))
@@ -1056,7 +1084,7 @@
                       (lambda () (roster-evolve! "Level clear")))))
       (set! gate-followups
             (append gate-followups
-                    (if biome-pin
+                    (if (or biome-pin (pair? wish-hold))
                       jobs
                       (append jobs (list (lambda () (archive-visit!))))))))
     (queue-chase! played bumps (chase-sum chase-recent) speed-now race)
@@ -1368,6 +1396,7 @@
   (set! edsl-ready #f)
   (set! edsl-theme-now "")
   (set! edsl-hint "")
+  (set! wish-hold #f)
   (edsl-clear!)
   (if slow-mods
     (set! edsl-pool (edsl-boot))
@@ -3070,8 +3099,13 @@
   (if (expire-one! pals-busy pals-asked-at pals-accept "pals" "The friends waited")
     (begin (set! pals-accept -1) (set! pals-busy #f))
     #f)
-  (if (expire-one! edsl-busy edsl-asked-at edsl-accept "biome" "The world stayed")
-    (begin (set! edsl-accept -1) (set! edsl-busy #f) (set! edsl-enter? #f))
+  (if (expire-one! edsl-busy edsl-asked-at edsl-accept "biome" (world-stay))
+    (begin
+      (set! edsl-accept -1)
+      (set! edsl-busy #f)
+      (set! edsl-enter? #f)
+      ; A world already kept stays. The late reply must not put the garden back.
+      (if edsl-held #f (preview-back!)))
     #f)
   (sync-llm-busy!))
 
@@ -3247,12 +3281,28 @@
   (let ((preset (edsl-preset theme)))
     (if (string? preset)
       (consider-edsl! preset (edsl-say theme wish-locale) #t #t)
-      (note! "ROLLBACK" "shape" "biome" "The world stayed"))))
+      (note! "ROLLBACK" "shape" "biome" (world-stay)))))
+
+(define (refine-miss theme hint fallback held enter why)
+  (if (string=? theme "free")
+    (if held
+      (note! "ROLLBACK" why "biome" (world-stay) "world")
+      (if (and (string? fallback) (> (string-length fallback) 0) (wish-commit! fallback))
+        (preview-drop!)
+        (begin
+          (preview-back!)
+          (note! "ROLLBACK" why "biome" (world-stay) "world"))))
+    (if enter
+      (edsl-fallback! theme)
+      (note! "ROLLBACK" why "biome" (world-stay) "world"))))
 
 (define (take-edsl! c msg)
   (let ((tok (hash-ref msg "token" -1))
         (enter edsl-enter?)
-        (theme edsl-theme-now))
+        (theme edsl-theme-now)
+        (hint edsl-hint)
+        (fallback edsl-fallback-form)
+        (held edsl-held))
     (if (not (accept-reply! tok edsl-accept))
       #f
       (let ((ans (hash-ref msg "ans" #f)))
@@ -3261,26 +3311,23 @@
         (set! edsl-enter? #f)
         (set! edsl-theme-now "")
         (set! edsl-hint "")
+        (set! edsl-fallback-form "")
         (if (and (hash? ans) (hash-ref ans "ok"))
           (let ((raw (hash-ref ans "content" "")))
             (let ((text (if (string? raw) raw "")))
               (if (banned? text)
-                (if enter
-                  (edsl-fallback! theme)
-                  (note! "ROLLBACK" "banned" "biome" "The world stayed"))
+                (refine-miss theme hint fallback held enter "banned")
                 (let ((form (extract-balanced text "(biome")))
-                  (if form
-                    (if (not (consider-edsl! form (say-line text) enter enter))
-                      (if enter (edsl-fallback! theme) #f)
-                      #f)
-                    (if enter
-                      (edsl-fallback! theme)
-                      (note! "ROLLBACK" "shape" "biome" "The world stayed")))))))
-          (if enter
-            (edsl-fallback! theme)
-            (note! "ROLLBACK" "llm" "biome" "The world stayed")))
+                      (asked (if (string=? theme "free") hint theme))
+                      (install (or (string=? theme "free") enter)))
+                  (if (and (string? form) (edsl-serves? asked form))
+                    (if (consider-edsl! form (say-line text) install install)
+                      (begin (if install (set! edsl-held #f) #f) (preview-drop!))
+                      (refine-miss theme hint fallback held enter "shape"))
+                    (refine-miss theme hint fallback held enter "shape"))))))
+          (refine-miss theme hint fallback held enter "llm"))
         (send c (rules-msg))
-        (set! rules-dirty #f)))))
+        (set! rules-dirty #f))))
 
 (define (ask-pals!)
   (if (or pals-working (not pals-req))
@@ -4073,13 +4120,101 @@
   (if (compose-wanted? text) (thing-show! text) #f)
   (thing-start! text))
 
+; The line a child reads when a place does not change.
+(define (world-stay)
+  (if (string=? wish-locale "zh")
+    "还是原来的世界"
+    "The world stayed"))
+
 ; 换一个城市 is a venue steer and is handled before this. A bare
-; 换一个 asks the kept worlds for one child.
+; 换一个 asks the kept worlds for one child. It does not share the
+; offline wish path, so the offer cap stays its own counter.
 (define (grow-ask? text)
   (and (string? text)
        (or (string=? text "换一个")
            (string=? text "再换一个")
            (string=? (string-downcase text) "another world"))))
+
+; Sky, friend, star, and gate lines stay on the wish they already had.
+; A bare sentence with none of those words is a world, not an obstacle.
+(define (wish-keep? text)
+  (or (wish-preset text)
+      (wish-named text)
+      (let ((arm (wish-arm text)))
+        (or (string=? arm "scene") (string=? arm "pals")))
+      (edsl-motif-line? text)))
+
+(define (preview-show! text)
+  (let ((found (edsl-check text)))
+    (if (not (and (hash? found) (hash-ref found "ok" #f)))
+      #f
+      (begin
+        (if (not (pair? wish-hold))
+          (set! wish-hold (list biome-now edsl-form edsl-spec (if biome-pin #t #f)))
+          #f)
+        (set! biome-now (hash-ref found "id"))
+        (set! edsl-form (hash-ref found "form"))
+        (set! edsl-spec (if (string=? (hash-ref found "recipe" "") "mix")
+                          (edsl-pub found)
+                          #f))
+        (set! rules-dirty #t)
+        #t))))
+
+(define (preview-drop!)
+  (set! wish-hold #f))
+
+(define (preview-back!)
+  (if (not (pair? wish-hold))
+    #f
+    (let ((held wish-hold))
+      (set! biome-now (car held))
+      (set! edsl-form (car (cdr held)))
+      (set! edsl-spec (car (cdr (cdr held))))
+      (set! biome-pin (car (cdr (cdr (cdr held)))))
+      (set! wish-hold #f)
+      (set! rules-dirty #t)
+      #t)))
+
+(define (wish-commit! text)
+  (let ((found (edsl-check text)))
+    (if (not (and (hash? found) (hash-ref found "ok" #f)))
+      #f
+      (consider-edsl! text (edsl-say (hash-ref found "id" "") wish-locale) #t #t))))
+
+; The offline world is already kept. A model may refine a named place
+; or an open 去. Gibberish stays on the hash, so a key cannot change it.
+(define (maybe-refine! text full)
+  (set! edsl-accept -1)
+  (set! edsl-busy #f)
+  (set! edsl-fallback-form full)
+  (if (and llm-on edsl-req (not edsl-working) (not (llm-posting?))
+           (or (edsl-shaped? text) (edsl-open-place? text)))
+    (begin
+      (set! edsl-hint text)
+      (set! edsl-theme-now "free")
+      (set! edsl-enter? #t)
+      (ask-edsl!))
+    (begin
+      (set! edsl-hint "")
+      (set! edsl-theme-now ""))))
+
+(define (wish-world! c text)
+  (load-slow!)
+  (let ((full (edsl-offline text (if (pair? edsl-pool) edsl-pool (list)))))
+    (let ((found (if (string? full) (edsl-check full) #f)))
+      (if (not (and (hash? found) (hash-ref found "ok" #f)))
+        (note! "ROLLBACK" "shape" "biome" (world-stay) "world")
+        (begin
+          (let ((tint (edsl-tint text full)))
+            (preview-show! (if (string? tint) tint full)))
+          (send c (rules-msg))
+          (set! rules-dirty #f)
+          (if (wish-commit! full)
+            (begin
+              (preview-drop!)
+              (set! edsl-held #t)
+              (maybe-refine! text full))
+            (preview-back!)))))))
 
 (define (on-wish c msg)
   (set! wish-locale (wish-lang (hash-ref msg "lang" "")))
@@ -4091,9 +4226,14 @@
         ((string=? source "") (wish-note! "ROLLBACK" "hear"))
         ((string=? text "") (wish-note! "ROLLBACK" "empty"))
         ((banned? text) (wish-note! "ROLLBACK" "banned"))
+        ((grow-ask? text)
+         (if (or (llm-posting?) (chat-open?) trial-open)
+           (note! "ROLLBACK" "busy" "biome" (world-stay) "world")
+           (archive-offer! #t)))
+        ((edsl-free-form text) (wish-world! c text))
         (else
-         ; The city comes first. 下一个城市 contains 城市, and 北京的夜晚
-         ; contains 夜晚, so the built-in voice would land on the wrong place.
+         ; A named city comes before the built-in voice. 下一个城市
+         ; contains 城市, and 北京的夜晚 contains 夜晚.
          (let ((steer (edsl-steer text biome-now)))
            (if steer
              (edsl-hear! steer)
@@ -4103,11 +4243,9 @@
                  (let ((theme (edsl-place text biome-now)))
                    (if theme
                      (edsl-hear! theme)
-                     (if (grow-ask? text)
-                       (if (or (llm-posting?) (chat-open?) trial-open)
-                         (note! "ROLLBACK" "busy" "biome" "还是原来的世界" "world")
-                         (archive-offer! #t))
-                       (offer-wish! text))))))))))))
+                     (if (wish-keep? text)
+                       (offer-wish! text)
+                       (wish-world! c text))))))))))))
   (flush-notes! c)
   (if rules-dirty
     (begin (send c (rules-msg)) (set! rules-dirty #f))
@@ -4224,8 +4362,50 @@
     ((>= n 500000.0) 500000.0)
     (else (exact->inexact n))))
 
+; A saved mix comes back from its form. A built-in name does not load
+; the EDSL. A normal garden hello must stay on the fast path.
+(define (install-saved-spec! spec)
+  (if (not (hash? spec))
+    #f
+    (begin
+      (load-slow!)
+      (let ((form (hash-ref spec "form" "")))
+        (if (and (string? form) (> (string-length form) 0) (edsl-enter-kept! form))
+          #t
+          #f)))))
+
+(define (install-biome-name! b pin?)
+  (cond
+    ((biome-name? b)
+     (begin
+       (edsl-clear!)
+       (set! biome-now b)
+       (set! biome-pin pin?)
+       #t))
+    ((and (string? b) (> (string-length b) 0))
+     (begin
+       (load-slow!)
+       (if (not (edsl-id? b))
+         #f
+         (let ((preset (edsl-preset b)))
+           (if (string? preset)
+             (edsl-enter-kept! preset)
+             (begin
+               (edsl-clear!)
+               (set! biome-now b)
+               (set! biome-pin #t)
+               #t))))))
+    (else #f)))
+
+(define (resume-custom? row)
+  (or (hash? (hash-ref row "spec" #f))
+      (let ((b (hash-ref row "biome" #f)))
+        (and (string? b) (> (string-length b) 0) (not (biome-name? b))))))
+
 ; A saved run rebuilds the road at that form. A blank record stays on
-; the road reset-run! just laid. Restart never calls this.
+; the road reset-run! just laid. Restart never calls this. A custom
+; world at the start of a run still resumes, or a refresh would
+; become the garden.
 (define (resume-run! msg)
   (let ((row (hash-ref msg "resume" #f)))
     (if (not (hash? row))
@@ -4233,7 +4413,7 @@
       (let ((lv (level-exact (hash-ref row "level" 1)))
             (fm (form-exact (hash-ref row "form" 0)))
             (pts (points-clamp (hash-ref row "points" 0))))
-        (if (and (= lv 1) (= fm 0) (<= pts 0.0))
+        (if (and (= lv 1) (= fm 0) (<= pts 0.0) (not (resume-custom? row)))
           #f
           (begin
             (set! world (list))
@@ -4251,10 +4431,12 @@
             (set! run-mult (mult-clamp (if (number? (hash-ref row "mult" #f))
                                          (hash-ref row "mult")
                                          lv)))
-            (let ((b (hash-ref row "biome" #f)))
-              (if (biome-name? b)
-                (begin (set! biome-now b) (set! biome-pin #t))
-                (set! biome-now (biome-for-level lv))))
+            (if (not (install-saved-spec! (hash-ref row "spec" #f)))
+              (let ((b (hash-ref row "biome" #f)))
+                (if (not (install-biome-name! b #t))
+                  (set! biome-now (biome-for-level lv))
+                  #f))
+              #f)
             (let ((m (hash-ref row "mood" #f)))
               (if (mood-name? m) (set! mood-now m) #f))
             (set! chal-coins 0)
@@ -4339,7 +4521,8 @@
   (set! seed (hash-ref saved "seed"))
   (set! level-n (hash-ref saved "level"))
   (set! run-mult (mult-clamp (hash-ref saved "mult" 1)))
-  (set! biome-now (biome-known (hash-ref saved "biome" "garden")))
+  (let ((named (hash-ref saved "biome" "garden")))
+    (set! biome-now (if (world-id? named) named (biome-known named))))
   (let ((kept (hash-ref saved "edsl" "")))
     (if (and (string? kept) (> (string-length kept) 0) (edsl-enter-kept! kept))
       #f
@@ -4493,9 +4676,14 @@
                         "knob" 0
                         "prev" #f))
       (set! chase-recent (list))
-      (set! biome-now (biome-known (hash-ref snap "biome" "garden")))
-      (set! mood-now (mood-known (hash-ref snap "mood" "day")))
-      (set! biome-pin #f)
+      (if (not (install-saved-spec! (hash-ref snap "spec" #f)))
+        (let ((b (hash-ref snap "biome" "garden")))
+          (if (not (install-biome-name! b #f))
+            (begin (edsl-clear!) (set! biome-now "garden") (set! biome-pin #f))
+            #f))
+        #f)
+      (let ((m (hash-ref snap "mood" "")))
+        (if (mood-name? m) (set! mood-now m) #f))
       (and (scene-install! (hash-ref snap "scene" ""))
            (pals-install! (hash-ref snap "pals" ""))
            (motif-install! (hash-ref snap "motif" ""))))))
@@ -4573,10 +4761,13 @@
 
 (define (take-hello-venue! msg)
   (let ((b (hash-ref msg "venue" #f))
-        (m (hash-ref msg "mood" #f)))
-    (if (biome-name? b)
-      (begin (set! biome-now b) (set! biome-pin #t))
-      #f)
+        (m (hash-ref msg "mood" #f))
+        (spec (hash-ref msg "spec" #f)))
+    (if (hash? spec)
+      (install-saved-spec! spec)
+      (if (or (biome-name? b) (and (string? b) (> (string-length b) 0)))
+        (install-biome-name! b #t)
+        #f))
     (if (mood-name? m)
       (set! mood-now m)
       #f)))

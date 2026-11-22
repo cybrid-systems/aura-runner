@@ -55,7 +55,7 @@ A gamepad uses A to jump, B or down to slide, and the d-pad or stick for lanes. 
 
 ## Voice
 
-Hold Space, speak, and release. Built-in lines apply at once and the combo stays. A custom world uses its themed recipe immediately when no LLM key is set.
+Hold Space, speak, and release. Built-in lines apply at once and the combo stays. A custom world uses its themed recipe immediately when no LLM key is set. The lines in this table are examples, not a whitelist. A sentence that names a place can become that place.
 
 | Say | What changes |
 | --- | --- |
@@ -63,6 +63,7 @@ Hold Space, speak, and release. Built-in lines apply at once and the combo stays
 | 夜晚 / night, 白天 / day, 日落 / sunset, 霓虹 / neon | Mood |
 | 去北京 / paris, 下一个城市 / 换城市 / next city | World tour |
 | 去火山 / volcano, 糖果 / candy, 珊瑚 / coral | New world |
+| 去沙漠 / 海底城市 / 下雨的东京 | A place, and its weather |
 
 ## Evolution
 
@@ -86,7 +87,7 @@ The form in [`lib/edsl.aura`](lib/edsl.aura):
   (recipe garden|city|space|coast|mix))
 ```
 
-KIND is tree, tower, arch, crystal, rock, coral, or ring.
+KIND is tree, tower, arch, crystal, rock, coral, ring, pagoda, palace-gate, pearl-tower, spire, bridge-tower, eiffel-tower, clock-tower, colonnade, bamboo, palm, stone-bridge, battlement, willow, cypress, or sakura.
 A proposal is kept only after evo:trial (edsl-gate).
 
 ## Music

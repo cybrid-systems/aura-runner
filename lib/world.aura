@@ -96,12 +96,74 @@
   (let ((v (hash-ref snap k #f)))
     (if (string? v) v "")))
 
+; A legal world id: a lowercase word, two to twenty-four characters.
+; The four built-in names pass. "Bad" does not. This does not load the EDSL.
+(define (world-id? s)
+  (and (string? s)
+       (>= (string-length s) 2)
+       (<= (string-length s) 24)
+       (let ((n (string-length s)))
+         (let loop ((i 0) (ok #t))
+           (if (or (not ok) (>= i n))
+             ok
+             (let ((c (string-ref s i)))
+               (loop (+ i 1)
+                     (or (and (>= c 97) (<= c 122))
+                         (and (> i 0)
+                              (or (and (>= c 48) (<= c 57))
+                                  (= c 45)))))))))))
+
+; A mood the four names do not cover. "0.28" stays. "1.000" is too long.
+; "dark" is not a number. The live mood is still one of the four names.
+(define (world-decimal? s)
+  (and (string? s)
+       (> (string-length s) 0)
+       (<= (string-length s) 4)
+       (let ((n (string->number s)))
+         (and (number? n) (>= n 0.0) (<= n 1.0)))))
+
+(define (world-mood? s)
+  (or (mood-name? s) (world-decimal? s)))
+
 ; A missing venue is the garden in daylight. A bad name refuses the snap.
+; A kept custom id is still that id.
 (define (world-venue-ok? snap key names)
   (let ((v (hash-ref snap key #f)))
     (or (not v)
         (and (string? v) (= (string-length v) 0))
         (and (string? v) (biome-member? names v)))))
+
+(define (world-biome-ok? snap)
+  (let ((v (hash-ref snap "biome" #f)))
+    (or (not v)
+        (and (string? v) (= (string-length v) 0))
+        (world-id? v))))
+
+(define (world-mood-ok? snap)
+  (let ((v (hash-ref snap "mood" #f)))
+    (or (not v)
+        (and (string? v) (= (string-length v) 0))
+        (world-mood? v))))
+
+; A bad spec is dropped. It does not refuse the rest of the snap.
+; The form is the world. A quote, a backslash, or a newline is not stored.
+(define (world-spec-keep spec)
+  (if (not (hash? spec))
+    #f
+    (let ((id (hash-ref spec "id" #f))
+          (form (hash-ref spec "form" #f))
+          (fog (hash-ref spec "fogAmt" #f))
+          (light (hash-ref spec "light" #f)))
+      (if (and (world-id? id)
+               (world-channels? (hash-ref spec "sky" #f))
+               (world-channels? (hash-ref spec "road" #f))
+               (world-channels? (hash-ref spec "ground" #f))
+               (world-num-in? fog 0.0 0.38)
+               (world-num-in? light 0.5 1.0)
+               (world-phrase? form 800)
+               (> (string-length form) 0))
+        spec
+        #f))))
 
 (define (world-snap-ok? snap)
   (if (or (not (hash? snap)) (world-secret? snap))
@@ -141,8 +203,8 @@
            (world-num-in? (hash-ref snap "density" #f) 0.15 1.0)
            (world-num-in? (hash-ref snap "light" #f) 0.50 1.0)
            (world-num-in? (hash-ref snap "fog" #f) 0.0 0.38)
-           (world-venue-ok? snap "biome" biome-names)
-           (world-venue-ok? snap "mood" mood-names)
+           (world-biome-ok? snap)
+           (world-mood-ok? snap)
            (world-num-in? (hash-ref snap "bend" #f) 0.0 0.65)
            (number? chase)
            (>= chase 1.6)
@@ -189,8 +251,11 @@
           "density" (exact->inexact (hash-ref snap "density" 0.45))
           "light" (exact->inexact (hash-ref snap "light" 0.82))
           "fog" (exact->inexact (hash-ref snap "fog" 0.22))
-          "biome" (biome-known (world-str snap "biome"))
-          "mood" (mood-known (world-str snap "mood")))))
+          "biome" (let ((b (world-str snap "biome")))
+                    (if (world-id? b) b "garden"))
+          "mood" (let ((m (world-str snap "mood")))
+                   (if (world-mood? m) m "day"))
+          "spec" (world-spec-keep (hash-ref snap "spec" #f)))))
 
 (define (world-accept kind snap)
   (and (string? kind) (string=? kind "KEEP") (world-snap-ok? snap)))

@@ -5,7 +5,6 @@ export const WORLD_KEY = "lumen-world";
 
 const LOOTS = new Set(["coin", "blossom", "apple", "star", "gem"]);
 const FLOWERS = new Set(["daisy", "tulip", "blossom", "buttercup"]);
-const BIOMES = new Set(["garden", "city", "space", "coast"]);
 const MOODS = new Set(["day", "night", "sunset", "neon"]);
 
 export function blankWorld() {
@@ -71,12 +70,41 @@ function channels(v) {
   return Array.isArray(v) && v.length === 3 && v.every((n) => numIn(n, 0, 1));
 }
 
-function venueOk(v, names) {
-  return v == null || v === "" || (typeof v === "string" && names.has(v));
+const VENUE_ID = /^[a-z][a-z0-9-]{1,23}$/;
+
+function biomeOk(v) {
+  return v == null || v === "" || (typeof v === "string" && VENUE_ID.test(v));
 }
 
-function venueOf(v, names, fallback) {
-  return typeof v === "string" && names.has(v) ? v : fallback;
+function decimalMood(v) {
+  if (typeof v !== "string" || v.length < 1 || v.length > 4) return false;
+  if (/[a-z]/i.test(v)) return false;
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 && n <= 1;
+}
+
+function moodOk(v) {
+  return v == null || v === "" || (typeof v === "string" && (MOODS.has(v) || decimalMood(v)));
+}
+
+function biomeOf(v) {
+  return typeof v === "string" && VENUE_ID.test(v) ? v : "garden";
+}
+
+function moodOf(v) {
+  return typeof v === "string" && (MOODS.has(v) || decimalMood(v)) ? v : "day";
+}
+
+// A bad spec is omitted. It does not refuse an otherwise good snap.
+function specKeep(spec) {
+  if (!spec || typeof spec !== "object" || Array.isArray(spec)) return null;
+  if (typeof spec.id !== "string" || !VENUE_ID.test(spec.id)) return null;
+  if (!channels(spec.sky) || !channels(spec.road) || !channels(spec.ground)) return null;
+  if (!numIn(spec.fogAmt, 0, 0.38) || !numIn(spec.light, 0.5, 1)) return null;
+  const form = spec.form;
+  if (typeof form !== "string" || form.length < 1 || form.length > 800) return null;
+  if (form.includes("\"") || form.includes("\\") || form.includes("\n")) return null;
+  return spec;
 }
 
 export function snapOk(snap) {
@@ -114,8 +142,8 @@ export function snapOk(snap) {
     && numIn(snap.density, 0.15, 1)
     && numIn(snap.light, 0.5, 1)
     && numIn(snap.fog, 0, 0.38)
-    && venueOk(snap.biome, BIOMES)
-    && venueOk(snap.mood, MOODS)
+    && biomeOk(snap.biome)
+    && moodOk(snap.mood)
     && numIn(snap.bend, 0, 0.65)
     && typeof chase === "number"
     && chase >= 1.6
@@ -160,8 +188,9 @@ export function cleanSnap(snap) {
     density: snap.density,
     light: snap.light,
     fog: snap.fog,
-    biome: venueOf(snap.biome, BIOMES, "garden"),
-    mood: venueOf(snap.mood, MOODS, "day"),
+    biome: biomeOf(snap.biome),
+    mood: moodOf(snap.mood),
+    spec: specKeep(snap.spec),
   };
 }
 

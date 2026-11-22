@@ -40,6 +40,11 @@ const gate = onLevelGate({
 check("gate-combo", gate.combo === 4 && gate.comboUntil === 9000 && gate.distance === 140);
 check("gate-mult", gate.mult === 2 && gate.gain === 1 && gate.level === 2);
 check("gate-biome", gate.biome === "city" && gate.what === "harder" && gate.chalCoins === 0);
+const pinnedGate = onLevelGate({
+  level: 1, form: 0, mult: 1, combo: 1, comboUntil: 0, distance: 10,
+  biome: "lava-canyon", mood: "day", pinned: true,
+}, { form: 0 });
+check("gate-pin", pinnedGate.biome === "lava-canyon" && pinnedGate.pinned === true);
 
 const again = onLevelGate({
   level: 2, form: 1, mult: gate.mult, combo: gate.combo, comboUntil: gate.comboUntil,

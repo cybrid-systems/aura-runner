@@ -61,3 +61,30 @@ steer-metro hangzhou
 say-beijing 来到北京了
 say-beijing-en A new world: Beijing
 say-candy 来到糖果云了
+sand KEEP fair sand-dunes Sand Dunes ok
+sand-keep 1
+ask-desert 1
+place-desert 1
+theme-desert 1
+desert-world 1
+reef-world 1
+rain-tokyo 1
+night-beijing 1
+cyber-theme 1
+cyber-not-free 1
+gibber-ok 1
+gibber-diff 1
+gibber-same 1
+still-sky 1
+still-star 1
+still-bunny 1
+still-garden 1
+still-swap 1
+still-slow 1
+still-city 1
+still-guilin 1
+still-next 1
+still-another 1
+open-guilin 1
+not-open-beijing 1
+not-open-desert 1

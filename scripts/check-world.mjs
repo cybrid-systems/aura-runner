@@ -91,11 +91,29 @@ const edited = snap("", ["light", "double"], 24, 1);
 const drift = snap("", ["light", "double"], 22, 0);
 if (snapOk(weak) || snapOk(sword) || snapOk(drift)) fail("bounds");
 if (!snapOk(edited)) fail("primer-g");
-if (snapOk({ ...phrase, biome: "mars" }) || snapOk({ ...phrase, mood: "dark" })) fail("venue");
+if (snapOk({ ...phrase, mood: "dark" }) || snapOk({ ...phrase, biome: "Bad" })) fail("venue");
+if (!snapOk({ ...phrase, biome: "mars" })) fail("mars");
 if (!snapOk({ ...phrase, biome: "space", mood: "neon" })) fail("venue-ok");
 const cleaned = cleanSnap(phrase);
 if (!cleaned || cleaned.biome !== "garden" || cleaned.mood !== "day") fail("venue-default");
 if (cleanSnap({ ...phrase, biome: "city", mood: "sunset" }).biome !== "city") fail("venue-keep");
+if (cleanSnap({ ...phrase, biome: "city", mood: "sunset" }).mood !== "sunset") fail("mood-keep");
+const lavaMood = cleanSnap({ ...phrase, biome: "lava-canyon", mood: "0.28" });
+if (!lavaMood || lavaMood.biome !== "lava-canyon" || lavaMood.mood !== "0.28") fail("custom-mood");
+const keptSpec = {
+  id: "lava-canyon",
+  sky: [0.42, 0.16, 0.18],
+  road: [0.7, 0.42, 0.28],
+  ground: [0.22, 0.16, 0.16],
+  fogAmt: 0.18,
+  light: 0.78,
+  form: "(biome lava-canyon)",
+};
+const withSpec = cleanSnap({ ...phrase, biome: "lava-canyon", mood: "0.28", spec: keptSpec });
+if (!withSpec || !withSpec.spec || withSpec.spec.id !== "lava-canyon" || withSpec.spec.form !== keptSpec.form) fail("spec");
+const badSpec = cleanSnap({ ...phrase, spec: { id: "Bad", form: "x" } });
+if (!badSpec || badSpec.spec) fail("bad-spec");
+if (JSON.stringify(cleanSnap(phrase)).includes("\"key\"") || JSON.stringify(cleanSnap(phrase)).includes("\"audio\"")) fail("phrase-secret");
 
 const adopted = adoptDecision(blankWorld(), {
   op: "decision", kind: "KEEP", why: "fair", arm: "motif", cue: "A new shape bloomed",

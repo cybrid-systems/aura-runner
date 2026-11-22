@@ -99,10 +99,13 @@ export function venueLine(place, mult, lang) {
 }
 
 // The page keeps combo and comboUntil. plan.form is the pace the gate chose.
+const VENUE_ID = /^[a-z][a-z0-9-]{1,23}$/;
+
 export function onLevelGate(state, plan) {
   const level = (Number(state.level) || 1) + 1;
   const form = plan && Number.isFinite(plan.form) ? plan.form : state.form;
   const added = addMult(state.mult, 1);
+  const pinned = !!(state && state.pinned && typeof state.biome === "string" && VENUE_ID.test(state.biome));
   return {
     level,
     form,
@@ -111,8 +114,9 @@ export function onLevelGate(state, plan) {
     combo: state.combo,
     comboUntil: state.comboUntil,
     distance: state.distance,
-    biome: biomeForLevel(level),
+    biome: pinned ? state.biome : biomeForLevel(level),
     mood: state.mood,
+    pinned,
     chalCoins: 0,
     chalDone: false,
     what: evoWhat(state.form, form, level),

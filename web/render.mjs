@@ -191,6 +191,7 @@ export function acceptSpec(raw) {
     particles: typeof raw.particles === "string" ? raw.particles : "none",
     particleAmt: Math.max(0, Math.min(0.55, Number(raw.particleAmt) || 0)),
     props,
+    form: typeof raw.form === "string" && raw.form.length <= 800 && !/["\\\n]/.test(raw.form) ? raw.form : "",
   };
 }
 
@@ -209,12 +210,67 @@ export function takeVenue(prev, msg) {
       if (spec) name = spec.id;
     } else spec = null;
   }
-  const venue = typeof body.biome === "string" && BIOME_NAMES.includes(body.biome) ? body.biome : "";
-  if (venue && !(spec && spec.id === venue)) {
+  const venue = typeof body.biome === "string" && /^[a-z][a-z0-9-]{1,23}$/.test(body.biome) ? body.biome : "";
+  const builtin = BIOME_NAMES.includes(venue);
+  // A built-in venue wins over a leftover mix. A custom id keeps its spec.
+  if (builtin && !(spec && spec.id === venue)) {
     spec = null;
     name = venue;
   } else if (spec) name = spec.id;
+  else if (venue) name = venue;
   return { name, spec };
+}
+
+// The prop plan for one world at one tier. Meshes stay in world space and
+// are rebuilt every frame, because the road moves. This cache is the plan.
+const PLAN_CACHE = new Map();
+const PLAN_CAP = 12;
+
+function specKey(spec, tier) {
+  const props = (Array.isArray(spec.props) ? spec.props : [])
+    .map((p) => `${p && p.kind}:${p && p.density}:${p && p.scale}`)
+    .join(",");
+  const sky = Array.isArray(spec.sky) ? spec.sky.join(",") : "";
+  return [spec.id, tier, spec.surface || "", spec.particles || "", props, sky].join("|");
+}
+
+export function worldPlan(spec, tier) {
+  if (!spec || spec.recipe !== "mix" || !spec.id) return null;
+  const name = tier === "low" || tier === "medium" || tier === "high" ? tier : "low";
+  const key = specKey(spec, name);
+  const hit = PLAN_CACHE.get(key);
+  if (hit) {
+    PLAN_CACHE.delete(key);
+    PLAN_CACHE.set(key, hit);
+    return hit;
+  }
+  const scale = name === "low" ? 0.45 : name === "medium" ? 0.72 : 1;
+  const props = (Array.isArray(spec.props) ? spec.props : []).map((p) => ({
+    kind: p.kind,
+    density: Math.max(0.05, Math.min(0.55, (Number(p.density) || 0.2) * scale)),
+    scale: Math.max(0.55, Math.min(1.45, Number(p.scale) || 1)),
+  }));
+  let amt = Number(spec.particleAmt) || 0;
+  if (name === "low") amt = Math.min(0.1, amt * 0.35);
+  else if (name === "medium") amt *= 0.72;
+  const plan = { id: spec.id, props, particleAmt: amt, tier: name };
+  PLAN_CACHE.set(key, plan);
+  while (PLAN_CACHE.size > PLAN_CAP) {
+    const oldest = PLAN_CACHE.keys().next().value;
+    PLAN_CACHE.delete(oldest);
+  }
+  return plan;
+}
+
+// Shoulder flag. Sand and dust share the stone band. Reef is its own.
+// A custom surface with no band stays 0. A built-in venue stays 4.
+export function surfaceBand(pal) {
+  if (!pal || !pal.custom) return 4;
+  const s = pal.surface;
+  if (s === "sand" || s === "dust" || s === "stone" || s === "plank" || s === "lava") return 3;
+  if (s === "reef") return 2;
+  if (s === "ice" || s === "cloud") return 5;
+  return 0;
 }
 
 export function specInstances(spec) {
@@ -292,7 +348,11 @@ export function dressPalette(base, biome, mood, spec) {
     particleAmt: 0,
     surface: "grass",
   });
-  if (custom) applyMix(pal, spec);
+  // The spec already chose this sky. A named mood must not pull it back.
+  if (custom) {
+    applyMix(pal, spec);
+    return pal;
+  }
   if (name === "city") {
     pal.sky0 = [0.42, 0.52, 0.82];
     pal.sky1 = [0.98, 0.58, 0.34];
@@ -2806,7 +2866,9 @@ export function createRenderer(canvas, hooks) {
     }
     function drawMix(cz, dist) {
       drawCityStreet(cz);
-      const props = Array.isArray(pal.props) ? pal.props : [];
+      const plan = worldPlan(st.spec, activeProfile.tier);
+      const usePlan = !!(plan && plan.id === pal.biome);
+      const props = usePlan ? plan.props : (Array.isArray(pal.props) ? pal.props : []);
       const sway = reduced ? 0 : Math.sin((st.time || 0) * 1.1 + cz * 0.13) * 0.05;
       for (let p = 0; p < props.length && n < MAX - 70; p++) {
         const prop = props[p];
@@ -2863,7 +2925,7 @@ export function createRenderer(canvas, hooks) {
         }
       }
       const kind = pal.particles;
-      const amt = Number(pal.particleAmt) || 0;
+      const amt = usePlan ? plan.particleAmt : (Number(pal.particleAmt) || 0);
       if (!kind || kind === "none" || amt < 0.05 || reduced || n >= MAX - 24) return;
       if (((cz / 2) | 0) % 2 !== 0) return;
       const count = Math.min(2, Math.max(1, Math.round(amt * 3)));
@@ -2904,7 +2966,7 @@ export function createRenderer(canvas, hooks) {
             // breaks into shorter slabs so the ends still meet.
             const gradeSplit = Math.abs(roadGrade(cursor, pieces) - roadGrade(Math.max(cursor, end - 0.05), pieces)) > 0.015;
             const step = Math.abs(yB - yA) > 0.02 && gradeSplit ? 1 : span;
-            const grass = lane !== 1 && dist > -2 && dist < 4 ? (pal.custom && (pal.surface === "stone" || pal.surface === "plank" || pal.surface === "lava") ? 3 : pal.custom && (pal.surface === "ice" || pal.surface === "cloud") ? 5 : 4) : 0;
+            const grass = lane !== 1 && dist > -2 && dist < 4 ? surfaceBand(pal) : 0;
             for (let s = cursor; s < end - 0.001; s += step) {
               const e = Math.min(end, s + step);
               const mid = (s + e) * 0.5;

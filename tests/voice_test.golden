@@ -118,3 +118,5 @@ song-not-city biome city 1
 song-not-scene biome-next next 1
 song-not-level none
 song-line 1
+reef-voice biome city 1
+desert-voice none

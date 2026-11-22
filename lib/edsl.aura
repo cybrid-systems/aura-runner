@@ -14,7 +14,10 @@
 ;   (props (KIND DENSITY SCALE) ...)
 ;   (recipe garden|city|space|coast|mix))
 ;
-; KIND is tree, tower, arch, crystal, rock, coral, or ring.
+; KIND is tree, tower, arch, crystal, rock, coral, ring, pagoda,
+; palace-gate, pearl-tower, spire, bridge-tower, eiffel-tower,
+; clock-tower, colonnade, bamboo, palm, stone-bridge, battlement,
+; willow, cypress, or sakura.
 ; A proposal is kept only after evo:trial (edsl-gate).
 (require "std/string" all:)
 (require "std/evo-core" all:)
@@ -96,6 +99,8 @@
   "(biome visit-asia (label visit-asia) (sky 0.14 0.16 0.34 0.90 0.35 0.55) (fog 0.40 0.22 0.48 0.16) (body moon) (road 0.34 0.36 0.44) (curb 0.20 0.80 0.80) (ground 0.12 0.16 0.22) (surface plank) (light 0.88) (mood 0.38) (particles sparkles 0.18) (props (spire 0.22 1.15) (sakura 0.16 1.00)) (recipe mix))")
 (define edsl-visit-palm
   "(biome visit-palm (label visit-palm) (sky 0.95 0.70 0.50 0.98 0.50 0.45) (fog 0.96 0.78 0.62 0.14) (body sun) (road 0.70 0.60 0.45) (curb 0.85 0.55 0.40) (ground 0.36 0.50 0.28) (surface sand) (light 0.90) (mood 0.72) (particles sparkles 0.10) (props (palm 0.28 1.10) (spire 0.14 1.05)) (recipe mix))")
+(define edsl-sand
+  "(biome sand-dunes (label sand-dunes) (sky 0.96 0.74 0.46 0.98 0.86 0.62) (fog 0.94 0.82 0.58 0.14) (body sun) (road 0.72 0.58 0.36) (curb 0.55 0.40 0.24) (ground 0.86 0.72 0.42) (surface sand) (light 0.88) (mood 0.72) (particles sparkles 0.08) (props (rock 0.22 0.90) (palm 0.14 1.05)) (recipe mix))")
 
 (define (edsl-boot)
   (list edsl-garden edsl-city edsl-space edsl-coast))
@@ -134,6 +139,7 @@
     ((string=? name "visit-us") edsl-visit-us)
     ((string=? name "visit-asia") edsl-visit-asia)
     ((string=? name "visit-palm") edsl-visit-palm)
+    ((string=? name "sand-dunes") edsl-sand)
     (else #f)))
 
 (define (edsl-int n)
@@ -295,6 +301,7 @@
     ((string=? id "visit-us") "America")
     ((string=? id "visit-asia") "Asia")
     ((string=? id "visit-palm") "Palm City")
+    ((string=? id "sand-dunes") "Sand Dunes")
     ((string? id) (edsl-pretty id))
     (else "Garden")))
 
@@ -332,6 +339,7 @@
     ((string=? id "visit-us") "美国")
     ((string=? id "visit-asia") "亚洲")
     ((string=? id "visit-palm") "棕榈城")
+    ((string=? id "sand-dunes") "沙漠")
     (else (edsl-title id))))
 
 (define (edsl-cubes kind)
@@ -574,7 +582,8 @@
           "mood" (hash-ref found "mood")
           "particles" (hash-ref found "particles")
           "particleAmt" (hash-ref found "pamt")
-          "props" (hash-ref found "props"))))
+          "props" (hash-ref found "props")
+          "form" (hash-ref found "form" ""))))
 
 (define (edsl-has? pool id)
   (let loop ((xs pool))
@@ -611,6 +620,38 @@
 (define (edsl-word? low w)
   (string-contains? (string-append " " low " ") (string-append " " w " ")))
 
+; 沙漠 / desert. 沙滩 stays the coast. 沙 alone is not a desert.
+(define (edsl-desert? text)
+  (and (string? text)
+       (let ((low (string-downcase text)))
+         (or (string-contains? text "沙漠")
+             (string-contains? text "沙丘")
+             (edsl-word? low "desert")
+             (edsl-word? low "dunes")))))
+
+; 海底 is not 海边. A city word inside 海底城市 still means the reef.
+(define (edsl-reef? text)
+  (and (string? text)
+       (let ((low (string-downcase text)))
+         (or (string-contains? text "海底")
+             (string-contains? text "水下")
+             (string-contains? text "珊瑚")
+             (edsl-word? low "reef")
+             (edsl-word? low "coral")
+             (edsl-word? low "undersea")
+             (edsl-word? low "underwater")
+             (edsl-word? low "seafloor")))))
+
+; 下雨 / rainy. 赛博雨 is its own preset and is not this weather.
+(define (edsl-rain? text)
+  (and (string? text)
+       (not (string-contains? text "赛博雨"))
+       (let ((low (string-downcase text)))
+         (or (string-contains? text "下雨")
+             (string-contains? text "雨天")
+             (edsl-word? low "rainy")
+             (edsl-word? low "rain")))))
+
 ; 去背景 / 到程度. A bare 到 inside 看到 does not count unless the
 ; misheard name sits right after it.
 (define (edsl-toward? text word)
@@ -624,6 +665,8 @@
     #f
     (let ((low (string-downcase text)))
       (cond
+        ((edsl-desert? text) "sand-dunes")
+        ((edsl-reef? text) "coral-reef")
         ((or (string-contains? text "火山")
              (edsl-word? low "volcano")
              (edsl-word? low "lava"))
@@ -796,16 +839,14 @@
 (define (edsl-ask text)
   (let ((low (string-downcase text)))
     (cond
+      ((edsl-desert? text) "sand-dunes")
+      ((edsl-reef? text) "coral-reef")
       ((or (string-contains? text "拉萨") (string-contains? text "藏") (string-contains? low "lhasa")) "visit-high")
       ((or (string-contains? text "大理") (string-contains? low "dali")) "visit-lake")
       ((or (string-contains? text "桂林") (string-contains? text "漓") (string-contains? low "guilin")) "visit-china")
       ((or (string-contains? text "阿姆斯特丹") (string-contains? low "amsterdam")) "visit-canal")
       ((or (string-contains? text "布拉格") (string-contains? low "prague")) "visit-stone")
       ((or (string-contains? text "芝加哥") (string-contains? low "chicago")) "visit-us")
-      ((and (or (string-contains? text "去") (string-contains? text "前往"))
-            (edsl-cjk? text)
-            (not (edsl-builtin-ask? text low)))
-       "visit-china")
       ((and (string-contains? low "go to ") (not (edsl-builtin-ask? text low)))
        (edsl-nth (list "visit-stone" "visit-us" "visit-asia" "visit-palm") (modulo (edsl-hash low) 4)))
       (else #f))))
@@ -1111,3 +1152,234 @@
   (if (string=? lang "zh")
     (string-append "来到" (edsl-zh id) "了")
     (edsl-banner (edsl-title id))))
+
+; Mix worlds a made-up sentence may start from. The plain garden is not
+; the only look. Kept elites, when the pool has any, come first.
+(define edsl-bases
+  (list "lava-canyon" "aurora-ice" "candy-clouds" "coral-reef" "cyber-rain"
+        "sand-dunes" "tokyo" "paris" "beijing" "venice" "visit-palm" "visit-lake"))
+
+(define (edsl-hash-n s)
+  (let ((n (if (string? s) (string-length s) 0)))
+    (let loop ((i 0) (h 0))
+      (if (>= i n)
+        h
+        (loop (+ i 1) (modulo (+ (* h 33) (string-ref s i)) 1000003))))))
+
+(define (edsl-wish-id text)
+  (string-append "w" (edsl-int (edsl-hash-n text))))
+
+(define (edsl-elite-forms pool)
+  (let loop ((xs (if (pair? pool) pool (list))) (acc (list)))
+    (if (or (not (pair? xs)) (null? xs))
+      (if (null? acc) #f (reverse acc))
+      (let ((chk (edsl-check (car xs))))
+        (if (and (hash? chk) (hash-ref chk "ok" #f)
+                 (not (edsl-builtin? (hash-ref chk "id" ""))))
+          (loop (cdr xs) (cons (car xs) acc))
+          (loop (cdr xs) acc))))))
+
+(define (edsl-base-form text pool)
+  (let ((elites (edsl-elite-forms pool))
+        (h (edsl-hash-n text)))
+    (if (pair? elites)
+      (edsl-nth elites (modulo h (edsl-len elites)))
+      (edsl-preset (edsl-nth edsl-bases (modulo h (edsl-len edsl-bases)))))))
+
+(define (edsl-checked text)
+  (let ((found (if (string? text) (edsl-check text) #f)))
+    (if (and (hash? found) (hash-ref found "ok" #f)) text #f)))
+
+(define (edsl-sky-nudge sky salt)
+  (list (edsl-nudge (car sky) salt)
+        (edsl-nudge (car (cdr sky)) (+ salt 1))
+        (edsl-nudge (car (cdr (cdr sky))) (+ salt 2))
+        (edsl-nudge (car (cdr (cdr (cdr sky)))) (+ salt 3))
+        (edsl-nudge (car (cdr (cdr (cdr (cdr sky))))) (+ salt 4))
+        (edsl-nudge (car (cdr (cdr (cdr (cdr (cdr sky)))))) (+ salt 5))))
+
+(define (edsl-chan-nudge xs salt)
+  (list (edsl-nudge (car xs) salt)
+        (edsl-nudge (car (cdr xs)) (+ salt 1))
+        (edsl-nudge (car (cdr (cdr xs))) (+ salt 2))))
+
+(define (edsl-one-prop text)
+  (let ((h (edsl-hash-n (string-append text "p"))))
+    (list (hash "kind" (edsl-nth edsl-kinds (modulo h 22))
+                "density" (+ 0.10 (* (modulo h 9) 0.02))
+                "scale" 1.0))))
+
+(define (edsl-hash-part text)
+  (let ((k (edsl-nth edsl-particles (modulo (edsl-hash-n (string-append text "q")) 7))))
+    (if (or (not (string? k)) (string=? k "none")) "sparkles" k)))
+
+(define (edsl-retint found id salt props particles pamt)
+  (let ((fog (hash-ref found "fog")))
+    (edsl-emit id
+               (edsl-sky-nudge (hash-ref found "sky") salt)
+               (list (edsl-nudge (car fog) (+ salt 6))
+                     (edsl-nudge (car (cdr fog)) (+ salt 7))
+                     (edsl-nudge (car (cdr (cdr fog))) (+ salt 8))
+                     (edsl-clamp (car (cdr (cdr (cdr fog)))) 0.08 0.32))
+               (hash-ref found "body")
+               (edsl-chan-nudge (hash-ref found "road") (+ salt 9))
+               (hash-ref found "curb")
+               (edsl-chan-nudge (hash-ref found "ground") (+ salt 12))
+               (hash-ref found "surface")
+               (hash-ref found "light")
+               (hash-ref found "mood")
+               particles
+               pamt
+               props
+               "mix")))
+
+; Colour only. The id, the surface, and the particles stay so the
+; preview is the same place, a little warmer or cooler.
+(define (edsl-tint text full)
+  (let ((found (if (string? full) (edsl-check full) #f)))
+    (if (not (and (hash? found) (hash-ref found "ok" #f)))
+      full
+      (let ((tinted (edsl-retint found (hash-ref found "id") (edsl-hash-n text)
+                                 (hash-ref found "props")
+                                 (hash-ref found "particles")
+                                 (hash-ref found "pamt"))))
+        (if (edsl-checked tinted) tinted full)))))
+
+(define (edsl-with-particles form kind amt)
+  (let ((found (if (string? form) (edsl-check form) #f)))
+    (if (not (and (hash? found) (hash-ref found "ok" #f)))
+      form
+      (edsl-emit (hash-ref found "id")
+                 (hash-ref found "sky")
+                 (hash-ref found "fog")
+                 (hash-ref found "body")
+                 (hash-ref found "road")
+                 (hash-ref found "curb")
+                 (hash-ref found "ground")
+                 (hash-ref found "surface")
+                 (hash-ref found "light")
+                 (hash-ref found "mood")
+                 kind
+                 amt
+                 (hash-ref found "props")
+                 (hash-ref found "recipe")))))
+
+; A place the sentence already names. The string is the world, not an id.
+; Rain keeps that place and only changes the weather.
+(define (edsl-free-form text)
+  (if (not (and (string? text) (> (string-length text) 0)))
+    #f
+    (let ((theme (edsl-theme text)))
+      (cond
+        ((and (edsl-rain? text) (string? theme) (string? (edsl-preset theme)))
+         (edsl-with-particles (edsl-preset theme) "rain" 0.28))
+        ((edsl-reef? text) edsl-coral)
+        ((edsl-desert? text) edsl-sand)
+        (else #f)))))
+
+(define (edsl-shaped? text)
+  (string? (edsl-free-form text)))
+
+; 去 / 前往 / go to, and not a place we already know how to name.
+(define (edsl-open-place? text)
+  (and (string? text)
+       (not (edsl-shaped? text))
+       (not (edsl-theme text))
+       (not (edsl-tour-next text ""))
+       (let ((low (string-downcase text)))
+         (and (not (edsl-builtin-ask? text low))
+              (or (string-contains? text "去")
+                  (string-contains? text "前往")
+                  (string-contains? low "go to "))))))
+
+(define (edsl-hash-world text pool)
+  (let ((base (edsl-base-form text pool)))
+    (let ((found (if (string? base) (edsl-check base) #f)))
+      (if (not (and (hash? found) (hash-ref found "ok" #f)))
+        #f
+        (let ((id (edsl-wish-id text))
+              (salt (edsl-hash-n text))
+              (nudged (edsl-retint found id salt
+                                   (edsl-one-prop text)
+                                   (edsl-hash-part text)
+                                   0.12)))
+          (if (edsl-checked nudged)
+            nudged
+            (let ((same (edsl-emit id
+                                   (hash-ref found "sky")
+                                   (hash-ref found "fog")
+                                   (hash-ref found "body")
+                                   (hash-ref found "road")
+                                   (hash-ref found "curb")
+                                   (hash-ref found "ground")
+                                   (hash-ref found "surface")
+                                   (hash-ref found "light")
+                                   (hash-ref found "mood")
+                                   (let ((part (hash-ref found "particles")))
+                                     (if (string=? part "none") "sparkles" part))
+                                   (hash-ref found "pamt")
+                                   (hash-ref found "props")
+                                   "mix")))
+              (if (edsl-checked same) same base))))))))
+
+; A named place comes back unchanged. Anything else is a legal world
+; whose colours follow the sentence, stable for that same sentence.
+(define (edsl-offline text pool)
+  (let ((shaped (edsl-free-form text)))
+    (if (string? shaped)
+      shaped
+      (edsl-hash-world (if (string? text) text "") pool))))
+
+(define (edsl-warm? found)
+  (let ((g (hash-ref found "ground"))
+        (s (hash-ref found "sky")))
+    (and (> (car g) (car (cdr (cdr g))))
+         (> (car s) (car (cdr (cdr s)))))))
+
+(define (edsl-cyan-fog? found)
+  (let ((f (hash-ref found "fog")))
+    (and (> (car (cdr f)) (car f))
+         (> (car (cdr (cdr f))) (car f)))))
+
+(define (edsl-has-kind? props kind)
+  (let loop ((xs props))
+    (if (or (not (pair? xs)) (null? xs))
+      #f
+      (if (and (hash? (car xs)) (string=? (hash-ref (car xs) "kind" "") kind))
+        #t
+        (loop (cdr xs))))))
+
+; A model answer may replace the offline world only when it is still
+; the place the child named. Any other legal form is enough for a
+; sentence that did not name one.
+(define (edsl-serves? text form)
+  (let ((found (if (string? form) (edsl-check form) #f)))
+    (if (not (and (hash? found) (hash-ref found "ok" #f)))
+      #f
+      (cond
+        ((edsl-desert? text)
+         (and (or (string=? (hash-ref found "surface" "") "sand")
+                  (string=? (hash-ref found "surface" "") "dust"))
+              (edsl-warm? found)))
+        ((edsl-reef? text)
+         (or (string=? (hash-ref found "surface" "") "reef")
+             (edsl-has-kind? (hash-ref found "props" (list)) "coral")
+             (edsl-cyan-fog? found)))
+        ((and (edsl-rain? text) (string? (edsl-theme text)))
+         (and (string=? (hash-ref found "particles" "") "rain")
+              (or (string=? (hash-ref found "id" "") (edsl-theme text))
+                  (edsl-has-kind? (hash-ref found "props" (list)) "sakura")
+                  (edsl-has-kind? (hash-ref found "props" (list)) "spire"))))
+        (else #t)))))
+
+(define (edsl-motif-line? text)
+  (and (string? text)
+       (let ((low (string-downcase text)))
+         (or (string-contains? text "星星")
+             (string-contains? text "金币")
+             (string-contains? text "门")
+             (string-contains? text "跳")
+             (edsl-word? low "star")
+             (edsl-word? low "coin")
+             (edsl-word? low "gate")
+             (edsl-word? low "jump")))))
