@@ -44,15 +44,27 @@
   (require "lib/gen")
   (require "lib/live")
   (boot-note! 36 "正在铺路")
+  ; One line before each module. A cold compile sits inside a single
+  ; require, and the page can only show the line that was already written.
+  (boot-note! 40 "正在读场景")
   (require "lib/scene")
+  (boot-note! 48 "正在读朋友")
   (require "lib/pals")
+  (boot-note! 54 "正在读卡片")
   (require "lib/cards")
+  (boot-note! 60 "正在读地方")
   (require "lib/biome")
+  (boot-note! 66 "正在读追逐")
   (require "lib/chase")
+  (boot-note! 72 "正在读心")
   (require "lib/hearts")
+  (boot-note! 76 "正在读比赛")
   (require "lib/race")
+  (boot-note! 80 "正在读世界")
   (require "lib/world")
+  (boot-note! 84 "正在读入门")
   (require "lib/primer")
+  (boot-note! 88 "正在读曲子")
   (require "lib/music")
   ; Coins are laid into the first chunk, so they load with the road.
   ; One require here, before the port opens. A second require on the

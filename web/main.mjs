@@ -63,19 +63,29 @@ const gpuNote = document.getElementById("nogpu");
 const bootEl = document.getElementById("boot");
 const bootStep = document.getElementById("boot-step");
 const bootBar = document.getElementById("boot-bar");
-const renderer = createRenderer(canvas, {
-  onStatus(ev) {
-    if (!gpuNote) return;
-    if (ev.type === "restored") {
-      gpuNote.hidden = true;
-      return;
-    }
-    if (ev.type === "lost" || ev.type === "failed" || ev.type === "fallback") {
-      gpuNote.hidden = false;
-      gpuNote.textContent = ev.message || "The picture was interrupted. Bringing it back…";
-    }
-  },
-}) || createFallback(canvas);
+function makeRenderer() {
+  try {
+    return createRenderer(canvas, {
+      onStatus(ev) {
+        if (!gpuNote) return;
+        if (ev.type === "restored") {
+          gpuNote.hidden = true;
+          return;
+        }
+        if (ev.type === "lost" || ev.type === "failed" || ev.type === "fallback") {
+          gpuNote.hidden = false;
+          gpuNote.textContent = ev.message || "The picture was interrupted. Bringing it back…";
+        }
+      },
+    }) || createFallback(canvas);
+  } catch (err) {
+    // A shader failure used to abort the module before connect(), so the
+    // opening card stayed on its first line forever.
+    console.error(err);
+    try { return createFallback(canvas); } catch { return null; }
+  }
+}
+const renderer = makeRenderer();
 const input = createInput(canvas);
 const audio = createAudio();
 if (!renderer || renderer.kind === "canvas2d") {
@@ -1033,10 +1043,12 @@ function shareText() {
   return `${location.origin}${location.pathname}?seed=${seed}&cards=${ids}`;
 }
 
-// The boot file freezes on its last line. Once the socket has opened or
-// dropped, that file must not paint itself back over the live status.
+// The boot file freezes on its last line. Once the socket has opened,
+// that file must not paint itself back over the live status. A close
+// before any message clears this, so the next boot line can show.
 let bootLocal = false;
 let bootWatch = 0;
+let bootSaw = false;
 
 function paintBoot(text) {
   if (bootLocal || !bootEl || bootEl.hidden || !text) return;
@@ -1044,7 +1056,7 @@ function paintBoot(text) {
   const pct = cut > 0 ? Number(text.slice(0, cut)) : NaN;
   const label = cut > 0 ? text.slice(cut + 1).trim() : text.trim();
   if (Number.isFinite(pct) && bootBar) bootBar.style.width = Math.min(96, pct) + "%";
-  if (label && bootStep) bootStep.textContent = label;
+  if (label) showBoot(label);
 }
 
 function showBoot(label) {
@@ -1089,11 +1101,15 @@ function connect() {
     if (bootBar) bootBar.style.width = "70%";
     clearBootWatch();
     // A socket that never gets a welcome used to sit on the frozen line.
+    // Closing at 8s also cut off a hello the core was still answering,
+    // and this process accepts one client, so the retry then waited on
+    // a socket that was already gone. Give the first welcome longer,
+    // and do not close once any message has arrived.
     bootWatch = setTimeout(() => {
       bootWatch = 0;
-      if (!bootEl || bootEl.hidden) return;
+      if (!bootEl || bootEl.hidden || bootSaw) return;
       try { ws.close(); } catch { /* already closed */ }
-    }, 8000);
+    }, 25000);
     if (booted) {
       // The local list has already been pruned. Ask the server for the
       // chunks it still has instead of inventing an empty road.
@@ -1125,7 +1141,14 @@ function connect() {
     }
   };
   ws.onmessage = (ev) => {
-    const msg = JSON.parse(ev.data);
+    bootSaw = true;
+    let msg;
+    try {
+      msg = JSON.parse(ev.data);
+    } catch {
+      return;
+    }
+    if (!msg || typeof msg !== "object") return;
     if (freshRun && msg.op !== "welcome" && msg.op !== "resync") return;
     if (msg.op === "welcome" || msg.op === "chunk" || msg.op === "state") hideBoot();
     if (msg.op === "welcome") {
@@ -1218,7 +1241,10 @@ function connect() {
     connected = false;
     clearBootWatch();
     if (bootEl && !bootEl.hidden) {
-      bootLocal = true;
+      // No message yet: the boot file is still the truth. Keeping
+      // bootLocal set here left the card on 还在启动 while the core
+      // was still writing the next boot line.
+      if (!bootSaw) bootLocal = false;
       showBoot("还在启动");
     }
     setTimeout(connect, 600);

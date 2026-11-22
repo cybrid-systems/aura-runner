@@ -132,8 +132,11 @@ rm -f out/aura.port out/boot.txt
 
 # The prebuilt binary loads the game in-process. That needs no compiler.
 # The page is served as soon as it binds; it retries until the core listens.
-# AURA_CORE_WAIT is how long that load may take before this script gives up.
-core_wait="${AURA_CORE_WAIT:-60}"
+# AURA_CORE_WAIT is how long one boot stage may take. A cold compile of the
+# road used to pass 60s and get killed, and the page then stayed on
+# "花园正在打开" because the welcome never arrived. A new boot line starts
+# the wait over. The whole load still ends at twice that.
+core_wait="${AURA_CORE_WAIT:-300}"
 if ! [[ "$core_wait" =~ ^[1-9][0-9]*$ ]]; then
   echo "AURA_CORE_WAIT must be a positive number of seconds" >&2
   exit 1
@@ -170,20 +173,35 @@ echo "open http://127.0.0.1:${WEB_PORT}" >&2
 echo "tap or space jumps, down slides, left and right change lane" >&2
 
 core_deadline=$((SECONDS + core_wait))
+core_cap=$((SECONDS + core_wait * 2))
 core_ready=0
+boot_stamp=""
 while kill -0 "$WEB_PID" 2>/dev/null; do
   if [[ "$core_ready" -eq 0 ]]; then
-    if grep -q "PORT " out/aura.log 2>/dev/null; then
+    # out/aura.port is written when the listener exists. The PORT line
+    # can sit in a block buffer until the dotted flush, so the file is
+    # the earlier signal. Killing on the log alone used to stop a core
+    # that was already opening the garden.
+    if grep -q "PORT " out/aura.log 2>/dev/null || [[ -s out/aura.port ]]; then
       core_ready=1
     elif ! kill -0 "$AURA_PID" 2>/dev/null; then
       echo "Aura core exited before it was listening" >&2
       tail -n 40 out/aura.log >&2 || true
       exit 1
-    elif (( SECONDS >= core_deadline )); then
-      echo "Aura core did not listen within ${core_wait}s" >&2
-      echo "The log is out/aura.log. ./run.sh is using the prebuilt Aura binary." >&2
-      tail -n 40 out/aura.log >&2 || true
-      exit 1
+    else
+      now_boot="$(cat out/boot.txt 2>/dev/null || true)"
+      if [[ -n "$now_boot" && "$now_boot" != "$boot_stamp" ]]; then
+        boot_stamp="$now_boot"
+        echo "$now_boot" >&2
+        core_deadline=$((SECONDS + core_wait))
+        if (( core_deadline > core_cap )); then core_deadline=$core_cap; fi
+      fi
+      if (( SECONDS >= core_deadline )); then
+        echo "Aura core did not listen within ${core_wait}s of the last boot line" >&2
+        echo "The log is out/aura.log. ./run.sh is using the prebuilt Aura binary." >&2
+        tail -n 40 out/aura.log >&2 || true
+        exit 1
+      fi
     fi
   elif ! kill -0 "$AURA_PID" 2>/dev/null; then
     echo "Aura core stopped" >&2
