@@ -59,7 +59,8 @@ stretch has no popper and no flyer in it.
   held-out 2036 ms against its own null's 3090 ms; see below).
 - `step-poppers-noop`: the same for the poppers.
 - `collide-slack`: the metre of slack around the body is more than the
-  geometry needs.
+  geometry needs. **Evaluated, NOT landed** — safe but no live gain (see
+  below).
 - `wrong-scale`: the score is doubled on the way in; the checksum has to
   reject it.
 
@@ -135,6 +136,39 @@ both worldline states agree with the gate, 2 release verdicts published,
 tree's `lib` (`AURA_PATH=~/aura/lib`); the nightly's bundled lib does not
 ship it, though the binary has the bus primitives.
 
+### collide-slack: safe, but the gate's win does not transfer to the road
+
+After the #5388 IR-cap fix the gated round PASSed `collide-slack` on the
+site floor (collide 472 -> 338 ms). Evaluated for landing on the fixed
+runtime; **not landed** — it is behavior-preserving but buys nothing on
+the live road.
+
+Safety (proven, not just gate-checked): `collide-far?` is a pure skip; the
+web twin `web/sim.mjs` has no skip and checks every piece, so it is the
+parity ground truth. A collision span can poke past the authored box only
+for a narrow gate: `gate-span` floors depth at 0.45 and thick at 0.22, so
+the span extends at most 0.11 m past the box (w -> 0); production gates are
+width-validated to [0.35, 2.0] (`lib/gen.aura`), where the span sits fully
+inside the box. 0.25 m slack therefore clears the worst case with margin.
+Differential test of collide output (player + event + pieces) for slack
+1.0 vs 0.25 vs no-skip: 3805 checks over every kind incl. gates at w=0.2
+and 0.05, plus 2093 adversarial body-edge sweeps across the 0.25 m
+boundary at w=0..0.12 — **0 mismatches**.
+
+Gain (where the gate's win comes from, and why it does not transfer):
+
+| workload | slack 1.0 | slack 0.25 | delta |
+|---|---|---|---|
+| perf course, ground+coin 1 m spacing, fixed px | 46570 ms/30k | 41353 ms/30k | -11% |
+| real road (mixed chunks), fixed px=80 | 21472 ms/30k | 21480 ms/30k | ~0 |
+| real road, moving player, 3000 steps | 10360 ms | 10298 ms | ~0 (digest equal) |
+
+The perf course is dense overlapping ground (6 m wide, 1 m apart), so the
+0.25-1.0 m band around the body holds piece edges the tighter slack skips.
+The live road spreads pieces across ~8-30 m chunks; that band is empty
+almost everywhere, so the skip decision is the same. The gate measures the
+perf course, not the road — a site-floor PASS there is not a live win.
+Keeping the metre of slack costs nothing and leaves more geometry margin.
 
 ## The run remembers
 
