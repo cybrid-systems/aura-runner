@@ -1013,13 +1013,23 @@ function shareText() {
   return `${location.origin}${location.pathname}?seed=${seed}&cards=${ids}`;
 }
 
+// The boot file freezes on its last line. Once the socket has opened or
+// dropped, that file must not paint itself back over the live status.
+let bootLocal = false;
+let bootWatch = 0;
+
 function paintBoot(text) {
-  if (!bootEl || bootEl.hidden || !text) return;
+  if (bootLocal || !bootEl || bootEl.hidden || !text) return;
   const cut = text.indexOf(" ");
   const pct = cut > 0 ? Number(text.slice(0, cut)) : NaN;
   const label = cut > 0 ? text.slice(cut + 1).trim() : text.trim();
   if (Number.isFinite(pct) && bootBar) bootBar.style.width = Math.min(96, pct) + "%";
   if (label && bootStep) bootStep.textContent = label;
+}
+
+function showBoot(label) {
+  if (!bootEl || bootEl.hidden || !bootStep || !label) return;
+  bootStep.textContent = label;
 }
 
 function pollBoot() {
@@ -1033,13 +1043,18 @@ function pollBoot() {
     });
 }
 
+function clearBootWatch() {
+  if (bootWatch) clearTimeout(bootWatch);
+  bootWatch = 0;
+}
+
 function hideBoot() {
   if (!bootEl || bootEl.hidden) return;
+  bootLocal = true;
+  clearBootWatch();
   if (bootBar) bootBar.style.width = "100%";
   if (bootStep) bootStep.textContent = "可以跑了";
-  setTimeout(() => {
-    if (bootEl) bootEl.hidden = true;
-  }, 160);
+  bootEl.hidden = true;
 }
 
 pollBoot();
@@ -1049,7 +1064,16 @@ function connect() {
   ws = new WebSocket(`${proto}://${location.host}/ws`);
   ws.onopen = () => {
     connected = true;
-    paintBoot("70 正在铺路");
+    bootLocal = true;
+    showBoot("正在铺路");
+    if (bootBar) bootBar.style.width = "70%";
+    clearBootWatch();
+    // A socket that never gets a welcome used to sit on the frozen line.
+    bootWatch = setTimeout(() => {
+      bootWatch = 0;
+      if (!bootEl || bootEl.hidden) return;
+      try { ws.close(); } catch { /* already closed */ }
+    }, 8000);
     if (booted) {
       // The local list has already been pruned. Ask the server for the
       // chunks it still has instead of inventing an empty road.
@@ -1079,8 +1103,8 @@ function connect() {
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
     if (freshRun && msg.op !== "welcome" && msg.op !== "resync") return;
+    if (msg.op === "welcome" || msg.op === "chunk" || msg.op === "state") hideBoot();
     if (msg.op === "welcome") {
-      hideBoot();
       freshRun = false;
       resetLocal();
       booted = true;
@@ -1168,7 +1192,11 @@ function connect() {
   };
   ws.onclose = () => {
     connected = false;
-    if (bootEl && !bootEl.hidden && bootStep) bootStep.textContent = "还在启动";
+    clearBootWatch();
+    if (bootEl && !bootEl.hidden) {
+      bootLocal = true;
+      showBoot("还在启动");
+    }
     setTimeout(connect, 600);
   };
 }

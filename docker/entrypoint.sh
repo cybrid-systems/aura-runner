@@ -17,6 +17,7 @@ export AURA_RUNNER_WEB="${AURA_RUNNER_WEB:-8080}"
 export AURA_RUNNER_PORT="${AURA_RUNNER_PORT:-8765}"
 export AURA_EVO_LOG="${AURA_EVO_LOG:-/opt/lumen-run/out/evo.jsonl}"
 mkdir -p /opt/lumen-run/out
+rm -f /opt/lumen-run/out/boot.txt
 : > "$AURA_EVO_LOG" || true
 
 if [ -n "${LUMEN_MINIMAX_KEY:-}${LUMEN_MINIMAX_URL:-}${LUMEN_MINIMAX_MODEL:-}" ] || [ "${LUMEN_LLM:-}" = "minimax" ]; then

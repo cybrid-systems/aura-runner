@@ -128,7 +128,7 @@ export AURA_RUNNER_WEB="$WEB_PORT"
 source "$ROOT/scripts/probe-llm.sh"
 configure_llm
 : > "$AURA_EVO_LOG" || true
-rm -f out/aura.port
+rm -f out/aura.port out/boot.txt
 
 # The prebuilt binary loads the game in-process. That needs no compiler.
 # The page is served as soon as it binds; it retries until the core listens.
@@ -185,6 +185,10 @@ while kill -0 "$WEB_PID" 2>/dev/null; do
       tail -n 40 out/aura.log >&2 || true
       exit 1
     fi
+  elif ! kill -0 "$AURA_PID" 2>/dev/null; then
+    echo "Aura core stopped" >&2
+    tail -n 40 out/aura.log >&2 || true
+    exit 1
   fi
   sleep 0.2
 done

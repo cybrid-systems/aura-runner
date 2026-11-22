@@ -682,13 +682,13 @@
   (set! level-overtakes 0)
   (set! level-coins 0)
   (set! level-swaps 0)
-  ; Level 1 uses the plain span. adapt-span lives with voice, which is
-  ; loaded after the garden is already open. For level 1 the two agree.
-  (if (> level-n 1) (load-slow!) #f)
+  ; Level 1 uses the plain span. adapt-span lives with voice. A resumed
+  ; level keeps the plain span until open-road! has loaded voice, so the
+  ; welcome is not waiting on that compile.
   (if goal-lock
     #f
     (set! level-x1 (+ level-x0
-                     (if (> level-n 1)
+                     (if (and (> level-n 1) slow-mods)
                        (adapt-span speed-now (player-score player) level-n)
                        (level-span speed-now)))))
   (coin-open-level! level-x0 level-x1))
@@ -1307,9 +1307,22 @@
 ; One chunk a tick spreads that across frames. The road-horizon buffer is
 ; six seconds of road (72-160 m), far more than one chunk (~8-30 m) and
 ; the per-tick advance (~0.2 m), so the picture never reaches the tail
-; while the fill catches up. The setup callers (reset / resume / rewind)
-; pass no budget and fill the whole horizon synchronously, so hello and
-; resync still carry a complete road.
+; while the fill catches up. open-road! and rewind pass no budget. The
+; default cap is 12 chunks, enough for a normal horizon, and the welcome
+; is already on the wire before that fill starts.
+; Load voice for a resumed level, then lay the road. A failure here must
+; not drop the welcome.
+(define (open-road!)
+  (if (and (> level-n 1) (not slow-mods))
+    (try (load-slow!) (catch (e) #f))
+    #f)
+  (if (and (> level-n 1) slow-mods (not goal-lock))
+    (begin
+      (set! level-x1 (+ level-x0 (adapt-span speed-now (player-score player) level-n)))
+      (coin-span! level-x1))
+    #f)
+  (ensure-ahead!))
+
 (define (ensure-ahead! . rest)
   (let ((hint (if (and (pair? rest) (number? (car rest)) (> (car rest) 0.0))
                 (exact->inexact (car rest))
@@ -1458,8 +1471,7 @@
     (begin (sync-rules!) (set! tuned #f))
     #f)
   (remember-published!)
-  (begin-level!)
-  (ensure-ahead!))
+  (begin-level!))
 
 (define (parse-seed v)
   (cond
@@ -1474,6 +1486,15 @@
 
 (define (send c v)
   (tcp-send c (string-append (json-encode v) "\n")))
+
+; The page hides the boot card on this message. Send it before the road
+; is laid, and still send a small one if the full snapshot throws.
+(define (send-welcome! c)
+  (let ((msg (try (welcome-msg) (catch (e) #f))))
+    (send c (if (hash? msg)
+              msg
+              (hash "op" "welcome" "seed" seed
+                    "replay" (string-append "LUMEN-" (int-str seed)))))))
 
 (define (hero-public)
   (if (hash? hero-now)
@@ -4247,8 +4268,7 @@
             ; toast a speed change the runner already had.
             (set! feel-cue "")
             (apply-feel! "pace")
-            (begin-level!)
-            (ensure-ahead!)))))))
+            (begin-level!)))))))
 
 ; A new hello or restart starts a fresh trunk. Older branches stay.
 (define (world-trunk!)
@@ -4567,10 +4587,10 @@
     (set! seed (if parsed parsed (exact->inexact (fresh-seed))))
     (set! speed-lock #f)
     (set! speed-now 8.0)
-    (reset-run!)
-    (resume-run! msg)
-    (take-hello-venue! msg)
-    (send c (welcome-msg))
+    (try (begin (reset-run!) (resume-run! msg) (take-hello-venue! msg))
+         (catch (e) #f))
+    (send-welcome! c)
+    (try (open-road!) (catch (e) #f))
     (send-all-chunks c)
     (send c (state-msg "ok"))
     (flush-notes! c)))
@@ -4579,9 +4599,10 @@
   (let ((parsed (parse-seed (hash-ref msg "seed" #f))))
     (world-trunk!)
     (if parsed (set! seed parsed) #f)
-    (reset-run!)
-    (take-hello-venue! msg)
-    (send c (welcome-msg))
+    (try (begin (reset-run!) (take-hello-venue! msg))
+         (catch (e) #f))
+    (send-welcome! c)
+    (try (open-road!) (catch (e) #f))
     (send-all-chunks c)
     (send c (state-msg "ok"))
     (flush-notes! c)))
@@ -4997,7 +5018,12 @@
             (begin (send c (hash "op" "err" "why" "json")) (loop))
             (if (string=? (hash-ref msg "op" "") "bye")
               #t
-              (begin (dispatch c msg) (loop)))))))))
+              (begin
+                ; One bad message used to kill the listener. The page then
+                ; stayed on the last boot line forever.
+                (try (dispatch c msg)
+                     (catch (e) (send c (hash "op" "err" "why" "drop"))))
+                (loop)))))))))
 
 (define (start-llm!)
   (set! llm-provider (choose-provider))
@@ -5202,6 +5228,9 @@
           (newline)
           1)
         (begin
+          ; The page is already polling. "马上就好" was the last line it
+          ; would ever read, including after this listener was up.
+          (boot-note! 96 "正在开门")
           (start-llm!)
           (let ((bound (tcp-local-port listener)))
             (try (make-directory "out") (catch (e) #f))
