@@ -3720,6 +3720,8 @@
                             0)
              (note! "KEEP" "fair" "voice"
                     (voice-line act next "fair" wish-locale) next)))))
+      ((string=? act "music-next")
+       (note! "KEEP" "fair" "music" (voice-line act "" "fair" wish-locale)))
       ((string=? act "drop-thing")
        (let ((got (shown-drop shown name)))
          (if (not (hash-ref got "ok" #f))

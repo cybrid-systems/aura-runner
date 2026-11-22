@@ -25,6 +25,19 @@ export function mentionsCity(line) {
   });
 }
 
+// A next-track sentence. 下一首 is not 下一个城市, and 换一首 is not 换场景.
+export function mentionsSong(line) {
+  const text = String(line || "");
+  const low = text.toLowerCase();
+  if (text.includes("场景") || text.includes("城市")) return false;
+  if (text.includes("下一首") || text.includes("下首歌") || text.includes("换一首")
+    || text.includes("换首歌") || text.includes("切歌") || text.includes("跳过这首")) return true;
+  const word = (phrase) => new RegExp(`(?:^|[^a-z])${phrase}(?:[^a-z]|$)`).test(low);
+  if (word("scene") || word("city") || word("biome")) return false;
+  return (word("next") && (word("song") || word("track")))
+    || (word("skip") && (word("song") || word("track") || word("music")));
+}
+
 export function preferHeard(alternatives) {
   const list = [];
   for (const raw of alternatives || []) {
@@ -33,6 +46,7 @@ export function preferHeard(alternatives) {
   }
   if (!list.length) return "";
   for (const line of list) {
+    if (mentionsSong(line)) return line;
     if (mentionsCity(line)) return line;
   }
   return list[0];

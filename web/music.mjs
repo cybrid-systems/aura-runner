@@ -541,7 +541,7 @@ export function chordRoot(phrase, step) {
 
 // A folder of the player's own tracks. shuffle is the default. ordered
 // keeps the file-name order. One track loops. Several tracks in shuffle
-// start on a shuffled song, and each ending song starts a different one.
+// open on any song, and each ending song starts a different one.
 export function arrangeTracks(tracks, order, random = Math.random) {
   const list = Array.isArray(tracks) ? tracks.slice() : [];
   if (order === "ordered") return list;
@@ -558,13 +558,28 @@ export function arrangeTracks(tracks, order, random = Math.random) {
   return list;
 }
 
+// Opening slot. ordered and a single file stay on the first entry.
+// shuffle draws across the whole list, so the song that starts is not
+// pinned to whatever landed in slot 0.
+function openingIndex(count, order, random) {
+  const n = count | 0;
+  if (order === "ordered" || n <= 1) return 0;
+  const raw = Number(random());
+  const u = Number.isFinite(raw) ? raw : 0;
+  let i = Math.floor(u * n);
+  if (i < 0) i = 0;
+  if (i >= n) i = n - 1;
+  return i;
+}
+
 export function freshPlaylist(tracks, order, random = Math.random) {
   const mode = order === "ordered" ? "ordered" : "shuffle";
   const list = Array.isArray(tracks) ? tracks : [];
+  const arranged = arrangeTracks(list, mode, random);
   return {
     order: mode,
-    tracks: arrangeTracks(list, mode, random),
-    index: 0,
+    tracks: arranged,
+    index: openingIndex(arranged.length, mode, random),
     failed: 0,
     action: list.length ? "play" : "synth",
   };

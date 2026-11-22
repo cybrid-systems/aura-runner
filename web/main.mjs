@@ -1145,6 +1145,7 @@ function connect() {
         if (msg.kind === "KEEP") audio.tuneKeep(msg.tune);
         else if (msg.kind === "ROLLBACK") audio.tuneRollback(msg.tune);
       }
+      if (msg.arm === "music" && msg.kind === "KEEP") audio.skip();
       if (msg.arm === "rule") endPrimerWait();
       if (window.__lumenOnDecision) window.__lumenOnDecision(msg);
       if (msg.kind === "KEEP" && (msg.arm === "motif" || msg.arm === "scene" || msg.arm === "pals")) audio.keep();

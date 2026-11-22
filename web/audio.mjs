@@ -275,6 +275,14 @@ export function createAudio() {
     else armTrack();
   }
 
+  // Same step as a track ending: shuffle avoids the song that just played,
+  // ordered wraps, and one file starts again.
+  function skip() {
+    if (!playState || playState.action === "synth" || !playState.tracks.length) return false;
+    stepPlaylist("end");
+    return true;
+  }
+
   function failTrack() {
     if (failGen === playGen) return;
     failGen = playGen;
@@ -783,7 +791,7 @@ export function createAudio() {
 
   return {
     unlock, jump, slide, coin, pickup, cheer, rise, nice, spring, die, keep, land, near, pop, ward,
-    music, setMuted, setVolume, follow, tuneKeep, tuneRollback, tuneHear: tuneKeep, resetTune,
+    music, setMuted, setVolume, follow, tuneKeep, tuneRollback, tuneHear: tuneKeep, resetTune, skip,
     get muted() { return muted; },
     get volume() { return userVolume; },
   };

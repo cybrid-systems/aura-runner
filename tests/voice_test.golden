@@ -105,3 +105,16 @@ heat-hold scene 1 2 0
 heat-cap harder 4 4 1
 heat-still hold 0 1 1
 line-dense 1
+song-next music-next  1
+song-long music-next  1
+song-short music-next  1
+song-change music-next  1
+song-cut music-next  1
+song-skip-zh music-next  1
+song-en music-next  1
+song-track music-next  1
+song-skip music-next  1
+song-not-city biome city 1
+song-not-scene biome-next next 1
+song-not-level none
+song-line 1

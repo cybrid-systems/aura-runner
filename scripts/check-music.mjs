@@ -154,6 +154,12 @@ const wrapped = advancePlaylist({ order: "ordered", tracks: ordered.tracks, inde
 checkOk("playlist-wrap", wrapped.index === 0 && wrapped.tracks.join() === "a.mp3,b.ogg,c.wav");
 const shuffled = arrangeTracks(["a", "b", "c", "d"], "shuffle", () => 0);
 checkOk("playlist-shuffle", shuffled.join() === "b,c,d,a");
+const openedLow = freshPlaylist(["a", "b", "c", "d"], "shuffle", () => 0);
+checkOk("playlist-open-low", openedLow.action === "play" && openedLow.index === 0 && openedLow.tracks.join() === "b,c,d,a");
+const openedHigh = freshPlaylist(["a", "b", "c", "d"], "shuffle", () => 0.99);
+checkOk("playlist-open-high", openedHigh.action === "play" && openedHigh.index === 3 && openedHigh.tracks.join() === "a,b,c,d");
+const afterOpen = advancePlaylist(openedHigh, "end", () => 0);
+checkOk("playlist-open-next", afterOpen.index === 0 && afterOpen.index !== openedHigh.index && afterOpen.tracks.join() === "a,b,c,d");
 const randomNext = advancePlaylist({ order: "shuffle", tracks: ["a", "b", "c", "d"], index: 2, failed: 0 }, "end", () => 0);
 checkOk("playlist-random-next", randomNext.action === "play" && randomNext.index === 0 && randomNext.tracks.join() === "a,b,c,d");
 const randomHigh = advancePlaylist({ order: "shuffle", tracks: ["a", "b", "c", "d"], index: 0, failed: 0 }, "end", () => 0.999);

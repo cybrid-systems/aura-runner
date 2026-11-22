@@ -70,6 +70,9 @@ check("voice-next", hop.biome === "coast" && hop.combo === 3 && hop.level === 2)
 check("heard-city", preferHeard(["去背景", "去北京"]) === "去北京");
 check("heard-top", preferHeard(["跑快点", "再快一点"]) === "跑快点");
 check("heard-tour", preferHeard(["下一个程序", "下一个城市"]) === "下一个城市");
+check("heard-song", preferHeard(["下一", "下一首"]) === "下一首");
+check("heard-song-first", preferHeard(["下一首", "下一个城市"]) === "下一首");
+check("heard-city-first", preferHeard(["下一个城市", "下一首"]) === "下一个城市");
 check("miss-network", missLine("network") === "语音服务连不上");
 check("miss-mic", missLine("not-allowed") === "请允许这个页面使用麦克风");
 check("miss-empty", missLine("") === "没听清，按住空格再说久一点");
