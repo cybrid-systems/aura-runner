@@ -1,3 +1,4 @@
+import { roadHeight } from "./road.mjs";
 import { drawThing, growOf, animOf, showBox } from "./thing.mjs";
 import { DEPTH_FS, highFragment, highSky, litFragment, litSky } from "./lit.mjs";
 import { POST_SOURCES, createPost, probeFloat, shaderCompiler } from "./post.mjs";
@@ -1842,12 +1843,15 @@ export function createRenderer(canvas, hooks) {
   }
 
   let n = 0;
+  // Added to a push while an authored obstacle is drawn, so its mesh
+  // sits on the local road. Flat pieces leave this at 0.
+  let deckLift = 0;
   // Default yaw for a group (the runner, a companion). Explicit yaw wins.
   let spin = 0;
   function push(x, y, z, sx, sy, sz, shape, rgb, rough = 0.62, emit = 0, yaw = spin, metal = 0, sheen = 0, kind = 0) {
     if (n >= MAX) return;
     const o = n * STRIDE;
-    data[o] = x; data[o + 1] = y; data[o + 2] = z; data[o + 3] = shape;
+    data[o] = x; data[o + 1] = y + deckLift; data[o + 2] = z; data[o + 3] = shape;
     data[o + 4] = sx; data[o + 5] = sy; data[o + 6] = sz; data[o + 7] = rough;
     data[o + 8] = rgb[0]; data[o + 9] = rgb[1]; data[o + 10] = rgb[2]; data[o + 11] = emit;
     data[o + 12] = yaw; data[o + 13] = metal; data[o + 14] = sheen; data[o + 15] = kind;
@@ -2301,9 +2305,12 @@ export function createRenderer(canvas, hooks) {
     if (Math.abs(speed - prevSpeed) > 0.05 || Math.abs(grav - prevG) > 0.05) pulse = 1;
     prevSpeed = speed;
     prevG = grav;
-    const justLanded = py <= 0.02 && prevY > 0.18;
+    const roadPieces = st.pieces;
+    const floorDraw = roadHeight(drawS, roadPieces);
+    const rel = py - floorDraw;
+    const justLanded = rel <= 0.02 && prevY > 0.18;
     if (justLanded) land = 1;
-    prevY = py;
+    prevY = rel;
     const lxDelta = px - prevLx;
     prevLx = px;
     lean += ((reduced ? 0 : -lxDelta * 6) - lean) * (reduced ? 1 : 0.2);
@@ -2382,10 +2389,11 @@ export function createRenderer(canvas, hooks) {
     keepT = Math.max(0, keepT - frameDt / 0.7);
     backT = Math.max(0, backT - frameDt / 0.55);
     camS += (drawS - camS) * followS;
+    const floorCam = roadHeight(camS, roadPieces);
     const floaty = Math.max(0, (32 - grav) * 0.03);
-    const wantY = 2.25 + floaty + (py > 0.4 ? 0.18 : 0) - land * 0.16;
+    const wantY = 2.25 + floaty + (rel > 0.4 ? 0.18 : 0) - land * 0.16;
     camY += (wantY - camY) * (reduced ? 1 : 0.08);
-    const wantFov = (py > 0.35 ? 1.04 : 0.9) + Math.min(0.1, Math.max(0, speed - 5) * 0.025) + pulse * 0.04
+    const wantFov = (rel > 0.35 ? 1.04 : 0.9) + Math.min(0.1, Math.max(0, speed - 5) * 0.025) + pulse * 0.04
       + (gpuFeel ? fovKick(speed, activeProfile.fovKick) : 0);
     camFov += (wantFov - camFov) * (reduced ? 1 : 0.08);
     const bob = reduced || !alive ? 0 : Math.sin(st.time * (8 + speed * 0.25)) * 0.02;
@@ -2397,7 +2405,7 @@ export function createRenderer(canvas, hooks) {
     const leanWorld = lean * 0.15;
     const eye = [
       basis.x + ox * 0.62 - Math.sin(psi) * 4.7 + leanWorld * Math.cos(psi),
-      camY + bob,
+      camY + bob + floorCam,
       basis.z + oz * 0.62 - Math.cos(psi) * 4.7 - leanWorld * Math.sin(psi),
     ];
     if (shakeAmp > 0) {
@@ -2420,7 +2428,7 @@ export function createRenderer(canvas, hooks) {
     const lookAhead = speed * 1.3;
     const at = [
       basis.x + ox * 0.22 + Math.sin(psi) * lookAhead,
-      0.95 + py * 0.18 + floaty * 0.4,
+      0.95 + Math.max(0, rel) * 0.18 + floaty * 0.4 + floorCam,
       basis.z + oz * 0.22 + Math.cos(psi) * lookAhead,
     ];
     perspective(proj, drawFov, w / h, 0.08, 96);
@@ -2828,14 +2836,23 @@ export function createRenderer(canvas, hooks) {
         for (let i = 0; i <= spans.length; i++) {
           const end = i < spans.length ? spans[i][0] : s1;
           if (end - cursor > 0.04) {
-            const mid = (cursor + end) / 2;
-            const tile = onRoad(mid, lat);
-            // A tenth of a step made each 2 m slab a different flat colour.
-            const vary = (laneHash(mid * 0.23 + lane * 17.2) - 0.5) * 0.03;
-            const top = vary >= 0 ? mix3(baseTop, [1, 1, 1], vary) : mix3(baseTop, [0.16, 0.18, 0.1], -vary);
-            const len = end - cursor;
+            const yA = roadHeight(cursor, pieces);
+            const yB = roadHeight(end, pieces);
+            const span = end - cursor;
+            // A grade steps in 1 m slabs so the deck follows the rise.
+            // A flat span stays one slab at the old height.
+            const step = Math.abs(yB - yA) > 0.02 ? 1 : span;
             const grass = lane !== 1 && dist > -2 && dist < 4 ? (pal.custom && (pal.surface === "stone" || pal.surface === "plank" || pal.surface === "lava") ? 3 : pal.custom && (pal.surface === "ice" || pal.surface === "cloud") ? 5 : 4) : 0;
-            push(tile.x, 0.02, tile.z, 1.74, 0.12, len + 0.02, 0, top, lane === 1 ? 0.55 : 0.8, pal.custom && lane === 1 ? 0.08 : 0, tile.psi, 0, 0, grass);
+            for (let s = cursor; s < end - 0.001; s += step) {
+              const e = Math.min(end, s + step);
+              const mid = (s + e) * 0.5;
+              const tile = onRoad(mid, lat);
+              // A tenth of a step made each 2 m slab a different flat colour.
+              const vary = (laneHash(mid * 0.23 + lane * 17.2) - 0.5) * 0.03;
+              const top = vary >= 0 ? mix3(baseTop, [1, 1, 1], vary) : mix3(baseTop, [0.16, 0.18, 0.1], -vary);
+              const deck = roadHeight(mid, pieces);
+              push(tile.x, deck + 0.02, tile.z, 1.74, 0.12, e - s + 0.02, 0, top, lane === 1 ? 0.55 : 0.8, pal.custom && lane === 1 ? 0.08 : 0, tile.psi, 0, 0, grass);
+            }
           }
           if (i < spans.length) cursor = spans[i][1];
         }
@@ -2844,16 +2861,18 @@ export function createRenderer(canvas, hooks) {
           const b = spans[i][1];
           const mid = (a + b) / 2;
           const tile = onRoad(mid, lat);
-          push(tile.x, -0.06, tile.z, 1.72, 0.1, b - a + 0.04, 0, pal.water, 0.12, 0.1, tile.psi, 0, 0, 1);
+          const lip = roadHeight(mid, pieces);
+          const waterY = lip > 0.001 ? lip - 0.08 : -0.06;
+          push(tile.x, waterY, tile.z, 1.72, 0.1, b - a + 0.04, 0, pal.water, 0.12, 0.1, tile.psi, 0, 0, 1);
           const spanLen = b - a;
           if (spanLen > 0.8 && laneHash(mid * 0.27 + lane * 5.1) > 0.38 && n < MAX - 160) {
             const off = (laneHash(mid * 0.53 + lane) - 0.5) * 0.7;
             const along = mid + (laneHash(mid * 0.91) - 0.5) * Math.min(0.6, spanLen * 0.3);
             const lily = onRoad(along, lat + off);
             const pad = 0.22 + laneHash(mid * 1.3 + lane) * 0.14;
-            push(lily.x, 0.03, lily.z, pad, 0.04, pad * 0.86, 0, pal.lily, 0.5, 0.06, lily.psi);
+            push(lily.x, (lip > 0.001 ? lip : 0) + 0.03, lily.z, pad, 0.04, pad * 0.86, 0, pal.lily, 0.5, 0.06, lily.psi);
             if (laneHash(mid * 1.7 + 3) > 0.62) {
-              push(lily.x, 0.07, lily.z, 0.08, 0.08, 0.08, 1, pal.flower, 0.3, 0.35, lily.psi);
+              push(lily.x, (lip > 0.001 ? lip : 0) + 0.07, lily.z, 0.08, 0.08, 0.08, 1, pal.flower, 0.3, 0.35, lily.psi);
             }
           }
         }
@@ -3362,6 +3381,10 @@ export function createRenderer(canvas, hooks) {
       if (zc < z0 || zc > z1) continue;
       const lane = q.length > 5 ? q[5] : -1;
       const sc = sproutOf(q, pz);
+      // Piece y on these kinds is relative to the road. A popper already
+      // stores a world height. Flat roads add nothing.
+      deckLift = (k === 3 || k === 4 || k === 5 || k === 6 || k === 7 || k === 8 || k === 10)
+        ? roadHeight(zc, pieces) : 0;
       const glow = q.born ? 0.16 : 0;
       const lootKind = typeof st.loot === "string" ? st.loot : "coin";
       const here = onRoad(zc, laneX(lane < 0 ? 1 : lane));
@@ -3436,6 +3459,7 @@ export function createRenderer(canvas, hooks) {
         casting = false;
       }
     }
+    deckLift = 0;
 
     // Spoken toys stand beside the road, in the same frame as the runner.
     // They are pictures only: the lateral offset keeps them off the lanes.
@@ -3509,10 +3533,10 @@ export function createRenderer(canvas, hooks) {
       burst(rx + ax.tx * (passed ? 1.1 : -0.4), py + 0.8, rz + ax.tz * (passed ? 1.1 : -0.4),
         passed ? [1, 0.84, 0.35] : [1, 0.45, 0.38], 10, 0.08, passed ? 3 : 2, heading);
     }
-    if (land > 0.85) burst(rx, 0.15, rz, pal.path, 4, 0.01, 0, heading);
+    if (land > 0.85) burst(rx, floorDraw + 0.15, rz, pal.path, 4, 0.01, 0, heading);
     if (st.reject) burst(rx + ax.tx * 2, 1.6, rz + ax.tz * 2, pal.flower, 10, 0.06, 0, heading);
-    if (!reduced && alive && py <= 0.06) {
-      if (justLanded) puffDust(rx, 0.06, rz, heading, 5, 0.7);
+    if (!reduced && alive && rel <= 0.06) {
+      if (justLanded) puffDust(rx, floorDraw + 0.06, rz, heading, 5, 0.7);
       else if (speed >= 8) {
         dustStep++;
         const every = speed >= 12 ? 3 : 6;
@@ -3520,14 +3544,14 @@ export function createRenderer(canvas, hooks) {
           dustStep = 0;
           const side = Math.sin((st.time || 0) * 9) > 0 ? 0.14 : -0.14;
           const foot = sample(drawS, px + side);
-          puffDust(foot.x, 0.05, foot.z, foot.psi, 1, 0.32);
+          puffDust(foot.x, floorDraw + 0.05, foot.z, foot.psi, 1, 0.32);
         }
       }
     }
 
     drawPals(st.pals, drawS, st.time || 0, reduced);
 
-    const air = py > 0.08;
+    const air = rel > 0.08;
     const sliding = st.slide > 0;
     const freq = reduced || !alive ? 0 : (9.2 + speed * 0.35);
     const swing = Math.sin((st.time || 0) * freq);
@@ -3545,7 +3569,7 @@ export function createRenderer(canvas, hooks) {
     if (alive) {
       if (!wantShadow) {
         const shadow = spot(0, 0);
-        push(shadow.x, 0.02, shadow.z, sliding ? 0.95 : 0.62, 0.025, sliding ? 0.9 : 0.5, 0, [0.18, 0.12, 0.08], 1, 0);
+        push(shadow.x, floorDraw + 0.02, shadow.z, sliding ? 0.95 : 0.62, 0.025, sliding ? 0.9 : 0.5, 0, [0.18, 0.12, 0.08], 1, 0);
       }
       if (!blinkOff) {
       casting = wantShadow;
@@ -3554,8 +3578,8 @@ export function createRenderer(canvas, hooks) {
         const bob = reduced ? 0 : Math.sin((st.time || 0) * 3) * 0.02;
         const footL = spot(0.02, leanLat - 0.16);
         const footR = spot(0.02, leanLat + 0.16);
-        push(footL.x, 0.05 + bob, footL.z, 0.18, 0.04, 0.18, 1, glow, 0.25, reduced ? 0.2 : 0.45);
-        push(footR.x, 0.05 + bob, footR.z, 0.18, 0.04, 0.18, 1, glow, 0.25, reduced ? 0.2 : 0.45);
+        push(footL.x, floorDraw + 0.05 + bob, footL.z, 0.18, 0.04, 0.18, 1, glow, 0.25, reduced ? 0.2 : 0.45);
+        push(footR.x, floorDraw + 0.05 + bob, footR.z, 0.18, 0.04, 0.18, 1, glow, 0.25, reduced ? 0.2 : 0.45);
       }
       if (dressed) {
         const at = spot(sliding ? 0.12 : 0, leanLat);
@@ -3588,7 +3612,7 @@ export function createRenderer(canvas, hooks) {
         const fade = 1 - t / (trailN + 1);
         const s = 0.12 * fade;
         const puff = spot(-0.45 - t * (0.28 + speed * 0.02), lean * 0.1 * t);
-        push(puff.x, 0.35 + fade * 0.15, puff.z, s, s, s, 2, pal.cape, 0.15, 0.35 + fade * 0.5);
+        push(puff.x, floorDraw + 0.35 + fade * 0.15, puff.z, s, s, s, 2, pal.cape, 0.15, 0.35 + fade * 0.5);
       }
       if (usePost && !reduced) {
         const extra = activeProfile.trail | 0;

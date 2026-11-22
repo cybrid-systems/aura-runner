@@ -229,3 +229,38 @@
                            (>= (piece-lane pop-early) 0.0)
                            (< (piece-lane pop-early) 3.0))
                     1 0))
+
+; A mild hill is a phrase the autopilot can clear. A grade outside the
+; cap is refused before it is laid. A phrase that forgets the way down
+; is closed. Flat ground stays the short piece, and an uphill run is slower.
+(define feel0 (feel-rules 0))
+(define mild "(seq (ground 10.4) (slope 0.12 8) (ground 4.8) (slope -0.12 8) (ground 10.4))")
+(define steep "(seq (ground 6) (slope 0.4 8) (ground 6))")
+(define hill (check-source mild feel0))
+(define cliff (check-source steep feel0))
+(show "hill" (if (and hill (hash-ref hill "ok")) 1 0))
+(show "steep" (if (and cliff (not (hash-ref cliff "ok")) (string=? (hash-ref cliff "why") "range")) 1 0))
+
+(define one (layout-form "(seq (ground 6))" feel0))
+(define g0 (car (hash-ref one "pieces")))
+(show "flat-piece" (if (and one (= (length g0) 6) (= (piece-y g0) 0.0)) 1 0))
+
+(define opened (layout-form "(seq (ground 4) (slope 0.1 8) (ground 4))" feel0))
+(define endh (road-height (- (hash-ref opened "x1") 0.05) (hash-ref opened "pieces")))
+(show "closed" (if (and opened (< (if (< endh 0.0) (- 0.0 endh) endh) 0.02)) 1 0))
+
+(define (roll n pieces rules)
+  (let loop ((i 0) (p (make-player 0.4)))
+    (if (>= i n)
+      p
+      (loop (+ i 1) (car (step p pieces rules PHYS-DT))))))
+
+(define flat-road (list (piece 1.0 0.0 40.0 0.45 0.0)))
+(define up-road (list (piece 1.0 0.0 40.0 0.45 0.0 -1.0 4.8)))
+(define flat-p (roll 120 flat-road feel0))
+(define up-p (roll 120 up-road feel0))
+(show "climb" (if (and (> (road-height 20.0 up-road) 1.0)
+                       (= (road-height 20.0 flat-road) 0.0)
+                       (< (player-x up-p) (- (player-x flat-p) 0.5))
+                       (> (player-y up-p) 1.0))
+                1 0))

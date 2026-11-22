@@ -76,40 +76,83 @@
     (/ (exact->inexact speed) REF-SPEED)
     1.0))
 
+; A phrase that ends in the air would meet the next chunk as a cliff.
+; There is no height carried across chunks, so a leftover rise comes
+; back down here, gently enough that the grade stays inside the cap.
+(define CREST-MAX 2.4)
+(define SLOPE-GRADE 0.16)
+(define CLOSE-EPS 0.08)
+
+(define (abs-num v)
+  (if (< v 0.0) (- 0.0 v) v))
+
+; Flat ground at height 0 stays the piece the traces know.
+; A rise, or a shelf above 0, keeps the start height and the rise.
+(define (ground-piece x laid y0 rise)
+  (if (and (= y0 0.0) (= rise 0.0))
+    (piece 1.0 x laid 0.45 0.0)
+    (piece 1.0 x laid 0.45 y0 -1.0 rise)))
+
+(define (append-one xs item)
+  (if (null? xs)
+    (list item)
+    (cons (car xs) (append-one (cdr xs) item))))
+
+(define (close-crest pieces x h)
+  (if (<= (abs-num h) CLOSE-EPS)
+    (list pieces x)
+    (let* ((need (abs-num h))
+           (laid (max 4.0 (/ need SLOPE-GRADE)))
+           (rise (if (> h 0.0) (- 0.0 need) need)))
+      (list (append-one pieces (ground-piece x laid h rise)) (+ x laid)))))
+
 (define (layout-specs specs x0 . rest)
   (let ((scale (ground-scale (opt-speed rest))))
-    (let loop ((ss specs) (x x0) (acc (list)))
+    (let loop ((ss specs) (x x0) (h 0.0) (acc (list)))
       (if (null? ss)
-        (list (reverse acc) x)
+        (close-crest (reverse acc) x h)
         (let* ((sp (car ss))
                (kind (car sp))
-               (placed (place-one kind sp x scale)))
+               (placed (place-one kind sp x h scale)))
           (if (not placed)
             #f
-            (loop (cdr ss) (car (cdr placed)) (cons-all (car placed) acc))))))))
+            (loop (cdr ss) (car (cdr placed)) (car (cdr (cdr placed)))
+                  (cons-all (car placed) acc))))))))
 
-(define (place-one kind sp x scale)
+(define (place-one kind sp x h scale)
   (cond
     ((string=? kind "ground")
      (let ((w (spec-num sp 1 4.0)))
        (if (not (positive-range? w 0.8 18.0))
          #f
          (let ((laid (* w scale)))
-           (list (list (piece 1.0 x laid 0.45 0.0)) (+ x laid))))))
+           (list (list (ground-piece x laid h 0.0)) (+ x laid) h)))))
+    ((string=? kind "slope")
+     (let ((grade (spec-num sp 1 0.0))
+           (w (spec-num sp 2 8.0)))
+       (if (or (not (positive-range? (abs-num grade) 0.04 0.16))
+               (not (positive-range? w 0.8 18.0)))
+         #f
+         (let* ((laid (* w scale))
+                (rise (* grade laid))
+                (y1 (+ h rise)))
+           (if (> (abs-num y1) CREST-MAX)
+             #f
+             (list (list (ground-piece x laid h rise)) (+ x laid) y1))))))
     ((string=? kind "gap")
      (let ((w (spec-num sp 1 1.2)))
        (if (not (positive-range? w 0.4 8.0))
          #f
-         (list (list (piece 2.0 x w 1.2 -1.2)) (+ x w)))))
+         (list (list (piece 2.0 x w 1.2 -1.2)) (+ x w) h))))
     ((string=? kind "hurdle")
-     (let ((h (spec-num sp 1 0.5))
+     (let ((hh (spec-num sp 1 0.5))
            (w (spec-num sp 2 0.7))
            (style (named-style (spec-sym sp 3) hurdle-looks)))
-       (if (or (not (positive-range? h 0.15 3.0))
+       (if (or (not (positive-range? hh 0.15 3.0))
                (not (positive-range? w 0.35 2.2))
                (< style 0.0))
          #f
-         (list (list (piece 3.0 (+ x 0.25) w h 0.0 -1.0 style)) (+ x w 1.05)))))
+         (list (list (piece 3.0 (+ x 0.25) w hh 0.0 -1.0 style)) (+ x w 1.05) h))))
     ((string=? kind "gate")
      (let ((bottom (spec-num sp 1 0.66))
            (w (spec-num sp 2 0.7))
@@ -118,17 +161,17 @@
                (not (positive-range? w 0.35 2.0))
                (< style 0.0))
          #f
-         (list (list (piece 4.0 (+ x 0.2) w 0.34 bottom -1.0 style)) (+ x w 0.95)))))
+         (list (list (piece 4.0 (+ x 0.2) w 0.34 bottom -1.0 style)) (+ x w 0.95) h))))
     ((string=? kind "coin")
      (let ((y (spec-num sp 1 1.35)))
        (if (not (positive-range? y 0.4 2.4))
          #f
-         (list (list (piece 5.0 (+ x 0.35) 0.42 0.42 y)) (+ x 1.35)))))
+         (list (list (piece 5.0 (+ x 0.35) 0.42 0.42 y)) (+ x 1.35) h))))
     ((string=? kind "spring")
      (let ((w (spec-num sp 1 0.75)))
        (if (not (positive-range? w 0.45 1.6))
          #f
-         (list (list (piece 6.0 x w 0.32 0.0)) (+ x w 0.7)))))
+         (list (list (piece 6.0 x w 0.32 0.0)) (+ x w 0.7) h))))
     ; Side or centre crate. Does not advance the track, so it sits beside
     ; the piece that follows and the fair centre line keeps its timing.
     ; BLOCK-INSET is how far onto that ground the crate is drawn. The
@@ -141,13 +184,13 @@
                (not (positive-range? w 0.5 2.2))
                (< style 0.0))
          #f
-         (list (list (piece 7.0 (+ x BLOCK-INSET) w 1.65 0.0 lane style)) x))))
+         (list (list (piece 7.0 (+ x BLOCK-INSET) w 1.65 0.0 lane style)) x h))))
     ((string=? kind "coin-lane")
      (let ((lane (spec-num sp 1 2.0))
            (y (spec-num sp 2 1.3)))
        (if (or (not (lane-id? lane)) (not (positive-range? y 0.4 2.4)))
          #f
-         (list (list (piece 5.0 (+ x 0.4) 0.42 0.42 y lane)) x))))
+         (list (list (piece 5.0 (+ x 0.4) 0.42 0.42 y lane)) x h))))
     ; One gentle toy, flying back toward the runner. It takes its own
     ; stretch of track so two of them cannot sit on the same spot.
     ((string=? kind "flyer")
@@ -158,18 +201,18 @@
          (if (or (< code 0.0) (not (lane-id? lane)) (not (positive-range? y 0.55 0.85)))
            #f
            (list (list (piece 8.0 (+ x 0.35) 0.72 0.5 y lane code (flyer-speed code)))
-                 (+ x 3.4))))))
+                 (+ x 3.4) h)))))
     ; Restyle every pickup, or bias how hard the road turns. Neither
     ; occupies the track, so a coin's timing stays where the phrase put it.
     ((string=? kind "loot")
      (let ((name (spec-sym sp 1)))
        (if (loot-name? name)
-         (list (list) x)
+         (list (list) x h)
          #f)))
     ((string=? kind "bend")
      (let ((amp (spec-num sp 1 -1.0)))
        (if (and (>= amp 0.12) (<= amp 0.65))
-         (list (list) x)
+         (list (list) x h)
          #f)))
     (else #f)))
 
@@ -310,14 +353,18 @@
           (list "flyer" "lantern" 1.0 0.75) (list "ground" 10.4)
           (list "hurdle" 0.34 0.6 "bloom") (list "ground" 10.4))))
 
+; From band 1 the road climbs and comes back down. The pair replaces
+; two grounds of the same authored length, so the hazards keep their
+; places. The hill sits between moves, and the lip of a gap stays flat.
+; A higher band uses a steeper grade. A dream may nudge that grade.
 (define patterns-1
   (list
-    (list (list "ground" 10.4) (list "block" 1.0 1.0 "crate") (list "ground" 4.8)
-          (list "flyer" "leaf" 1.0 0.7) (list "ground" 10.4)
+    (list (list "slope" 0.06 10.4) (list "block" 1.0 1.0 "crate") (list "ground" 4.8)
+          (list "flyer" "leaf" 1.0 0.7) (list "slope" -0.06 10.4)
           (list "hurdle" 0.48 0.7 "drum") (list "ground" 10.4) (list "gate" 0.74 0.75 "scarf")
           (list "ground" 10.4) (list "gap" 1.25) (list "ground" 4.8))
-    (list (list "ground" 10.4) (list "gap" 1.15) (list "ground" 10.4)
-          (list "flyer" "ball" 2.0 0.68) (list "ground" 10.4)
+    (list (list "ground" 10.4) (list "gap" 1.15) (list "slope" 0.06 10.4)
+          (list "flyer" "ball" 2.0 0.68) (list "slope" -0.06 10.4)
           (list "gate" 0.72 0.8 "ribbon") (list "ground" 4.8) (list "block" 1.0 1.0 "stump")
           (list "ground" 10.4) (list "hurdle" 0.52 0.7 "log") (list "coin" 1.3)
           (list "ground" 4.8))))
@@ -325,14 +372,14 @@
 ; Recovery ground is a full beat, so a jump lands before the next hazard.
 (define patterns-2
   (list
-    (list (list "ground" 10.4) (list "block" 1.0 1.0 "mushroom") (list "block" 0.0 1.0 "crate")
-          (list "ground" 10.4) (list "gate" 0.66 0.75 "vine") (list "ground" 4.8)
+    (list (list "slope" 0.08 10.4) (list "block" 1.0 1.0 "mushroom") (list "block" 0.0 1.0 "crate")
+          (list "slope" -0.08 10.4) (list "gate" 0.66 0.75 "vine") (list "ground" 4.8)
           (list "coin" 1.4) (list "ground" 10.4) (list "hurdle" 0.55 0.7 "fence")
           (list "ground" 4.8) (list "flyer" "plane" 0.0 0.72) (list "ground" 10.4)
           (list "gap" 1.5) (list "ground" 4.8) (list "spring" 0.7)
           (list "ground" 4.8))
-    (list (list "ground" 10.4) (list "block" 1.0 1.0 "bush") (list "block" 2.0 1.0 "stump")
-          (list "ground" 10.4) (list "hurdle" 0.6 0.7 "bloom") (list "ground" 10.4)
+    (list (list "slope" 0.08 10.4) (list "block" 1.0 1.0 "bush") (list "block" 2.0 1.0 "stump")
+          (list "slope" -0.08 10.4) (list "hurdle" 0.6 0.7 "bloom") (list "ground" 10.4)
           (list "flyer" "bubble" 1.0 0.66) (list "ground" 10.4)
           (list "gate" 0.64 0.7 "lights") (list "ground" 10.4) (list "gap" 1.55)
           (list "ground" 4.8) (list "coin" 1.5) (list "ground" 4.8))))
@@ -341,12 +388,12 @@
   (list
     (list (list "ground" 10.4) (list "block" 1.0 1.05 "crate") (list "ground" 4.8)
           (list "gap" 1.6) (list "ground" 10.4)
-          (list "hurdle" 0.7 0.7 "drum") (list "ground" 10.4)
-          (list "flyer" "lantern" 2.0 0.7) (list "ground" 10.4)
+          (list "hurdle" 0.7 0.7 "drum") (list "slope" 0.10 10.4)
+          (list "flyer" "lantern" 2.0 0.7) (list "slope" -0.10 10.4)
           (list "gate" 0.64 0.7 "scarf")
           (list "coin" 1.6) (list "ground" 10.4) (list "gap" 1.55)
           (list "ground" 4.8) (list "spring" 0.75) (list "ground" 4.8))
-    (list (list "ground" 10.4) (list "block" 1.0 1.0 "mushroom") (list "ground" 10.4)
+    (list (list "slope" 0.10 10.4) (list "block" 1.0 1.0 "mushroom") (list "slope" -0.10 10.4)
           (list "gate" 0.62 0.7 "vine") (list "ground" 10.4)
           (list "flyer" "leaf" 0.0 0.74) (list "ground" 10.4)
           (list "gap" 1.7) (list "ground" 10.4) (list "hurdle" 0.75 0.7 "log")
@@ -355,14 +402,14 @@
 
 (define patterns-4
   (list
-    (list (list "ground" 10.4) (list "block" 1.0 1.0 "stump") (list "ground" 10.4)
+    (list (list "slope" 0.12 10.4) (list "block" 1.0 1.0 "stump") (list "slope" -0.12 10.4)
           (list "hurdle" 0.82 0.68 "fence") (list "flyer" "lantern" 1.0 0.68)
           (list "ground" 10.4) (list "gap" 1.85) (list "ground" 10.4)
           (list "gate" 0.62 0.68 "ribbon")
           (list "ground" 4.8) (list "spring" 0.7) (list "ground" 10.4)
           (list "gap" 1.7) (list "ground" 4.8) (list "coin" 1.6)
           (list "ground" 4.8))
-    (list (list "ground" 10.4) (list "block" 1.0 1.0 "bush") (list "ground" 10.4)
+    (list (list "slope" 0.12 10.4) (list "block" 1.0 1.0 "bush") (list "slope" -0.12 10.4)
           (list "gap" 1.9) (list "ground" 10.4)
           (list "gate" 0.6 0.66 "lights") (list "ground" 10.4)
           (list "flyer" "bubble" 2.0 0.7) (list "ground" 10.4)
@@ -789,7 +836,7 @@
   (or (string=? s "seq") (string=? s "ground") (string=? s "gap")
       (string=? s "hurdle") (string=? s "gate") (string=? s "coin")
       (string=? s "spring") (string=? s "block") (string=? s "coin-lane")
-      (string=? s "loot") (string=? s "bend")
+      (string=? s "loot") (string=? s "bend") (string=? s "slope")
       (string=? s "star") (string=? s "gem") (string=? s "blossom")
       (string=? s "apple")
       (string=? s "flyer") (string=? s "plane") (string=? s "bubble")
@@ -1054,12 +1101,44 @@
                       "loot" (car meta)
                       "bend" (car (cdr meta)))))))))))
 
+; First uphill grade in the phrase, or 0 when the road stays flat.
+(define (slope-base specs)
+  (let loop ((ss specs))
+    (if (null? ss)
+      0.0
+      (let ((sp (car ss)))
+        (if (and (pair? sp) (string? (car sp)) (string=? (car sp) "slope"))
+          (let ((g (spec-num sp 1 0.0)))
+            (if (> g 0.0) g (loop (cdr ss))))
+          (loop (cdr ss)))))))
+
+; A dream starts from the band's hill, nudged by the seed. The live
+; table stays put. The fairness gate still has to clear the nudge.
+(define (tune-slope-specs specs seed index)
+  (let ((base (slope-base specs)))
+    (if (<= base 0.0)
+      specs
+      (let ((mag (max 0.04 (min 0.16
+                    (+ base (* (- (exact->inexact (modulo (+ seed (* index 17)) 5)) 2.0) 0.01))))))
+        (let loop ((ss specs) (acc (list)))
+          (if (null? ss)
+            (reverse acc)
+            (let ((sp (car ss)))
+              (if (and (pair? sp) (string? (car sp)) (string=? (car sp) "slope"))
+                (let ((sign (if (< (spec-num sp 1 0.0) 0.0) -1.0 1.0))
+                      (len (spec-num sp 2 8.0)))
+                  (loop (cdr ss) (cons (list "slope" (* sign mag) len) acc)))
+                (loop (cdr ss) (cons sp acc))))))))))
+
 ; The same seeded pattern the offline chunk lays out, as one s-expression
-; the fairness gate can trial.
+; the fairness gate can trial. Band 0 has no slope, so its text is the
+; table. Later bands nudge the grade, and a phrase the run cannot clear
+; is refused by the same gate as any other motif.
 (define (pattern-form seed index band)
   (let* ((rng (make-random (modulo (+ seed (* index 9973) (* band 13)) 2147483646)))
-         (picked (pick-pattern band rng)))
-    (string-append "(seq" (specs-src (car picked)) ")")))
+         (picked (pick-pattern band rng))
+         (specs (tune-slope-specs (car picked) seed index)))
+    (string-append "(seq" (specs-src specs) ")")))
 
 ; A pickup becomes a short string when the stretch is shown. Spacing is a
 ; slice of time, so the same chain is the same rhythm at every pace.

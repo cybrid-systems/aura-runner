@@ -4,6 +4,9 @@
 // Pot, toy and gate footprints match the mesh (web/render.mjs).
 
 import { FLY_HALF, FLY_REACH, POT_HALF, POT_REACH, POT_TOP, gateBarDepth } from "./render.mjs";
+import { paceOnGrade, roadGrade, roadHeight } from "./road.mjs";
+
+export { roadGrade, roadHeight };
 
 export const DT = 1 / 60;
 // Twin of TAKEOFF-S / LANE-A / LANE-V in lib/phys.aura.
@@ -195,7 +198,7 @@ function liftOut(p, pieces) {
     const edge = gapFarEdge(p[0], bodyLane(p), pieces);
     if (edge === null) return;
     p[0] = edge + 0.08;
-    p[1] = 0;
+    p[1] = roadHeight(p[0], pieces);
     p[2] = 0;
     p[14] = 0;
   }
@@ -293,8 +296,9 @@ function stepPoppers(pieces, p, dt) {
     const vy = vy0 - POP_G * dt;
     let y = q[4] + vy * dt;
     let vy1 = vy;
-    if (y < 0) {
-      y = 0;
+    const floor = roadHeight(x, pieces);
+    if (y < floor) {
+      y = floor;
       vy1 = Math.max(POP_MIN, -vy * POP_BOUNCE);
     }
     const ahead = x - px;
@@ -305,7 +309,7 @@ function stepPoppers(pieces, p, dt) {
       q[1] = mid - POP_BW * 0.5;
       q[2] = POP_BW;
       q[3] = POP_BH;
-      q[4] = 0;
+      q[4] = roadHeight(x, pieces);
       q[6] = 1;
       q[7] = 0;
       q[8] = 0;
@@ -330,13 +334,15 @@ export function step(p, pieces, rules, dt) {
   const g = rules.g;
   const jump = rules.jump;
   const air = rulesAir(rules);
-  const speed = runSpeed(rules.speed, p);
+  const floor0 = roadHeight(p[0], pieces);
+  const grade = roadGrade(p[0], pieces);
+  const speed = paceOnGrade(runSpeed(rules.speed, p), grade);
   const slideDur = rules.slide;
   const coyoteMax = rules.coyote;
   tickTimers(p, dt);
   if (p[7] > 0) p[7] = Math.max(0, p[7] - dt);
   if (p[8] > 0) p[8] = Math.max(0, p[8] - dt);
-  const grounded = p[1] <= 0.0001 && !overGap(p[0], bodyLane(p), pieces);
+  const grounded = p[1] <= floor0 + 0.0001 && !overGap(p[0], bodyLane(p), pieces);
   if (grounded) p[4] = coyoteMax;
   else p[4] = Math.max(0, p[4] - dt);
   // Ground jump uses jump. One air jump while p[15] is 1. A third press
@@ -352,7 +358,7 @@ export function step(p, pieces, rules, dt) {
     p[7] = 0;
     p[3] = 0;
     p[14] = TAKEOFF_S;
-    if (p[1] < 0) p[1] = 0;
+    if (p[1] < floor0) p[1] = floor0;
     p[15] = groundJump && air >= 1 ? 1 : 0;
   } else if (air >= 1 && grounded) {
     p[15] = 1;
@@ -376,8 +382,15 @@ export function step(p, pieces, rules, dt) {
   }
   p[1] = p[1] + p[2] * dt;
   p[0] = p[0] + speed * dt;
+  // Downhill drops faster than one frame of gravity. Stay on the new
+  // floor unless this step is a jump. Grade 0 keeps the floor at 0.
+  const floor1 = roadHeight(p[0], pieces);
+  if (grounded && p[2] <= 0 && p[14] <= 0 && !overGap(p[0], bodyLane(p), pieces)) {
+    p[1] = floor1;
+    p[2] = 0;
+  }
   let ev = "ok";
-  if (p[1] <= 0 && overGap(p[0], bodyLane(p), pieces)) {
+  if (p[1] <= floor1 && overGap(p[0], bodyLane(p), pieces)) {
     if (rules.strict) {
       p[5] = 0;
       easeLane(p, dt);
@@ -391,8 +404,8 @@ export function step(p, pieces, rules, dt) {
     // A gap recovery keeps the pace. An obstacle still slows the run.
     if (ev === "oops") p[12] = 0;
   } else {
-    if (p[1] <= 0) {
-      p[1] = 0;
+    if (p[1] <= floor1) {
+      p[1] = floor1;
       p[2] = 0;
       p[14] = 0;
     }
@@ -434,6 +447,7 @@ function collide(p, pieces, rules) {
   const bottom = p[1] + forgive;
   const top = p[1] + h - forgive;
   const lane = bodyLane(p);
+  const floor = roadHeight(p[0], pieces);
   let event = "ok";
   for (let i = 0; i < pieces.length; i++) {
     if (p[5] <= 0) return "dead";
@@ -442,7 +456,8 @@ function collide(p, pieces, rules) {
     const span = hitSpan(q);
     const x1 = span[0];
     const x2 = span[1];
-    const y1 = q[4];
+    const deck = k === 0 || k === 1 || k === 2 || k === 9 ? 0 : roadHeight(q[1] + q[2] * 0.5, pieces);
+    const y1 = q[4] + deck;
     const y2 = k === 7 ? Math.min(y1 + q[3], POT_TOP) : y1 + q[3];
     const side = k === 7 || k === 8 || k === 10
       ? meetsSide(p[10], pieceLane(q), k === 7 ? POT_REACH : RIVAL_REACH)
@@ -464,7 +479,7 @@ function collide(p, pieces, rules) {
       q[0] = 0;
       p[6] += worth;
       event = "coin";
-    } else if (hit && k === 6 && p[1] <= 0.05 && p[2] <= 0) {
+    } else if (hit && k === 6 && p[1] <= floor + 0.05 && p[2] <= 0) {
       p[2] = rules.jump * 1.28;
       p[3] = 0;
       p[14] = 0;

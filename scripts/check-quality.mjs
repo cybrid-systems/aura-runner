@@ -1,7 +1,7 @@
 // Quality tiers, hysteresis, fallbacks, and a fixed sim step.
 // The picture policy must not change how fast the runner moves.
 import { readFileSync } from "node:fs";
-import { DT, makePlayer, rulesOf, step } from "../web/sim.mjs";
+import { DT, makePlayer, roadHeight, rulesOf, step } from "../web/sim.mjs";
 import { highFragment, highSky, litAnchorsOk, litFragment, litSky, LIGHT_LINE } from "../web/lit.mjs";
 import { invertMat, meshSources } from "../web/render.mjs";
 import { BLUR_TAP_PX, blurAmount, blurTapPx, fovKick, glossFor, groundId, heroShape, laneEase, sceneGrade, shakeOffset, sunScreen, whooshNudge } from "../web/feel.mjs";
@@ -502,5 +502,18 @@ const at120 = present(120, 2);
 assert(at30.steps === at60.steps && at60.steps === at120.steps, `step count drifted ${at30.steps} ${at60.steps} ${at120.steps}`);
 assert(Math.abs(at30.x - at60.x) < 1e-6 && Math.abs(at60.x - at120.x) < 1e-6, `position drifted ${at30.x} ${at60.x} ${at120.x}`);
 assert(at60.steps === 120, "two seconds is 120 sim steps");
+const slopeRules = rulesOf(32, 11.2, 8, 0.48, 0.12, 0.12);
+const flatRunner = makePlayer(0.4);
+const upRunner = makePlayer(0.4);
+const flatRoad = [[1, 0, 40, 0.45, 0, -1]];
+const upRoad = [[1, 0, 40, 0.45, 0, -1, 4.8]];
+for (let i = 0; i < 120; i++) {
+  step(flatRunner, flatRoad, slopeRules, DT);
+  step(upRunner, upRoad, slopeRules, DT);
+}
+assert(roadHeight(20, flatRoad) === 0, "a flat road stays at 0");
+assert(roadHeight(20, upRoad) > 1, "a slope raises the road");
+assert(upRunner[0] < flatRunner[0] - 0.5, "uphill is slower than the flat pace");
+assert(upRunner[1] > 1, "the runner stands on the slope");
 
 console.log(`quality ok tier-hysteresis fbo-fallback context-loss persist sim-steps ${at60.steps} x ${at60.x.toFixed(3)}`);
