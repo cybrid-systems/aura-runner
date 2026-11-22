@@ -159,6 +159,8 @@ async function drive() {
       throw new Error("welcome pals " + welcomeNames);
     }
     if (welcome.alive === false) throw new Error("welcome already ended");
+    // The garden is not asked on a clock. A sentence still reaches the model.
+    io.send({ op: "wish", text: "把天空换成郁金香", lang: "zh", source: "type" });
     let sawMotif = false;
     let sawScene = false;
     let sawCue = false;

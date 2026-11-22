@@ -3,26 +3,54 @@
 // or posts it to the game server.
 
 // Names the recognizer confuses with ordinary words (背景, 程度, 伤害).
-// A hit among the alternatives wins over the top guess.
-export const CITY_PHRASES = [
+// A named place in any alternative wins over a song mishear. A generic
+// "下一个城市" stays in confidence order with "下一首", so both commands work.
+export const NAMED_CITY_PHRASES = [
   "北京", "北平", "京城", "上海", "魔都", "申城", "杭州", "西湖", "杭城",
   "成都", "蓉城", "西安", "长安", "重庆", "香港", "香江", "纽约",
   "旧金山", "三藩市", "洛杉矶", "洛城", "巴黎", "花都", "伦敦", "罗马",
   "威尼斯", "东京", "東京", "江户",
-  "下一个城市", "下个城市", "换个城市", "换一座城市", "另一座城市", "别的城市", "其他城市",
-  "中国城市", "美国城市", "欧洲城市", "环球旅行",
   "beijing", "shanghai", "hangzhou", "chengdu", "xian", "chongqing", "hong kong",
   "new york", "san francisco", "los angeles", "paris", "london", "venice", "tokyo",
 ];
 
-export function mentionsCity(line) {
+export const TOUR_PHRASES = [
+  "下一个城市", "下个城市", "下一座城市", "换个城市", "换一个城市", "换城市",
+  "换一座城市", "另一座城市", "别的城市", "其他城市",
+  "中国城市", "美国城市", "欧洲城市", "环球旅行",
+];
+
+export const CITY_PHRASES = NAMED_CITY_PHRASES.concat(TOUR_PHRASES);
+
+const TRAVEL_MISHEARS = [
+  "背景", "北景", "背影", "伤害", "商海", "航州", "程度", "成度", "先安",
+  "重亲", "从庆", "巴里", "八里", "伦顿", "论敦", "罗玛", "维尼斯", "威尼司",
+  "东经", "牛约", "纽月", "落杉矶", "洛山矶", "落山矶",
+];
+
+function mentionsPhrase(line, phrases) {
   const text = String(line || "");
   const low = text.toLowerCase();
-  return CITY_PHRASES.some((phrase) => {
+  return phrases.some((phrase) => {
     if (/[\u4e00-\u9fff]/.test(phrase)) return text.includes(phrase);
     const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     return new RegExp(`(?:^|[^a-z])${escaped}(?:[^a-z]|$)`).test(low);
   });
+}
+
+export function mentionsNamedCity(line) {
+  return mentionsPhrase(line, NAMED_CITY_PHRASES);
+}
+
+export function mentionsCity(line) {
+  return mentionsPhrase(line, CITY_PHRASES);
+}
+
+// 去背景 / 到程度. A bare 伤害, with no 去 or 到 in front, is not a city.
+export function mentionsTravelCity(line) {
+  const text = String(line || "");
+  return TRAVEL_MISHEARS.some((word) =>
+    text.includes("去" + word) || text.includes("到" + word) || text.includes("前往" + word));
 }
 
 // A next-track sentence. 下一首 is not 下一个城市, and 换一首 is not 换场景.
@@ -45,6 +73,12 @@ export function preferHeard(alternatives) {
     if (line) list.push(line);
   }
   if (!list.length) return "";
+  for (const line of list) {
+    if (mentionsNamedCity(line)) return line;
+  }
+  for (const line of list) {
+    if (mentionsTravelCity(line)) return line;
+  }
   for (const line of list) {
     if (mentionsSong(line)) return line;
     if (mentionsCity(line)) return line;

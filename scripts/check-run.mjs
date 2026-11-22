@@ -73,6 +73,11 @@ check("heard-tour", preferHeard(["下一个程序", "下一个城市"]) === "下
 check("heard-song", preferHeard(["下一", "下一首"]) === "下一首");
 check("heard-song-first", preferHeard(["下一首", "下一个城市"]) === "下一首");
 check("heard-city-first", preferHeard(["下一个城市", "下一首"]) === "下一个城市");
+check("heard-named-over-song", preferHeard(["下一首", "去北京"]) === "去北京");
+check("heard-mishear-over-song", preferHeard(["下一首", "去背景"]) === "去背景");
+check("heard-harm-song", preferHeard(["下一首", "不要伤害"]) === "下一首");
+check("heard-change-city", preferHeard(["嗯", "换城市"]) === "换城市");
+check("heard-seat", preferHeard(["下一座城市", "下一首"]) === "下一座城市");
 check("miss-network", missLine("network") === "语音服务连不上");
 check("miss-mic", missLine("not-allowed") === "请允许这个页面使用麦克风");
 check("miss-empty", missLine("") === "没听清，按住空格再说久一点");

@@ -161,8 +161,10 @@
     " · ×"
     (biome-int mult)))
 
-; Every world switch uses the same line the Biome EDSL already shows.
-; Mood changes keep venue-line. The title stays English, matching
-; "A new world: Beijing" and the other kept specs.
-(define (world-banner place)
-  (string-append "A new world: " (biome-title place "en")))
+; Built-in venues. Chinese matches biome-say. English stays
+; "A new world: City". A call with no language stays English.
+(define (world-banner place . rest)
+  (let ((lang (if (and (pair? rest) (string? (car rest))) (car rest) "en")))
+    (if (string=? lang "zh")
+      (biome-say place lang)
+      (string-append "A new world: " (biome-title place "en")))))

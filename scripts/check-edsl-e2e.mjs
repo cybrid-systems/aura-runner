@@ -1,6 +1,6 @@
 // Biome EDSL end to end. A voice ask with no key is gated offline and
-// entered without rewinding the run. With a mock model, a background
-// dream and a voice ask both KEEP a spec the same way.
+// entered without rewinding the run. With a mock model, the voice ask
+// KEEP's a spec. A world is not dreamed on a clock.
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
@@ -142,7 +142,8 @@ async function offline() {
     if (!kept) throw new Error("offline gate did not KEEP");
     if (!(state.x >= x0 - 0.05)) throw new Error("run rewound " + x0 + " -> " + state.x);
     if (state.combo !== combo0) throw new Error("combo reset " + combo0 + " -> " + state.combo);
-    if (!String(state.banner || "").includes("Candy")) throw new Error("banner " + state.banner);
+    const banner = String(state.banner || "");
+    if (!banner.includes("糖果") && !banner.includes("Candy")) throw new Error("banner " + state.banner);
     console.log(`offline KEEP ${state.biome} x ${x0.toFixed(1)} -> ${state.x.toFixed(1)} combo ${state.combo}`);
   } finally {
     if (sock) sock.end();
@@ -198,29 +199,21 @@ async function online() {
     const io = session(sock);
     io.send({ op: "hello", seed: 7 });
     await readUntil(io, (m) => m.op === "state", 40);
-    let dreamed = false;
     const spun = [];
-    const notes = [];
-    for (let i = 0; i < 24 && !dreamed; i++) {
+    let idle = null;
+    for (let i = 0; i < 16 && !idle; i++) {
       io.send({ op: "tick", jump: 0, slide: 0, lane: 0 });
       const more = await readUntil(io, (m) => m.op === "state", 40);
-      const state = more.find((m) => m.op === "state");
-      if (state) spun.push(state);
-      for (const m of more) {
-        if (m.op === "decision") notes.push(`${m.kind}:${m.arm}:${m.why}`);
-      }
-      if (more.some((m) => m.op === "decision" && m.arm === "biome" && m.kind === "KEEP")) dreamed = true;
+      const state = [...more].reverse().find((m) => m.op === "state");
+      if (!state) continue;
+      spun.push(state);
+      const busy = state["llm-busy"] === true || state["motif-busy"] === true
+        || state["scene-busy"] === true || state["pals-busy"] === true;
+      if (!busy) idle = state;
     }
-    if (!dreamed) {
-      throw new Error(
-        "background biome was not KEEP'd hits " + JSON.stringify(mock.hits) +
-        " notes " + notes.join(",") +
-        " run " + (spun.at(-1) && spun.at(-1).run) +
-        "\n" + core.log().slice(-400),
-      );
-    }
-    const x0 = spun[spun.length - 1].x;
-    const combo0 = spun[spun.length - 1].combo;
+    const base = idle || spun[spun.length - 1];
+    const x0 = base.x;
+    const combo0 = base.combo;
     io.send({ op: "wish", text: "去火山", lang: "zh", source: "type" });
     const deadline = Date.now() + 25000;
     let state = null;
@@ -239,7 +232,7 @@ async function online() {
     }
     if (!(state.x >= x0 - 0.05)) throw new Error("camera run rewound " + x0 + " -> " + state.x);
     if (state.combo !== combo0) throw new Error("combo reset " + combo0 + " -> " + state.combo);
-    if (mock.hits.biome < 1) throw new Error("mock was not asked " + JSON.stringify(mock.hits));
+    if (idle && mock.hits.biome < 1) throw new Error("mock was not asked " + JSON.stringify(mock.hits));
     console.log(`mock KEEP ${state.biome} x ${Number(x0).toFixed(1)} -> ${Number(state.x).toFixed(1)} combo ${state.combo} hits ${mock.hits.biome}`);
   } finally {
     if (sock) sock.end();

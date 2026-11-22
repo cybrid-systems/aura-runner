@@ -105,5 +105,11 @@
 (show "theme-degree" (edsl-theme "去程度"))
 (show "theme-harm" (if (edsl-theme "不要伤害") 1 0))
 (show "theme-sf" (edsl-theme "三藩市"))
+(show "steer-change" (edsl-steer "换城市" "paris"))
+(show "steer-seat" (edsl-steer "下一座城市" "paris"))
+(show "steer-one" (edsl-steer "换一个城市" "paris"))
+(show "say-beijing" (edsl-say "beijing" "zh"))
+(show "say-beijing-en" (edsl-say "beijing" "en"))
+(show "say-candy" (edsl-say "candy-clouds" "zh"))
 
 (void)

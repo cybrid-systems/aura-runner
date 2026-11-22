@@ -61,14 +61,14 @@ Hold Space, speak, and release. Built-in lines apply at once and the combo stays
 | --- | --- |
 | 花园 / garden, 城市 / city, 太空 / space, 海边 / coast | Venue |
 | 夜晚 / night, 白天 / day, 日落 / sunset, 霓虹 / neon | Mood |
-| 去北京 / paris, 下一个城市 / next city | World tour |
+| 去北京 / paris, 下一个城市 / 换城市 / next city | World tour |
 | 去火山 / volcano, 糖果 / candy, 珊瑚 / coral | New world |
 
 ## Evolution
 
-A world, the runner, or a phrase is proposed while the run stays up. `evo:trial` returns KEEP or ROLLBACK. Only KEEP rebinds, live, with no restart. With no LLM key, a themed recipe takes that same gate, and later levels recombine the kept pool offline.
+A world, the runner, or a phrase is proposed while the run stays up. `evo:trial` returns KEEP or ROLLBACK. Only KEEP rebinds, live, with no restart. With no LLM key, a themed recipe takes that same gate. A clear steps the venue with the level (garden, city, space, coast) and the garden scene follows how that level went. A city the child names stays until they ask again. The kept pool is not recombined into a new world on its own, and a world is not dreamed on a clock.
 
-That offline step, a thing round, and a friend who is already here each take one small seeded step beside the tick before the same KEEP. Light, fog, and particle density move by PSO. Particle kind, surface, and props are ant credits. The friend's motion is chosen from the same motion list, which only moves the picture. The search reads the local check only, one generation at a time, and leaves the physics step alone. One `evo:trial` still decides what is installed.
+A thing round, and a friend who is already here, each take one small seeded step beside the tick before the same KEEP. When a world is proposed, light, fog, and particle density can move by PSO, and particle kind, surface, and props are ant credits. The friend's motion is chosen from the same motion list, which only moves the picture. The search reads the local check only, one generation at a time, and leaves the physics step alone. One `evo:trial` still decides what is installed.
 
 The form in [`lib/edsl.aura`](lib/edsl.aura):
 

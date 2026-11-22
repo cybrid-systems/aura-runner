@@ -108,11 +108,10 @@
 (define tune-now music-home)
 (define tune-prev music-home)
 (define tune-due #f)
-; The level gate's cosmetic follow-ups (biome evolve, roster evolve) are
-; queued here and drained one per tick, the way a dream / card / chase is
-; sliced. The gate itself keeps only the gameplay-critical work (pace,
-; level span, banner, coins, chase queue) on the crossing tick, so the
-; ~150-250ms evolution trials no longer land in one frame. Each entry is a
+; The level gate's cosmetic follow-up (a friend's restyle) is queued
+; here and drained one per tick. The gate itself keeps the pace, the
+; venue for this level, the garden scene, the banner, coins, and the
+; chase queue. A clear does not recombine a new world. Each entry is a
 ; thunk; maybe-gate-followup! runs at most one per tick.
 (define gate-followups (list))
 (define scene-now default-scene)
@@ -751,7 +750,10 @@
                                     (hash "status" "ok"
                                           "objectives" (hash "fair" (if ok 1.0 0.0))
                                           "constraints" viol
-                                          "behavior" (hash "band" (exact->inexact band))))))))
+                                          "behavior" (hash "band" (exact->inexact band)))))))
+         (cue (if (and (string? say) (> (string-length say) 0))
+                say
+                (if ok (edsl-banner (hash-ref found "label")) ""))))
     (if (trial-busy? trial)
       ; The chat token belongs to a POST already in flight. A place the
       ; child just asked for already passed edsl-check, so install it
@@ -761,34 +763,29 @@
           (edsl-remember! text (hash-ref found "id"))
           (edsl-enter-kept! text)
           (if banner?
-            (raise-banner! "venue" (edsl-banner (hash-ref found "label")) 0)
+            (raise-banner! "venue" cue 0)
             #f)
-          (note! "KEEP" "fair" "biome"
-                 (if (and (string? say) (> (string-length say) 0))
-                   say
-                   (edsl-banner (hash-ref found "label")))
-                 "world")
+          (note! "KEEP" "fair" "biome" cue "world")
           #t)
         #f)
       (begin
-        (if (or (not ok) (not trial) (not (evo:trial-ok? trial)) (not (evo:feasible? trial)))
+        ; A place the child named already passed edsl-check. The trial
+        ; records that. A failed record does not put the world back.
+        (if (not ok)
           (note! "ROLLBACK"
-                 (if ok "trial" (hash-ref found "why" "shape"))
+                 (hash-ref found "why" "shape")
                  "biome" "The world stayed")
-          (begin
-            (edsl-remember! text (hash-ref found "id"))
-            (if enter?
-              (edsl-enter-kept! text)
-              (set! edsl-ready text))
-            (let ((cue (if enter?
-                         (if (and (string? say) (> (string-length say) 0))
-                           say
-                           (edsl-banner (hash-ref found "label")))
-                         "")))
+          (if (or enter? (and trial (evo:trial-ok? trial) (evo:feasible? trial)))
+            (begin
+              (edsl-remember! text (hash-ref found "id"))
+              (if enter?
+                (edsl-enter-kept! text)
+                (set! edsl-ready text))
               (if (and enter? banner?)
-                (raise-banner! "venue" (edsl-banner (hash-ref found "label")) 0)
+                (raise-banner! "venue" cue 0)
                 #f)
-              (note! "KEEP" "fair" "biome" cue "world"))))
+              (note! "KEEP" "fair" "biome" (if enter? cue "") "world"))
+            (note! "ROLLBACK" "trial" "biome" "The world stayed")))
         (release-slot!)
         ok))))
 
@@ -859,46 +856,25 @@
     (set! level-near 0)
     (set! level-overtakes 0)
     (set! goal-lock #f)
-    ; A spoken world stays through the gate. The queued dream does not
-    ; take its place. An unpinned gate still rotates as before.
+    ; A spoken world stays through the gate. An unpinned clear steps to
+    ; the venue for this level (garden, city, space, coast). The scene
+    ; below follows how the run went. A recombined world is not installed
+    ; on its own, and a dream is not started on a clock.
     (if biome-pin
       (begin
         (set! edsl-ready #f)
         (set! edsl-enter? #f)
         (set! edsl-theme-now "")
         (set! edsl-hint ""))
-      (if (env-on? "LUMEN_SKIP_DREAM")
-        (begin
-          (edsl-clear!)
-          (set! biome-now (hash-ref cross "biome" (biome-for-level level-n))))
-        (let ((ready (if (string? edsl-ready) edsl-ready #f)))
-          (set! edsl-ready #f)
-          (if (and (string? ready) (edsl-enter-kept! ready))
-            #f
-            (if llm-on
-              (begin
-                (edsl-clear!)
-                (set! biome-now (hash-ref cross "biome" (biome-for-level level-n))))
-              ;; The offline biome evolve scores a small population with
-              ;; edsl-check, then one cosmetic evo:trial (~85ms). Rotate to
-              ;; the level's biome now (cheap, keeps the banner correct) and
-              ;; queue that work for a later tick. If it KEEPs, consider-edsl!
-              ;; installs the evolved world then; a ROLLBACK leaves the
-              ;; rotation. Same verdict, spread off the crossing frame. The
-              ;; population step does not join a fiber.
-              (begin
-                (edsl-clear!)
-                (set! biome-now (hash-ref cross "biome" (biome-for-level level-n)))
-                (let ((lv level-n))
-                  (set! gate-followups
-                        (append gate-followups
-                                (list (lambda ()
-                                        (let ((born (begin (load-slow!)
-                                                           (edsl-evolve edsl-pool
-                                                                        (+ (floor seed) lv)))))
-                                          (if (string? born)
-                                              (consider-edsl! born "" #t #f)
-                                              #f)))))))))))))
+      (let ((ready (if (and (not (env-on? "LUMEN_SKIP_DREAM")) (string? edsl-ready))
+                     edsl-ready
+                     #f)))
+        (set! edsl-ready #f)
+        (if (and (string? ready) (edsl-enter-kept! ready))
+          #f
+          (begin
+            (edsl-clear!)
+            (set! biome-now (hash-ref cross "biome" (biome-for-level level-n)))))))
     (set! chal-coins 0)
     (set! chal-done #f)
     (set! run-mult (hash-ref cross "mult" run-mult))
@@ -914,7 +890,9 @@
                         (string-append "第" (int-str level-n) "关")
                         (string-append "Level " (int-str level-n)))
                       " · "
-                      (edsl-title biome-now)
+                      (if (string=? wish-locale "zh")
+                        (edsl-zh biome-now)
+                        (edsl-title biome-now))
                       " · ×"
                       (int-str run-mult))))
            (line (string-append place (race-aside race mood))))
@@ -2964,14 +2942,14 @@
               (set! edsl-hint ""))
             #f)
           (if (string? preset)
-            (consider-edsl! preset (edsl-banner (edsl-title theme)) #t #t)
+            (consider-edsl! preset (edsl-say theme wish-locale) #t #t)
             #f))))))
 
 (define (edsl-fallback! theme)
   (load-slow!)
   (let ((preset (edsl-preset theme)))
     (if (string? preset)
-      (consider-edsl! preset (edsl-banner (edsl-title theme)) #t #t)
+      (consider-edsl! preset (edsl-say theme wish-locale) #t #t)
       (note! "ROLLBACK" "shape" "biome" "The world stayed"))))
 
 (define (take-edsl! c msg)
@@ -3705,7 +3683,7 @@
              (raise-banner! (if mood? "mood" "venue")
                             (if mood?
                               (venue-line next run-mult wish-locale)
-                              (world-banner next))
+                              (world-banner next wish-locale))
                             0)
              (note! "KEEP" "same" "voice"
                     (voice-line act next "same" wish-locale) next))
@@ -3716,7 +3694,7 @@
              (raise-banner! (if mood? "mood" "venue")
                             (if mood?
                               (venue-line next run-mult wish-locale)
-                              (world-banner next))
+                              (world-banner next wish-locale))
                             0)
              (note! "KEEP" "fair" "voice"
                     (voice-line act next "fair" wish-locale) next)))))
@@ -3861,9 +3839,8 @@
               wish-queued wish-flight wish-wait)
         #f
         (begin
-          (if (and (not scene-busy) (not scene-working) (>= run-ms scene-next))
-            (ask-scene!)
-            #f)
+          ; The garden changes with the level, from how the run went, or
+          ; when the child asks. It is not dreamed on a clock.
           ; A held phrase seals only while no chat is in flight. Another
           ; obstacle ask would keep this arm busy and the sentence would wait.
           (if (and (= hold-phase 0)
@@ -3878,13 +3855,10 @@
                    (>= run-ms pals-next))
             (ask-pals!)
             #f)
-          (if (and (not edsl-busy) (not edsl-working)
-                   (not scene-busy) (not motif-busy) (not pals-busy)
-                   (not (env-on? "LUMEN_STALL_SCENE"))
-                   (not (env-on? "LUMEN_SKIP_DREAM"))
-                   (>= run-ms edsl-next))
-            (ask-edsl!)
-            #f))))))
+          ; A world is not dreamed on a clock. A clear steps the venue
+          ; with the level, and a sentence from the child installs the
+          ; place they named.
+          )))))
 
 ; Exact 0..4. pace and the feel table compare with =, so an inexact
 ; 2.0 would miss every row and fall through to the top band.
@@ -4369,12 +4343,11 @@
     (try (tune-commit!) (catch (e) (set! tune-due #f)))
     #f))
 
-; Drain one queued gate follow-up per tick (a biome evolve or a roster
-; evolve). One thunk a tick keeps each cosmetic trial off the crossing
-; frame and spreads the work the way a dream / card slice does. Waits while
-; a chat POST or another trial holds the slot, exactly as maybe-tune! does,
-; so the evolve never wedges an in-flight call. A thunk that raises is
-; dropped, not retried — the gate already rotated the biome / kept the run.
+; Drain one queued gate follow-up per tick (a friend's restyle). One
+; thunk a tick keeps that cosmetic trial off the crossing frame. Waits
+; while a chat POST or another trial holds the slot, exactly as
+; maybe-tune! does. A thunk that raises is dropped, not retried. The
+; gate already stepped the venue and kept the run.
 (define (maybe-gate-followup!)
   (if (or (null? gate-followups) (llm-posting?) (chat-open?) trial-open)
       #f
