@@ -109,6 +109,45 @@ const PROP_CUBES = {
   "eiffel-tower": 7, "clock-tower": 5, colonnade: 6, bamboo: 5, palm: 6,
   "stone-bridge": 5, battlement: 5, willow: 4, cypress: 2, sakura: 4,
 };
+
+// Fifteen named cities, plus the plain city venue. Each street picks three
+// silhouettes and its own colours. A landmark still appears, but only rarely,
+// so the road is not one repeated tower. Plants stay on the prop list.
+export const CITY_FACES = ["block", "eave", "gate", "hall", "step", "row", "pier", "lantern", "wall"];
+export const NAMED_CITIES = [
+  "beijing", "shanghai", "hangzhou", "chengdu", "xian", "chongqing", "hongkong",
+  "newyork", "sanfrancisco", "losangeles", "paris", "london", "rome", "venice", "tokyo",
+];
+const CITY_ARCH = new Set([
+  "pagoda", "palace-gate", "pearl-tower", "spire", "bridge-tower", "eiffel-tower",
+  "clock-tower", "colonnade", "stone-bridge", "battlement", "tower",
+]);
+export const CITY_STYLES = {
+  city: { wall: [0.3, 0.34, 0.48], vary: [0.58, 0.38, 0.4], roof: [0.18, 0.2, 0.26], trim: [1, 0.86, 0.42], faces: ["block", "step", "row"], glow: 0.2 },
+  beijing: { wall: [0.78, 0.16, 0.12], roof: [0.14, 0.09, 0.07], trim: [0.95, 0.78, 0.32], faces: ["eave", "gate", "hall"], mark: "pagoda" },
+  shanghai: { wall: [0.14, 0.2, 0.42], roof: [0.45, 0.88, 1], trim: [0.7, 0.95, 1], faces: ["step", "lantern", "block"], mark: "pearl-tower", glow: 0.5 },
+  hangzhou: { wall: [0.92, 0.9, 0.84], roof: [0.22, 0.24, 0.26], trim: [0.45, 0.62, 0.38], faces: ["eave", "hall", "pier"], mark: "stone-bridge" },
+  chengdu: { wall: [0.62, 0.4, 0.22], roof: [0.16, 0.42, 0.24], trim: [0.86, 0.72, 0.38], faces: ["hall", "eave", "lantern"], mark: "pagoda" },
+  xian: { wall: [0.62, 0.36, 0.18], roof: [0.4, 0.16, 0.12], trim: [0.78, 0.52, 0.22], faces: ["wall", "gate", "hall"], mark: "battlement" },
+  chongqing: { wall: [0.42, 0.16, 0.14], roof: [0.16, 0.12, 0.14], trim: [0.95, 0.5, 0.18], faces: ["step", "pier", "lantern"], mark: "bridge-tower", glow: 0.4 },
+  hongkong: { wall: [0.1, 0.14, 0.24], roof: [0.08, 0.78, 0.7], trim: [0.98, 0.32, 0.52], faces: ["step", "lantern", "pier"], mark: "spire", glow: 0.6 },
+  newyork: { wall: [0.55, 0.46, 0.36], roof: [0.24, 0.28, 0.38], trim: [0.95, 0.74, 0.32], faces: ["step", "block", "row"], mark: "spire" },
+  sanfrancisco: { wall: [0.78, 0.8, 0.84], roof: [0.75, 0.22, 0.16], trim: [0.9, 0.45, 0.22], faces: ["pier", "row", "block"], mark: "bridge-tower" },
+  losangeles: { wall: [0.96, 0.74, 0.55], roof: [0.9, 0.42, 0.32], trim: [0.98, 0.84, 0.4], faces: ["row", "hall", "block"], mark: "palm" },
+  paris: { wall: [0.88, 0.78, 0.64], roof: [0.38, 0.36, 0.4], trim: [0.62, 0.7, 0.78], faces: ["row", "block", "lantern"], mark: "eiffel-tower" },
+  london: { wall: [0.58, 0.58, 0.56], roof: [0.26, 0.2, 0.18], trim: [0.9, 0.76, 0.38], faces: ["row", "block", "gate"], mark: "clock-tower" },
+  rome: { wall: [0.86, 0.66, 0.42], roof: [0.72, 0.3, 0.18], trim: [0.94, 0.88, 0.72], faces: ["row", "gate", "hall"], mark: "colonnade" },
+  venice: { wall: [0.92, 0.7, 0.66], roof: [0.55, 0.26, 0.3], trim: [0.7, 0.82, 0.9], faces: ["row", "hall", "pier"], mark: "stone-bridge" },
+  tokyo: { wall: [0.92, 0.9, 0.88], roof: [0.78, 0.16, 0.24], trim: [0.98, 0.5, 0.68], faces: ["lantern", "block", "eave"], mark: "spire", glow: 0.45 },
+  "visit-high": { wall: [0.93, 0.9, 0.84], roof: [0.72, 0.16, 0.14], trim: [0.9, 0.72, 0.28], faces: ["hall", "wall", "eave"], mark: "pagoda" },
+  "visit-lake": { wall: [0.94, 0.93, 0.9], roof: [0.32, 0.38, 0.44], trim: [0.32, 0.58, 0.82], faces: ["pier", "eave", "hall"], mark: "stone-bridge" },
+  "visit-china": { wall: [0.9, 0.88, 0.78], roof: [0.18, 0.34, 0.22], trim: [0.5, 0.7, 0.42], faces: ["pier", "hall", "eave"], mark: "stone-bridge" },
+  "visit-canal": { wall: [0.62, 0.26, 0.18], roof: [0.16, 0.18, 0.22], trim: [0.86, 0.78, 0.52], faces: ["row", "pier", "hall"], mark: "stone-bridge" },
+  "visit-stone": { wall: [0.7, 0.62, 0.5], roof: [0.32, 0.16, 0.14], trim: [0.78, 0.7, 0.52], faces: ["row", "lantern", "gate"], mark: "clock-tower" },
+  "visit-us": { wall: [0.22, 0.3, 0.4], roof: [0.55, 0.64, 0.74], trim: [0.7, 0.84, 0.98], faces: ["block", "step", "pier"], mark: "spire", glow: 0.28 },
+  "visit-asia": { wall: [0.16, 0.2, 0.34], roof: [0.15, 0.7, 0.66], trim: [0.96, 0.42, 0.3], faces: ["step", "lantern", "eave"], mark: "spire", glow: 0.42 },
+  "visit-palm": { wall: [0.96, 0.86, 0.68], roof: [0.82, 0.52, 0.32], trim: [0.28, 0.62, 0.5], faces: ["hall", "row", "lantern"], mark: "palm" },
+};
 const SPEC_BODIES = new Set(["sun", "moon", "stars", "aurora", "none"]);
 
 function color3(v) {
@@ -2623,17 +2662,93 @@ export function createRenderer(canvas, hooks) {
         push(x - 0.18 * s, 1.0 * s, z, 0.3 * s, 0.26 * s, 0.3 * s, 1, pink, 0.28, 0.1, psi);
       }
     }
+    function drawFace(at, face, scale, style) {
+      if (n >= MAX - 10) return;
+      const s = scale;
+      const x = at.x;
+      const z = at.z;
+      const psi = at.psi;
+      const wall = style.wall;
+      const roof = style.roof;
+      const trim = style.trim;
+      const glow = style.glow || 0.08;
+      if (face === "eave") {
+        push(x, 0.65 * s, z, 1.05 * s, 1.3 * s, 0.85 * s, 0, wall, 0.48, 0.03, psi, 0, 0, 6);
+        push(x, 1.38 * s, z, 1.65 * s, 0.12 * s, 1.3 * s, 0, roof, 0.42, 0.04, psi);
+        push(x, 1.9 * s, z, 0.62 * s, 0.78 * s, 0.55 * s, 0, wall, 0.46, glow * 0.35, psi, 0, 0, 6);
+        push(x, 2.36 * s, z, 1.0 * s, 0.1 * s, 0.85 * s, 0, roof, 0.4, glow * 0.5, psi);
+      } else if (face === "gate") {
+        push(x - 0.55 * s, 0.85 * s, z, 0.22 * s, 1.7 * s, 0.22 * s, 0, wall, 0.45, 0.03, psi);
+        push(x + 0.55 * s, 0.85 * s, z, 0.22 * s, 1.7 * s, 0.22 * s, 0, wall, 0.45, 0.03, psi);
+        push(x, 1.78 * s, z, 1.5 * s, 0.16 * s, 0.36 * s, 0, trim, 0.35, glow, psi);
+        push(x, 2.0 * s, z, 1.75 * s, 0.12 * s, 0.5 * s, 0, roof, 0.4, 0.05, psi);
+      } else if (face === "hall") {
+        push(x, 0.55 * s, z, 1.7 * s, 1.1 * s, 0.9 * s, 0, wall, 0.5, 0.03, psi, 0, 0, 6);
+        push(x, 1.18 * s, z, 2.05 * s, 0.14 * s, 1.2 * s, 0, roof, 0.42, 0.04, psi);
+        push(x, 1.4 * s, z, 0.7 * s, 0.16 * s, 0.16 * s, 0, trim, 0.35, glow * 0.6, psi);
+      } else if (face === "step") {
+        push(x, 0.9 * s, z, 1.05 * s, 1.8 * s, 0.8 * s, 0, wall, 0.42, glow * 0.25, psi, 0, 0, 6);
+        push(x, 2.05 * s, z, 0.72 * s, 0.9 * s, 0.58 * s, 0, wall, 0.4, glow * 0.4, psi, 0, 0, 6);
+        push(x, 2.7 * s, z, 0.4 * s, 0.55 * s, 0.36 * s, 0, trim, 0.32, glow, psi);
+        push(x, 3.1 * s, z, 0.06 * s, 0.4 * s, 0.06 * s, 0, roof, 0.3, glow, psi);
+      } else if (face === "row") {
+        push(x, 0.85 * s, z, 1.85 * s, 1.7 * s, 0.7 * s, 0, wall, 0.48, 0.04, psi, 0, 0, 6);
+        push(x, 1.85 * s, z, 1.95 * s, 0.28 * s, 0.85 * s, 0, roof, 0.45, 0.03, psi);
+        push(x + 0.55 * s, 2.1 * s, z, 0.16 * s, 0.28 * s, 0.16 * s, 0, trim, 0.4, glow * 0.4, psi);
+      } else if (face === "pier") {
+        push(x - 0.55 * s, 1.15 * s, z, 0.22 * s, 2.3 * s, 0.22 * s, 0, wall, 0.4, glow * 0.3, psi);
+        push(x + 0.55 * s, 1.15 * s, z, 0.22 * s, 2.3 * s, 0.22 * s, 0, wall, 0.4, glow * 0.3, psi);
+        push(x, 2.15 * s, z, 1.45 * s, 0.12 * s, 0.16 * s, 0, roof, 0.35, glow * 0.5, psi);
+        push(x, 2.45 * s, z, 0.12 * s, 0.12 * s, 0.12 * s, 1, trim, 0.2, Math.max(glow, 0.45), psi);
+      } else if (face === "lantern") {
+        push(x, 1.15 * s, z, 0.42 * s, 2.3 * s, 0.42 * s, 0, wall, 0.38, glow * 0.35, psi, 0, 0, 6);
+        push(x, 2.15 * s, z, 0.7 * s, 0.16 * s, 0.16 * s, 0, trim, 0.25, Math.max(0.55, glow), psi);
+        push(x, 2.55 * s, z, 0.28 * s, 0.28 * s, 0.28 * s, 1, trim, 0.18, Math.max(0.7, glow), psi);
+      } else if (face === "wall") {
+        push(x, 0.7 * s, z, 2.1 * s, 1.4 * s, 0.42 * s, 0, wall, 0.55, 0.02, psi);
+        push(x - 0.7 * s, 1.5 * s, z, 0.28 * s, 0.28 * s, 0.42 * s, 0, roof, 0.5, 0.03, psi);
+        push(x, 1.5 * s, z, 0.28 * s, 0.28 * s, 0.42 * s, 0, roof, 0.5, 0.03, psi);
+        push(x + 0.7 * s, 1.5 * s, z, 0.28 * s, 0.28 * s, 0.42 * s, 0, roof, 0.5, 0.03, psi);
+      } else {
+        const h = 1.7 + scale * 1.15;
+        push(x, h * 0.5, z, 0.95 * s, h, 0.72 * s, 0, wall, 0.48, glow * 0.2, psi, 0, 0, 6);
+        push(x, h + 0.08 * s, z, 1.05 * s, 0.14 * s, 0.8 * s, 0, roof, 0.4, 0.04, psi);
+        push(x, h * 0.72, z, 0.22 * s, 0.14 * s, 0.76 * s, 0, trim, 0.25, Math.max(glow, 0.35), psi);
+      }
+    }
+    function drawCityStreet(cz) {
+      const style = CITY_STYLES[pal.biome];
+      if (!style || n >= MAX - 24) return;
+      if (((((cz - 1) / 2) | 0) % 4) !== 0) return;
+      for (const side of [-1, 1]) {
+        if (n >= MAX - 12) return;
+        const pick = laneHash(cz * 0.37 + side * 4.1);
+        const face = style.faces[(pick * style.faces.length) | 0] || "block";
+        const scale = 0.84 + laneHash(cz * 0.19 + side) * 0.38;
+        const lat = side * (4.8 + laneHash(cz * 0.11 + side * 2) * 0.55);
+        const at = onRoad(cz, lat);
+        const look = style.vary
+          ? Object.assign({}, style, { wall: mix3(style.wall, style.vary, pick) })
+          : style;
+        const rare = style.mark && laneHash(cz * 0.07 + side * 8.2) > 0.84;
+        if (rare) drawCityMark(at, style.mark, Math.min(1.25, scale + 0.15), pal);
+        else drawFace(at, face, scale, look);
+      }
+    }
     function drawMix(cz, dist) {
+      drawCityStreet(cz);
       const props = Array.isArray(pal.props) ? pal.props : [];
       const sway = reduced ? 0 : Math.sin((st.time || 0) * 1.1 + cz * 0.13) * 0.05;
       for (let p = 0; p < props.length && n < MAX - 70; p++) {
         const prop = props[p];
+        if (CITY_STYLES[pal.biome] && CITY_ARCH.has(prop.kind)) continue;
         const density = Math.max(0.05, Math.min(0.55, Number(prop.density) || 0.2));
         const scale = Math.max(0.55, Math.min(1.45, Number(prop.scale) || 1));
         for (const side of [-1, 1]) {
           if (n >= MAX - 70) return;
           if (laneHash(cz * 0.17 + side * (3 + p) + prop.kind.length) > density + 0.2) continue;
-          const lat = side * (4.65 + laneHash(cz * 0.29 + side + p) * 0.9);
+          const shoulder = CITY_STYLES[pal.biome] ? 6.35 : 4.65;
+          const lat = side * (shoulder + laneHash(cz * 0.29 + side + p) * 0.9);
           const along = cz + (laneHash(cz * 0.41 + side * 2) - 0.5) * 1.1;
           const at = onRoad(along, lat);
           const glow = pal.flower;
@@ -2796,13 +2911,8 @@ export function createRenderer(canvas, hooks) {
             push(dash.x, 0.07, dash.z, 0.1, 0.02, 0.55, 0, [0.98, 0.9, 0.45], 0.3, 0.4, dash.psi);
           }
           if (step8) {
+            drawCityStreet(cz);
             for (const side of [-1, 1]) {
-              const lat = side * (4.7 + laneHash(z + side) * 0.5);
-              const at = onRoad(cz, lat);
-              const h = 1.8 + laneHash(z * 0.31 + side) * 2.6;
-              const bw = 1.15 + laneHash(z * 0.17 + side * 3) * 0.7;
-              const body = mix3([0.28, 0.32, 0.46], [0.55, 0.36, 0.4], laneHash(z * 0.53 + side));
-              push(at.x, h * 0.5, at.z, bw, h, bw * 0.75, 0, body, 0.5, 0.04, at.psi, 0, 0, 6);
               const lamp = onRoad(cz, side * 3.15);
               push(lamp.x, 0.9, lamp.z, 0.08, 1.8, 0.08, 0, [0.24, 0.26, 0.3], 0.45, 0.05, lamp.psi);
               push(lamp.x, 1.86, lamp.z, 0.2, 0.12, 0.2, 1, [1, 0.9, 0.55], 0.2, 0.9, lamp.psi);

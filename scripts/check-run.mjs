@@ -1,6 +1,6 @@
 // Multiplier, combo, venues, and obstacle contrast across biomes.
 import { awardPickup, praise } from "../web/score.mjs";
-import { dressPalette, palette } from "../web/render.mjs";
+import { CITY_FACES, CITY_STYLES, NAMED_CITIES, dressPalette, palette } from "../web/render.mjs";
 import {
   addMult,
   applyVoice,
@@ -107,6 +107,21 @@ const space = dressPalette(palette(0, null), "space", "day");
 const city = dressPalette(palette(0, null), "city", "day");
 check("space-sky", space.stars === 1 && space.sky0[2] > space.sky0[0]);
 check("city-sky", city.sky1[0] > city.sky1[2] && city.path[0] < 0.35);
+
+const faceSet = new Set(CITY_FACES);
+check("cities-15", NAMED_CITIES.length === 15 && NAMED_CITIES.every((id) => CITY_STYLES[id]));
+const signatures = new Set();
+for (const [id, style] of Object.entries(CITY_STYLES)) {
+  const facesOk = style.faces.length === 3 && style.faces.every((f) => faceSet.has(f));
+  const markOk = !style.mark || style.mark === "palm" || style.mark === "pagoda" || style.mark === "pearl-tower"
+    || style.mark === "stone-bridge" || style.mark === "battlement" || style.mark === "bridge-tower"
+    || style.mark === "spire" || style.mark === "eiffel-tower" || style.mark === "clock-tower"
+    || style.mark === "colonnade";
+  const sig = style.faces.join("/") + ":" + style.wall.map((n) => n.toFixed(2)).join(",");
+  check(`style-${id}`, facesOk && markOk && style.roof && style.trim && !signatures.has(sig));
+  signatures.add(sig);
+}
+check("styles-differ", signatures.size === Object.keys(CITY_STYLES).length);
 
 if (failed) {
   console.error(failed + " failed");
