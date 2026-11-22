@@ -338,7 +338,7 @@ async function screenshots() {
         `--user-data-dir=${dir}`,
         "--no-first-run",
         "--no-default-browser-check",
-        `http://127.0.0.1:${webPort}/?seed=42`,
+        `http://127.0.0.1:${webPort}/?seed=42&venue=garden`,
       ], { stdio: ["ignore", chromeOut, chromeOut] });
       const list = await waitJson(`http://127.0.0.1:${dbg}/json`, chromeLog);
     const page = list.find((t) => t.type === "page" && t.webSocketDebuggerUrl);
@@ -373,7 +373,13 @@ async function screenshots() {
     let chat = "";
     let heroNow = "";
     let roster = "";
+    let biome = "";
     let sawBodySay = false;
+    // The garden is not asked on a clock. Say it once the page is up,
+    // and again if a level clear paints over it. venue=garden keeps the
+    // drawn sky on that colour.
+    let gardenAsks = 0;
+    let nextGardenAsk = 0;
     await cdp.call("Runtime.evaluate", {
       expression: `(() => {
         if (window.__lumenDrive) return 0;
@@ -397,6 +403,7 @@ async function screenshots() {
             chat: root.dataset.chat || "",
             hero: root.dataset.hero || "",
             pals: root.dataset.pals || "",
+            biome: root.dataset.biome || "",
             body: document.body.innerText || "",
             chatGone: document.getElementById("chat") === null,
           });
@@ -409,13 +416,28 @@ async function screenshots() {
       chat = probe.chat || "";
       heroNow = probe.hero || "";
       roster = probe.pals || "";
+      biome = probe.biome || "";
       const body = probe.body || "";
+      const skyReady = sky.startsWith("0.9") || sky.startsWith("0.8");
+      if (!skyReady && gardenAsks < 3 && Date.now() >= nextGardenAsk) {
+        const sent = await cdp.call("Runtime.evaluate", {
+          expression: "window.__lumenSay ? (window.__lumenSay('把天空换成郁金香', 'zh') ? 1 : 0) : -1",
+          returnByValue: true,
+        });
+        if (sent.result && sent.result.value === 1) {
+          gardenAsks += 1;
+          nextGardenAsk = Date.now() + 8000;
+        }
+      }
       if (!probe.chatGone) throw new Error("center chat is still on screen");
       if (body.includes("The light rested") || body.includes("Run again")) {
         throw new Error("end card is on screen");
       }
       if (body.includes(MOTIF_SAY)) sawBodySay = true;
-      if ((sky.startsWith("0.9") || sky.startsWith("0.8")) && chat.includes(MOTIF_SAY) && sawBodySay && heroNow && heroNow !== "keeper") break;
+      if (skyReady && biome === "garden" && chat.includes(MOTIF_SAY) && sawBodySay && heroNow && heroNow !== "keeper") break;
+    }
+    if (!(sky.startsWith("0.9") || sky.startsWith("0.8"))) {
+      throw new Error("garden sky was not kept " + sky + " biome " + biome + " asks " + gardenAsks + " mock " + JSON.stringify(mock.hits) + "\n" + core.log().slice(-800));
     }
     if (!chat.includes(MOTIF_SAY) || !sawBodySay) {
       throw new Error("chat missing the model sentence " + chat + " sky " + sky + " mock " + JSON.stringify(mock.hits) + " page " + JSON.stringify(cdp.logs) + "\n" + core.log().slice(-1500));
