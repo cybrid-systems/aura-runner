@@ -11,5 +11,10 @@
 
 (define (fence-write path text)
   (if (fence-ok? path)
-    (try (write-file path text) (catch (e) #f))
+    (try (begin
+           ; aura test starts from a fresh tree. out/ is gitignored, and
+           ; write-file does not create the directory.
+           (make-directory "out")
+           (write-file path text))
+         (catch (e) #f))
     #f))

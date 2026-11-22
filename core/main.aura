@@ -850,7 +850,7 @@
                          (if (hash? gate) (hash-ref gate "why" "trial") "trial")
                          "biome" "还是原来的世界" "world"))
                 (release-slot!)
-                (and (hash? gate) (string=? (hash-ref gate "verdict" "") "KEEP")))))))))
+                (and (hash? gate) (string=? (hash-ref gate "verdict" "") "KEEP"))))))))))
 
 ; Remember the venue this clear stepped to. Offer a child only when
 ; two kept worlds are already on the map and the cooldown is over.
@@ -2603,7 +2603,7 @@
                                   "Coins found a new path" "lanes")
                             (> (length rows) 1))))
             (release-slot!)
-            #t))))))))
+            #t)))))))
 
 ; A step that the numbers already forbid does not take a slice. A legal
 ; step walks the proving road twelve frames at a time, under the rules
