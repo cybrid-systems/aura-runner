@@ -721,6 +721,31 @@ export function rebaseAnchor(anchor, keys, fromS, toS, bend) {
   };
 }
 
+// Fold the road keys behind `cut` into the anchor, keeping only the keys at
+// or after it. The world pose at `cut` becomes the new anchor, so every
+// later sample is unchanged (poseOnRoad continues the first key backward for
+// s < anchor.s). Without this, roadKeys grows once per bend change for the
+// whole run — only a gap-rescue rebase ever dropped them — and integrateRoad
+// walks every key behind the runner on each of the ~230 sample() calls a
+// frame makes, so the client frame cost climbed linearly with distance run
+// (the "stutters after a while" symptom). The camera samples no farther back
+// than pz - 8, so keys behind the runner by more than the margin are dead
+// weight. Returns the same anchor/keys when nothing is behind the cut.
+export function trimRoadKeys(anchor, keys, cut) {
+  if (!Array.isArray(keys) || keys.length < 2) return { anchor, keys };
+  let firstKept = 0;
+  while (firstKept < keys.length && keys[firstKept].s < cut) firstKept++;
+  if (firstKept === 0) return { anchor, keys };
+  const pose = poseOnRoad(anchor, keys, cut);
+  const bend = keys[firstKept - 1].bend;
+  const kept = [{ s: cut, bend: clampBend(bend) }];
+  for (let i = firstKept; i < keys.length; i++) kept.push(keys[i]);
+  return {
+    anchor: { s: cut, x: pose.x, z: pose.z, psi: pose.psi },
+    keys: kept,
+  };
+}
+
 // A gap recovery teleports arc length by about the width of the hole.
 // Taking the whole jump in one frame pops the runner ahead of the camera.
 // Glide across it. A correction past 8 m still rebases, so the view does
@@ -2295,6 +2320,14 @@ export function createRenderer(canvas, hooks) {
     } else {
       shownS = glide.s;
       noteBend(shownS, bend);
+    }
+    // Drop the keys behind the camera window so a long run does not pay for
+    // the whole road history on every sample. 16 m covers the farthest-back
+    // sample (pz - 8) with margin; the fold keeps the world pose exact.
+    {
+      const trimmed = trimRoadKeys(anchor, roadKeys, shownS - 16);
+      anchor = trimmed.anchor;
+      roadKeys = trimmed.keys;
     }
     runS = shownS;
     const drawS = shownS;

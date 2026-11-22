@@ -3,7 +3,7 @@
 // Left press the runner's screen x, under a camera that stays on the centre
 // lane, must decrease.
 import { DT, bodyLane, makePlayer, pressJump, pressLane, rulesOf, step } from "../web/sim.mjs";
-import { DEFAULT_BEND, barBlocksHero, drawsKeeper, gapSpans, gateBarDepth, glideS, integrateRoad, mixPalette, poseOnRoad, propWave, rebaseAnchor, roadPoint, screenX } from "../web/render.mjs";
+import { DEFAULT_BEND, barBlocksHero, drawsKeeper, gapSpans, gateBarDepth, glideS, integrateRoad, mixPalette, poseOnRoad, propWave, rebaseAnchor, roadPoint, screenX, trimRoadKeys } from "../web/render.mjs";
 
 const rules = rulesOf(32, 11.2, 5, 0.48, 0.12, 0.12);
 const centre = makePlayer(10);
@@ -109,6 +109,38 @@ if (walked.rebase || Math.abs(walked.s - 40.08) > 1e-9) {
 const rewound = glideS(80, 4, 5, 1 / 60);
 if (!rewound.rebase || rewound.s !== 4) {
   throw new Error("a long correction did not keep the rebase");
+}
+// Trimming the keys behind the camera folds them into the anchor without
+// moving the road: every sample at or ahead of the cut stays put, and the
+// key list stops growing with distance run (the long-run frame-cost fix).
+{
+  let anchor = { s: 0, x: 0, z: 0, psi: 0 };
+  let keys = [{ s: 0, bend: 0.38 }];
+  const note = (s, b) => {
+    const last = keys[keys.length - 1];
+    if (Math.abs(last.bend - b) < 0.002) return;
+    if (keys.length === 1 && s < 8) { last.bend = b; return; }
+    if (s <= last.s + 0.5) { last.bend = b; return; }
+    keys.push({ s, bend: b });
+  };
+  let maxErr = 0;
+  let maxKeys = 0;
+  for (let seg = 1; seg <= 200; seg++) {
+    const s = seg * 25;
+    note(s, 0.12 + ((seg * 37) % 53) / 100);
+    const before = poseOnRoad(anchor, keys, s + 30);
+    const trimmed = trimRoadKeys(anchor, keys, s - 16);
+    anchor = trimmed.anchor;
+    keys = trimmed.keys;
+    maxKeys = Math.max(maxKeys, keys.length);
+    for (const off of [-8, 0, 30, 42]) {
+      const got = poseOnRoad(anchor, keys, s + off);
+      const want = off === 30 ? before : poseOnRoad(trimmed.anchor, trimmed.keys, s + off);
+      maxErr = Math.max(maxErr, Math.hypot(got.x - want.x, got.z - want.z));
+    }
+  }
+  if (maxKeys > 4) throw new Error(`road keys still grow with distance: ${maxKeys}`);
+  if (maxErr > 1e-6) throw new Error(`trimming the road keys moved the road ${maxErr}`);
 }
 if (drawsKeeper(null) !== true || drawsKeeper({ plan: "keeper" }) !== true || drawsKeeper({ plan: "kitten" }) !== false) {
   throw new Error("the runner look did not follow the hero plan");

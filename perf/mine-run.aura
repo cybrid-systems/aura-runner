@@ -1,0 +1,224 @@
+; aura-perf mining target for aura-runner's LIVE TICK over a long run.
+;
+; The physics / autopilot / coin specs measure steady-state cost. The
+; reported symptom - frames stutter after the run has been up a while -
+; is time-dependent, so this target drives core/main.aura's own on-tick
+; against a real socket for thousands of ticks and samples the per-tick
+; wall cost in windows. A cost that grows with run time shows up as a
+; rising window median; the runtime counters beside it say whether the
+; growth is the target's state or the runtime's heap.
+;
+;   AURA_BIN=~/aura/build-jit2/aura AURA_PATH=~/aura-perf:~/aura/lib \
+;     AURA_SANDBOX=off aura --preset dev --grant network perf/mine-run.aura
+;
+; Knobs: RUN_TICKS (default 6000), RUN_WINDOW (default 250 ticks),
+; RUN_TICK_MS (default 50, the browser's own send cadence),
+; RUN_PORT (default 18797), RUN_SEED (default 42),
+; RUN_SKIP_DREAM (default 1; 0 keeps the dream slice on the tick).
+
+(require "lib/perf/util" all:)
+(require "lib/perf/score" all:)
+(require "lib/perf/profile" all:)
+(require "lib/perf/cct" all:)
+(require "std/socket" all:)
+(require "std/string" all:)
+
+(define (env-n name fallback)
+  (let ((raw (try (getenv name) (catch (e) ""))))
+    (let ((n (if (and (string? raw) (> (string-length raw) 0)) (string->number raw) #f)))
+      (if (and (number? n) (> n 0)) n fallback))))
+
+(define TICKS (env-n "RUN_TICKS" 6000))
+(define WINDOW (env-n "RUN_WINDOW" 250))
+(define TICK-MS (env-n "RUN_TICK_MS" 50))
+(define PORT (env-n "RUN_PORT" 18797))
+(define SEED (env-n "RUN_SEED" 42))
+(define SERVER-PID (env-n "RUN_SERVER_PID" 0))
+
+; ── the socket the tick answers on ──────────────────────────────────
+; The server is a separate process (core/main.aura); this file is the
+; client, so the numbers below are the tick's own wall cost as the
+; browser sees it, not a probe inside the server's fiber.
+
+; There is no kernel sleep; a yield loop on the steady clock waits.
+(define (wait-ms ms)
+  (let ((start (monotonic-ms)))
+    (let loop ()
+      (if (>= (- (monotonic-ms) start) ms)
+        #t
+        (begin (try (fiber:yield) (catch (e) #f)) (loop))))))
+
+(define (connect-retry port tries)
+  (let ((c (try (tcp-connect "127.0.0.1" port) (catch (e) #f))))
+    (if (number? c)
+      c
+      (if (<= tries 0)
+        (raise "server did not open its port")
+        (begin (wait-ms 250) (connect-retry port (- tries 1)))))))
+
+
+(define sock (connect-retry PORT 240))
+(define rbuf "")
+
+(define (send-msg h) (tcp-send sock (string-append (json-encode h) "\n")))
+
+(define (take-line)
+  (let ((i (string-find rbuf "\n")))
+    (if (< i 0)
+      #f
+      (let ((line (substring rbuf 0 i)))
+        (set! rbuf (substring rbuf (+ i 1) (string-length rbuf)))
+        line))))
+
+(define (read-msg)
+  (let ((have (take-line)))
+    (if have
+      (try (json-parse have) (catch (e) #f))
+      (let ((got (tcp-recv sock 65536)))
+        (if (or (not (string? got)) (= (string-length got) 0))
+          #f
+          (begin
+            (set! rbuf (string-append rbuf got))
+            (read-msg)))))))
+
+; Read until the state that answers this tick. Notes, chunks and HUD
+; rows ride ahead of it; they are part of the tick's cost, so they are
+; read inside the timed window.
+(define (read-state)
+  (let loop ((n 0) (last #f))
+    (if (> n 400)
+      last
+      (let ((m (read-msg)))
+        (if (not (hash? m))
+          last
+          (if (string=? (hash-ref m "op" "") "state")
+            m
+            (loop (+ n 1) m)))))))
+
+; ── runtime counters beside the wall cost ───────────────────────────
+(define (num h k) (let ((v (hash-ref h k 0))) (if (number? v) v 0)))
+
+(define (statm-kb path)
+  (let ((t (try (perf:read-text path) (catch (e) ""))))
+    (let ((xs (string-split t " ")))
+      (if (pair? (cdr xs))
+        (let ((n (string->number (car (cdr xs)))))
+          (if (number? n) (* 4 n) 0))
+        0))))
+
+; The client's own heap counters. The server is a separate process, so
+; its resident size is read from /proc/<pid>/statm; SERVER_PID names it.
+(define (snap)
+  (let ((gh (stats:get "gc-heap-stats"))
+        (cs (stats:get "closure:stats"))
+        (ck (hash-ref (engine:metrics) "compiler" (hash))))
+    (hash "pairs" (num gh "pairs")
+          "pairs-free" (num gh "pairs-free")
+          "strings-live" (num gh "strings-live")
+          "vectors" (num gh "vectors")
+          "tw-calls" (num cs "tw-calls")
+          "ir-calls" (num cs "ir-calls")
+          "env-size" (num ck "env_frames_size_total")
+          "env-live" (num ck "env_frames_live_total")
+          "rss-kb" (statm-kb "/proc/self/statm")
+          "server-rss-kb" (if (> SERVER-PID 0)
+                            (statm-kb (string-append "/proc/" (number->string SERVER-PID) "/statm"))
+                            0))))
+
+; ── the run ─────────────────────────────────────────────────────────
+(send-msg (hash "op" "hello" "seed" SEED))
+(define hello (read-state))
+(if (not (hash? hello)) (raise "no hello state"))
+
+(define (pct xs q)
+  (if (null? xs)
+    0
+    (let ((s (sort xs <)))
+      (list-ref s (inexact->exact (min (- (length s) 1) (floor (* q (length s)))))))))
+
+(define (report-window i samples st before after)
+  (let ((med (perf:median samples))
+        (worst (pct samples 0.99))
+        (over (let loop ((xs samples) (n 0))
+                (if (null? xs) n (loop (cdr xs) (if (> (car xs) 100) (+ n 1) n))))))
+    (display "window ") (display i)
+    (display " ticks=") (display (length samples))
+    (display " run-ms=") (display (num st "run"))
+    (display " level=") (display (num st "level"))
+    (display " x=") (display (num st "x"))
+    (display " med-ms=") (display med)
+    (display " p99-ms=") (display worst)
+    (display " over100=") (display over)
+    (display " chunks=") (display (num st "chunks"))
+    (display " ahead=") (display (num st "ahead"))
+    (display " score=") (display (num st "score"))
+    (newline)
+    (display "  heap pairs=") (display (num after "pairs"))
+    (display " strings=") (display (num after "strings-live"))
+    (display " vectors=") (display (num after "vectors"))
+    (display " env-size=") (display (num after "env-size"))
+    (display " env-live=") (display (num after "env-live"))
+    (display " tw-calls=") (display (num after "tw-calls"))
+    (display " ir-calls=") (display (num after "ir-calls"))
+    (display " rss-kb=") (display (num after "rss-kb"))
+    (display " server-rss-kb=") (display (num after "server-rss-kb"))
+    (newline)
+    (hash "i" i "median" med "p99" worst "over100" over
+          "run" (num st "run") "level" (num st "level")
+          "heap" after)))
+
+(display "=== aura-perf mining: aura-runner live tick over a long run ===\n")
+(display "ticks=") (display TICKS)
+(display " window=") (display WINDOW)
+(display " tick-ms=") (display TICK-MS)
+(display " seed=") (display SEED)
+(newline)
+
+(define windows
+  (let loop ((i 0) (done 0) (samples '()) (before (snap)) (acc '()) (st hello))
+    (if (>= done TICKS)
+      (reverse (if (null? samples)
+                 acc
+                 (cons (report-window i samples st before (snap)) acc)))
+      (let ((t0 (monotonic-ms)))
+        (send-msg (hash "op" "tick" "jump" 0 "slide" 0 "lane" 0
+                        "dt" TICK-MS "x" (num st "x") "hearts" 3))
+        (let ((got (read-state)))
+          (let ((dt (- (monotonic-ms) t0))
+                (nst (if (hash? got) got st)))
+            (if (>= (+ (length samples) 1) WINDOW)
+              (let ((row (report-window i (cons dt samples) nst before (snap))))
+                (loop (+ i 1) (+ done 1) (list) (snap) (cons row acc) nst))
+              (loop i (+ done 1) (cons dt samples) before acc nst))))))))
+
+(send-msg (hash "op" "bye"))
+(tcp-close sock)
+
+; ── mine the growth ─────────────────────────────────────────────────
+; The class is read off the window medians, not off a steady-state CCT:
+; a flat median with a rising heap is a runtime leak, a rising median
+; with a flat heap is the target's own growing state.
+(define (trend rows key)
+  (if (< (length rows) 2)
+    0
+    (let ((a (hash-ref (car rows) key 0))
+          (b (hash-ref (list-ref rows (- (length rows) 1)) key 0)))
+      (if (> a 0) (/ (- b a) a) 0))))
+
+(define (heap-of row k) (hash-ref (hash-ref row "heap" (hash)) k 0))
+
+(display "growth median-x=")
+(display (if (> (hash-ref (car windows) "median" 0) 0)
+           (/ (hash-ref (list-ref windows (- (length windows) 1)) "median" 0)
+              (hash-ref (car windows) "median" 1))
+           0))
+(newline)
+(display "growth pairs=") (display (- (heap-of (list-ref windows (- (length windows) 1)) "pairs")
+                                       (heap-of (car windows) "pairs"))) (newline)
+(display "growth strings=") (display (- (heap-of (list-ref windows (- (length windows) 1)) "strings-live")
+                                        (heap-of (car windows) "strings-live"))) (newline)
+(display "growth env-size=") (display (- (heap-of (list-ref windows (- (length windows) 1)) "env-size")
+                                         (heap-of (car windows) "env-size"))) (newline)
+(display "growth rss-kb=") (display (- (heap-of (list-ref windows (- (length windows) 1)) "rss-kb")
+                                       (heap-of (car windows) "rss-kb"))) (newline)
+(display "done\n")

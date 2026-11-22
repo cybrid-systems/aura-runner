@@ -530,3 +530,52 @@ content-independent; `force-soa` does not override). A fixed-arity
 | `mine-tick.aura` | drives `perf:collect` + `perf:mine` over the tick's defines |
 | `candidates/coin-window-trim.aura` | the kept fix: trim `coin-closed` to the window |
 | `candidates/coin-wrong-scale.aura` | negative control: shift coin x; checksum rejects |
+
+## The live-tick target (continuous tracking)
+
+    AURA_BIN=~/aura/build-jit2/aura AURA_PATH=~/aura-perf:~/aura/lib \
+      AURA_SANDBOX=off aura --preset dev --grant network perf/mine-run.aura
+
+`mine-run.aura` drives the real server (`core/main.aura` on a socket) for
+thousands of ticks and samples the per-tick wall cost in windows, with the
+runtime heap counters and the server RSS beside each window. Knobs:
+`RUN_TICKS`, `RUN_WINDOW`, `RUN_TICK_MS` (the browser's 50 ms send cadence),
+`RUN_PORT`, `RUN_SEED`, `RUN_SERVER_PID` (reads the server's `/proc` RSS).
+Start the server first, then run the probe against its port.
+
+Measured (seed 42, 6000 ticks / 300 s simulated, LLM off): the tick median
+is **flat** (13–21 ms across every window), p99 90–140 ms, >100 ms buckets
+6–13 per 500 — no upward trend. The server RSS climbs ~3 MB/min, but the
+live heap is flat (jemalloc `Allocated` ~1.8 MB): the climb is freed pages
+the allocator retains (glibc brk free chunks / jemalloc retained), not a
+live leak, and it does not move the tick median.
+
+### The stutter, attributed (client side)
+
+The time-dependent frame cost is in the **browser renderer**, not the
+server tick. `web/render.mjs` keeps `roadKeys` — one entry per bend change
+— and `integrateRoad` walks every key behind the runner on each of the
+~230 `sample()` calls a frame makes. Only a gap-rescue rebase (>8 m jump)
+ever dropped keys, so in normal play the list grows for the whole run:
+
+| distance run | roadKeys | road cost / frame |
+|---|---|---|
+| 1000 m | 41 | 0.31 ms |
+| 5000 m | 201 | 1.53 ms |
+| 10000 m | 401 | 3.00 ms |
+
+`trimRoadKeys` folds the keys behind the camera window (`shownS - 16`) into
+the anchor each frame, keeping the world pose exact (`poseOnRoad` continues
+the first key backward for `s < anchor.s`). The list stays at ≤2 keys and
+the road cost stays ~0.015 ms/frame regardless of distance. Verified: pose
+error < 1.5e-11 over 10000 m with bend changes and gap rescues;
+`check-lanes` carries the parity + bounded-key regression.
+
+The remaining periodic server spikes (~200 ms at each level gate) are the
+inline `consider-coins!` / `queue-chase!` fairness trials in `finish-level!`
+— constant across levels, not time-growing. The boot spikes (ticks 7–71)
+are the deferred module compile (`load-slow-one`), one-time.
+
+| file | what it is |
+|---|---|
+| `mine-run.aura` | continuous live-tick tracking: per-window wall cost + heap counters + server RSS |
