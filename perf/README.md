@@ -136,6 +136,29 @@ both worldline states agree with the gate, 2 release verdicts published,
 tree's `lib` (`AURA_PATH=~/aura/lib`); the nightly's bundled lib does not
 ship it, though the binary has the bus primitives.
 
+### The continuous loop (multi-round)
+
+`scripts/perf-continuous.py` is the outer scheduler: it drives N perf rounds
+on a spec, runs the harness coordinator inside each round's linger window,
+and runs the runner's own regression suite (`aura test` + `check-sim`) between
+rounds as the independent gate. perf's `memory.json` carries the negative
+examples across rounds, so each round's candidate set shrinks
+(`negative-skip`); the loop stops on a regression failure or when a round
+tries nothing new and keeps nothing (search exhausted).
+
+```sh
+AURA_BIN=... AURA_LIB=~/aura/lib python3 scripts/perf-continuous.py \
+    --spec perf/spec.aura --rounds 3 --ws-base 5400 --linger-s 150
+```
+
+Per-round artifacts land in `perf/out/continuous/` (`roundN.perf.txt`,
+`roundN.harness.json`, `roundN.auratest.txt`, `roundN.checksim.txt`,
+`summary.json`). Roles are unchanged: perf proposes/trials/KEEPS under the
+constraint gate, the harness only reads and publishes verdicts, the driver
+schedules and gates — it is not a path around the gate. `--fresh-memory`
+starts from an empty negative memory (the prior one is saved beside the
+summary); `--no-regression` skips the between-round suite.
+
 ### collide-slack: safe, but the gate's win does not transfer to the road
 
 After the #5388 IR-cap fix the gated round PASSed `collide-slack` on the
