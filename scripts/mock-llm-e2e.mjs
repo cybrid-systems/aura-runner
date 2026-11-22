@@ -172,8 +172,11 @@ async function drive() {
     // The x86 nightly can spend most of this window before the kept garden
     // and the runner are both on the wire. Stop as soon as they are.
     // On a two-core runner the kept phrase lands at about 72 s on main.
+    // A level clear can restyle a friend before the companion clock asks
+    // the model, so the prompts have to be seen too.
     const deadline = Date.now() + Number(process.env.MOCK_WINDOW_MS || 120000);
-    while (Date.now() < deadline && !(sawMotif && sawScene && sawCue && sawPal && sawShape && sawSay && sawRunner)) {
+    const promptsSeen = () => mock.hits.motif >= 1 && mock.hits.scene >= 1 && mock.hits.pals >= 1;
+    while (Date.now() < deadline && !(sawMotif && sawScene && sawCue && sawPal && sawShape && sawSay && sawRunner && promptsSeen())) {
       io.send({ op: "tick", jump: 0, slide: 0, lane: 0 });
       batch = await readUntil(io, (m) => m.op === "state", 40);
       for (const m of batch) {
