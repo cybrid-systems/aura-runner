@@ -114,6 +114,13 @@
 ; chase queue. A clear does not recombine a new world. Each entry is a
 ; thunk; maybe-gate-followup! runs at most one per tick.
 (define gate-followups (list))
+; True only on the tick that crossed a level gate. finish-level! sets it
+; inside pump!; the cosmetic trial drainers (tune, gate follow-up, and a
+; slice seal) stand down for that one tick so three trials do not stack on
+; the crossing frame. Cleared at the top of the next on-tick. The verdicts
+; are unchanged — they land a tick later, the same slice convention the
+; dream / card / chase already use.
+(define gate-tick #f)
 (define scene-now default-scene)
 (define pals-now default-pals)
 (define pals-rows (list))
@@ -826,6 +833,7 @@
 ; still adds its own step. The page's pickup combo is not this counter.
 ; Who reached the gate first is folded into the same banner.
 (define (finish-level! bonus)
+  (set! gate-tick #t)
   (let* ((played form)
          (bumps level-bumps)
          (combo level-combo)
@@ -908,13 +916,17 @@
       (note! "KEEP" "level" "run"
              (gate-line (level-clear-line combo near overs) race mood)
              "level"))
-    (consider-coins! played bumps got-coins got-swaps near)
+    ;; The coin spread step is a fairness trial when it moves. Queue it
+    ;; with the roster restyle so neither lands on the crossing frame; the
+    ;; drainer runs one per tick after the gate. Same KEEP/ROLLBACK verdict,
+    ;; a tick or two later. queue-chase! only arms the sliced autopilot (no
+    ;; trial here), so it stays inline.
+    (let ((gate-pace speed-now))
+      (set! gate-followups
+            (append gate-followups
+                    (list (lambda () (consider-coins! played bumps got-coins got-swaps near gate-pace))
+                          (lambda () (roster-evolve! "Level clear"))))))
     (queue-chase! played bumps (chase-sum chase-recent) speed-now race)
-    ;; The roster evolve is a cosmetic evo:trial + rebind (~60-130ms). Queue
-    ;; it for a later tick; the friends restyle a frame or two after the gate
-    ;; instead of stalling the crossing frame. Same KEEP/ROLLBACK verdict.
-    (set! gate-followups
-          (append gate-followups (list (lambda () (roster-evolve! "Level clear")))))
     (set! tune-due #t)))
 
 ; Three coins in one level step the multiplier once. A gate does not
@@ -1931,7 +1943,7 @@
     (set! dream-i (lref r 1))
     (set! dream-body (lref r 2))
     (set! dream-sim (lref r 3))
-    (if (and (lref r 0) (not (llm-posting?)) (not (chat-open?)) (seal-sliced! (if (lref r 4) #t #f)))
+    (if (and (lref r 0) (not gate-tick) (not (llm-posting?)) (not (chat-open?)) (seal-sliced! (if (lref r 4) #t #f)))
       (begin
         (set! dream-phase 0)
         (set! next-dream (+ run-ms 22000.0)))
@@ -2025,7 +2037,7 @@
       ; this interpreter. A busy flag also stays set while that arm is
       ; only waiting for the slot, and waiting on it holds the sentence
       ; past the browser check.
-      (if (and (lref r 0) (not (chat-open?))
+      (if (and (lref r 0) (not gate-tick) (not (chat-open?))
                (seal-hold! (if (lref r 4) #t #f)))
         (set! hold-phase 0)
         #f))))
@@ -2164,7 +2176,7 @@
       (set! card-i (lref r 1))
       (set! card-body (lref r 2))
       (set! card-sim (lref r 3))
-      (if (and (lref r 0) (not (chat-open?))
+      (if (and (lref r 0) (not gate-tick) (not (chat-open?))
                (seal-cards! (if (lref r 4) #t #f)))
         (set! card-phase 0)
         #f))))
@@ -2282,7 +2294,7 @@
       (set! primer-i (lref r 1))
       (set! primer-body (lref r 2))
       (set! primer-sim (lref r 3))
-      (if (and (lref r 0) (not (chat-open?))
+      (if (and (lref r 0) (not gate-tick) (not (chat-open?))
                (seal-primer! (if (lref r 4) #t #f)))
         (set! primer-phase 0)
         #f))))
@@ -2332,13 +2344,17 @@
 ; Coin lanes, pattern mix, density, and arc probability. One knob, then
 ; the same evo:trial the other arms use. A collapsed lane weight, or a
 ; coin sitting in an obstacle, rolls back.
-(define (consider-coins! played bumps coins swaps near)
+(define (consider-coins! played bumps coins swaps near . rest)
   (load-coins!)
-  (let ((step (coin-step coin-params played bumps coins swaps near speed-now)))
+  ; The gate queues this a tick later; capture the pace it crossed at so
+  ; the verdict matches the inline call. A live caller passes nothing and
+  ; reads speed-now as before.
+  (let ((pace-now (if (and (pair? rest) (number? (car rest))) (car rest) speed-now)))
+  (let ((step (coin-step coin-params played bumps coins swaps near pace-now)))
     (if (not (hash-ref step "moved" #f))
       #f
       (let* ((params (hash-ref step "params" coin-params))
-             (pace (if (and (number? speed-now) (> speed-now 0.1)) speed-now 8.0))
+             (pace (if (and (number? pace-now) (> pace-now 0.1)) pace-now 8.0))
              (road (coin-sample seed params pace))
              (engage (coin-engage coins swaps near))
              (audit (coin-consider coin-params params road pace engage))
@@ -2384,7 +2400,7 @@
                 (note! "KEEP" (hash-ref step "why" "fair") "spread"
                        "Coins found a new path" "lanes")))
             (release-slot!)
-            #t))))))
+            #t)))))))
 
 ; A step that the numbers already forbid does not take a slice. A legal
 ; step walks the proving road twelve frames at a time, under the rules
@@ -2457,7 +2473,7 @@
       (set! chase-i (lref r 1))
       (set! chase-body (lref r 2))
       (set! chase-sim (lref r 3))
-      (if (and (lref r 0) (not (chat-open?))
+      (if (and (lref r 0) (not gate-tick) (not (chat-open?))
                (seal-chase! (if (lref r 4) #t #f)))
         (set! chase-phase 0)
         #f))))
@@ -4368,7 +4384,7 @@
         (tune-send! "ROLLBACK" (hash-ref gate "why" "bounds") tune-now)))))
 
 (define (maybe-tune!)
-  (if (and tune-due (not (llm-posting?)) (not trial-open))
+  (if (and tune-due (not gate-tick) (not (llm-posting?)) (not trial-open))
     (try (tune-commit!) (catch (e) (set! tune-due #f)))
     #f))
 
@@ -4378,13 +4394,14 @@
 ; maybe-tune! does. A thunk that raises is dropped, not retried. The
 ; gate already stepped the venue and kept the run.
 (define (maybe-gate-followup!)
-  (if (or (null? gate-followups) (llm-posting?) (chat-open?) trial-open)
+  (if (or gate-tick (null? gate-followups) (llm-posting?) (chat-open?) trial-open)
       #f
       (let ((job (car gate-followups)))
         (set! gate-followups (cdr gate-followups))
         (try (job) (catch (e) #f)))))
 
 (define (on-tick c msg)
+  (set! gate-tick #f)
   (note-hearts! msg)
   (absorb-skill! msg)
   (if (and (player-alive? player) (> (hash-ref msg "jump" 0) 0))

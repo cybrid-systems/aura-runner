@@ -571,10 +571,28 @@ the road cost stays ~0.015 ms/frame regardless of distance. Verified: pose
 error < 1.5e-11 over 10000 m with bend changes and gap rescues;
 `check-lanes` carries the parity + bounded-key regression.
 
-The remaining periodic server spikes (~200 ms at each level gate) are the
-inline `consider-coins!` / `queue-chase!` fairness trials in `finish-level!`
-— constant across levels, not time-growing. The boot spikes (ticks 7–71)
-are the deferred module compile (`load-slow-one`), one-time.
+The periodic server spike at each level gate was three cosmetic trials
+stacking on the crossing frame: `finish-level!` armed the tune (`tune-due`),
+queued the roster restyle (`gate-followups`), and ran `consider-coins!`
+inline, while a chase/dream slice could seal on the same tick. Measured
+crossing ticks: 307 / 265 / 255 ms (pump + chase-seal + tune + follow-up).
+
+**Fixed** (`core/main.aura`): a tick-local `gate-tick` flag, set by
+`finish-level!` inside `pump!` and cleared at the top of the next `on-tick`.
+On that one tick the cosmetic trial drainers stand down — `maybe-tune!`,
+`maybe-gate-followup!`, and every slice seal (`step-dream!` / `step-hold!` /
+`step-cards!` / `step-primer!` / `step-chase!`). `consider-coins!` moved into
+the `gate-followups` queue (with the gate-time pace captured so its verdict
+is unchanged), so the drainer runs it a tick later, one per tick. Crossing
+ticks drop to ~160 / 149 / 142 ms; the tune+follow-up stack goes 6 → 0; the
+worst tick 307 → 204 ms. Differential check (seed 42, 1500 ticks): the state
+trace is byte-identical and the decision verdict bag matches exactly
+(60 = 60, 15 types, 0 diff) — only the timing shifts, no verdict changes.
+
+The remaining spikes are the physics sub-step loop (`pump`, gameplay, not
+deferrable) and the dream proving walk (cosmetic, already sliced). The boot
+spikes (ticks 7–71) are the deferred module compile (`load-slow-one`),
+one-time.
 
 | file | what it is |
 |---|---|
