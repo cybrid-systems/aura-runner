@@ -1,0 +1,91 @@
+; Kept worlds sit on a style × band map. A clear, or the child saying
+; 换一个, may recombine two of them into one new biome. The result still
+; has to pass edsl-gate. Nothing here runs on a clock.
+(require "std/qd" all:)
+(require "std/evo-core" all:)
+(require "lib/edsl")
+
+(define archive-text (hash))
+
+(define (archive-blank)
+  (qd:map-elites
+    (hash "descriptors" (list (list "style" 0 8 8) (list "band" 0 5 5))
+          "quality" "kept"
+          "seed" 7)))
+
+(define (archive-style recipe)
+  (cond
+    ((string=? recipe "city") 1.0)
+    ((string=? recipe "space") 2.0)
+    ((string=? recipe "coast") 3.0)
+    ((string=? recipe "mix") 4.0)
+    (else 0.0)))
+
+(define (archive-keep! m form band)
+  (let ((found (if (string? form) (edsl-check form) #f)))
+    (if (or (not (hash? found)) (not (hash-ref found "ok" #f)) (not (hash? m)))
+      #f
+      (let ((id (hash-ref found "id" "")))
+        (hash-set! archive-text id form)
+        (qd:insert! m
+                    (evo:candidate form (hash "id" id "target" "biome-form" "genome" form))
+                    1.0
+                    (list (archive-style (hash-ref found "recipe" "garden"))
+                          (exact->inexact (if (number? band) band 0))))))))
+
+(define (archive-ready? m)
+  (and (hash? m) (>= (length (qd:elites m)) 2)))
+
+(define (archive-nums xs)
+  (let loop ((ys xs) (acc ""))
+    (if (or (not (pair? ys)) (null? ys))
+      acc
+      (loop (cdr ys) (string-append acc " " (edsl-2 (car ys)))))))
+
+(define (archive-props rows)
+  (let loop ((ys rows) (acc ""))
+    (if (or (not (pair? ys)) (null? ys))
+      acc
+      (let ((row (car ys)))
+        (loop (cdr ys)
+              (string-append acc " (" (hash-ref row "kind" "tree") " "
+                             (edsl-2 (hash-ref row "density" 0.2)) " "
+                             (edsl-2 (hash-ref row "scale" 1.0)) ")"))))))
+
+; Sky and particles come from the first parent. The road, ground, and
+; props come from the second, so the contrast the gate already accepted
+; stays intact. The id is new, so the sentence is not either parent.
+(define (archive-emit a b)
+  (let ((nudged (min 0.55 (max 0.05 (+ (hash-ref a "pamt" 0.18) 0.02)))))
+    (string-append
+      "(biome grown (label Grown)"
+      " (sky" (archive-nums (hash-ref a "sky")) ")"
+      " (fog" (archive-nums (hash-ref b "fog")) ")"
+      " (body " (hash-ref a "body" "sun") ")"
+      " (road" (archive-nums (hash-ref b "road")) ")"
+      " (curb" (archive-nums (hash-ref b "curb")) ")"
+      " (ground" (archive-nums (hash-ref b "ground")) ")"
+      " (surface " (hash-ref b "surface" "grass") ")"
+      " (light " (edsl-2 (hash-ref a "light" 0.8)) ")"
+      " (mood " (edsl-2 (hash-ref b "mood" 0.5)) ")"
+      " (particles " (hash-ref a "particles" "fireflies") " " (edsl-2 nudged) ")"
+      " (props" (archive-props (hash-ref b "props")) ")"
+      " (recipe mix))")))
+
+(define (archive-child m)
+  (let ((elites (if (hash? m) (qd:elites m) (list))))
+    (if (< (length elites) 2)
+      #f
+      (let ((a (hash-ref archive-text (hash-ref (car elites) "id" "") #f))
+            (b (hash-ref archive-text (hash-ref (car (cdr elites)) "id" "") #f)))
+        (if (or (not (string? a)) (not (string? b)) (string=? a b))
+          #f
+          (let ((fa (edsl-check a)) (fb (edsl-check b)))
+            (if (or (not (hash-ref fa "ok" #f)) (not (hash-ref fb "ok" #f)))
+              #f
+              (let ((child (archive-emit fa fb)))
+                (if (and (not (string=? child a))
+                         (not (string=? child b))
+                         (hash-ref (edsl-check child) "ok" #f))
+                  child
+                  #f)))))))))

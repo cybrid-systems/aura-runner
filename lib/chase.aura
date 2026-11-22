@@ -199,6 +199,54 @@
                     "params" params
                     "race" race))))))))
 
+; One knob, the same nudges chase-step uses. The caller drops a result
+; that matches the live state or a candidate already scored.
+(define (chase-knob-params state use mood pace)
+  (let ((speed (chase-get state "speed" 2.1))
+        (cool (chase-get state "cool" 0.42))
+        (at (chase-get state "at" 0.42))
+        (look (chase-get state "look" -1))
+        (commit (chase-get state "commit" 7.5))
+        (slot (modulo use 4)))
+    (cond
+      ((= slot 0)
+       (chase-params-of state (chase-nudge-speed speed pace commit mood) cool at look))
+      ((= slot 1)
+       (chase-params-of state speed (chase-nudge-cool cool mood) at look))
+      ((= slot 2)
+       (chase-params-of state speed cool (chase-nudge-at at mood) look))
+      (else
+       (chase-params-of state speed cool at (chase-nudge-look look mood))))))
+
+; Up to two shadows beside the step already chosen. They are not installed.
+(define (chase-alts state primary mood pace)
+  (let loop ((use 0) (acc (list)))
+    (if (or (>= use 4) (>= (length acc) 2))
+      (reverse acc)
+      (let ((params (chase-knob-params state use mood pace)))
+        (loop (+ use 1)
+              (if (or (chase-same? params state)
+                      (and (hash? primary) (chase-same? params primary))
+                      (let seen ((ys acc))
+                        (if (or (not (pair? ys)) (null? ys))
+                          #f
+                          (if (chase-same? params (hash-ref (car ys) "params" params))
+                            #t
+                            (seen (cdr ys))))))
+                acc
+                (cons (hash "params" params
+                            "why" (chase-knob-name use)
+                            "knob" (modulo (+ use 1) 4)
+                            "mood" mood)
+                      acc)))))))
+
+(define (chase-blob params)
+  (string-append
+    (number->string (exact->inexact (chase-get params "speed" 0.0))) " "
+    (number->string (exact->inexact (chase-get params "cool" 0.0))) " "
+    (number->string (exact->inexact (chase-get params "at" 0.0))) " "
+    (number->string (exact->inexact (chase-get params "look" -1)))))
+
 (define (chase-keep state step)
   (let ((params (hash-ref step "params" state)))
     (hash "speed" (chase-get params "speed" 2.1)

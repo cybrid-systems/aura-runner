@@ -276,6 +276,12 @@ try {
   if (/^api_key\s*=/m.test(example) || example.includes(KEY)) throw new Error("example has a key");
   if (!example.includes(".env")) throw new Error("example should point the key at .env");
 
+  for (const file of ["run.sh", "docker/entrypoint.sh"]) {
+    const play = fs.readFileSync(path.join(root, file), "utf8");
+    if (play.includes("AURA_SANDBOX:-off")) throw new Error(file + " still defaults the sandbox off");
+    if (!play.includes("--preset dev --grant network")) throw new Error(file + " lost the dev grant");
+  }
+
   console.log("config ok");
 } finally {
   fs.rmSync(dir, { recursive: true, force: true });

@@ -163,6 +163,7 @@ let musicHit = false;
 let musicShield = false;
 let evoCue = "";
 let rejectSpark = false;
+let forkUntil = 0;
 let combo = 0;
 let comboUntil = 0;
 let grade = 1;
@@ -1150,6 +1151,7 @@ function connect() {
         else audio.skip();
       }
       if (msg.arm === "rule") endPrimerWait();
+      if (msg.fork) forkUntil = performance.now() + 1100;
       if (window.__lumenOnDecision) window.__lumenOnDecision(msg);
       if (msg.kind === "KEEP" && (msg.arm === "motif" || msg.arm === "scene" || msg.arm === "pals")) audio.keep();
       if (msg.kind === "ROLLBACK") rejectSpark = true;
@@ -1649,6 +1651,7 @@ function frame(now) {
         thingChunks,
         gear: gearTier(),
         ward: wardReady ? 1 : Math.max(0, (WARD_WAIT - wardLeft) / WARD_WAIT),
+        fork: forkUntil > now ? (forkUntil - now) / 1100 : 0,
       });
     } catch (err) {
       window.__lumenErr = String(err && err.stack || err);

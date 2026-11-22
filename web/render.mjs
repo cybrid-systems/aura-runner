@@ -3683,6 +3683,17 @@ export function createRenderer(canvas, hooks) {
         }
       }
       drawGear(spot, py, leanLat, sliding, st.time || 0, reduced, st.gear || 1, st.ward == null ? 1 : st.ward, pal, reduced ? 0 : stride, !dressed);
+      // Two pale bodies beside the runner while a fork is on screen.
+      // They are not pieces, so they never collide, and they leave with the cue.
+      const fork = typeof st.fork === "number" ? st.fork : 0;
+      if (fork > 0) {
+        const pale = mix3(pal.body, [0.86, 0.91, 0.96], 0.72);
+        const ghost = mix3(pale, [0.93, 0.95, 0.98], 1 - fork);
+        for (const side of [-0.72, 0.72]) {
+          const at = spot(0.15, leanLat + side);
+          push(at.x, py + 0.48, at.z, 0.32, 0.46 * fork, 0.3, 1, ghost, 0.08, 0.16 * fork);
+        }
+      }
       casting = false;
       const trailN = reduced ? 0 : Math.min(6, 3 + Math.floor(Math.max(0, speed - 5)));
       for (let t = 1; t <= trailN; t++) {

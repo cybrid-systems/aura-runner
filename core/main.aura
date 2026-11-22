@@ -13,7 +13,7 @@
 (define (boot-note! pct label)
   (try (begin
          (make-directory "out")
-         (write-file "out/boot.txt" (string-append (number->string pct) " " label)))
+         (fence-write "out/boot.txt" (string-append (number->string pct) " " label)))
        (catch (e) #f)))
 ; Loaded with the road, before the port opens. The first chunk lays coins.
 (define coin-params #f)
@@ -31,12 +31,15 @@
           coin-params)))))
 
 (define (load-fast!)
+  (require "lib/fence")
   (boot-note! 8 "正在启动")
   (require "std/socket" all:)
   (require "std/string" all:)
   (require "std/math" all:)
   (require "std/evo" all:)
   (require "std/evo-core" all:)
+  (require "lib/recordq")
+  (require "lib/fork")
   (boot-note! 18 "正在读规则")
   (require "lib/gen")
   (require "lib/live")
@@ -326,9 +329,12 @@
 
 (define (publish-named! name value)
   (let ((how (publish-rule! name (rule-body value) (full-src))))
-    (set! publish-via how)
-    (set! rule-rev (+ rule-rev 1))
-    (set! rules-dirty #t)
+    (if (string=? how "charter")
+      (note! "ROLLBACK" (charter-why name) "rule" (charter-cue) "rule")
+      (begin
+        (set! publish-via how)
+        (set! rule-rev (+ rule-rev 1))
+        (set! rules-dirty #t)))
     how))
 
 ; A spare-time number rides along in rest. It stays inside the evidence
@@ -433,14 +439,10 @@
       #f)
     (set! pending (cons row pending))
     ; evo:record! mutates while a POST is in flight and wedges that call.
-    ; The busy flags cover the whole ask, including the moment before the
-    ; worker takes the token. The decision is still sent to the client.
-    (if (or (llm-posting?) (chat-open?))
-      #f
-      (try (evo:record! arm kind why
-                        (if margin (hash "arm" arm "margin" margin) (hash "arm" arm))
-                        "" 0)
-           (catch (e) #f)))
+    ; The row waits on the queue until the tick after the POST leaves.
+    ; The decision is still sent to the client.
+    (record-hold! (or (llm-posting?) (chat-open?)))
+    (record-note! arm kind why margin)
     row))))
 
 (define (flush-notes! c)
@@ -539,6 +541,19 @@
         (set! trial-open #f)
         trial))))
 
+; An empty seen means the scratch define never changed. That does not
+; fail a candidate the shadow run already scored. A different token does.
+(define (fork-fair seen token fair)
+  (if (and (string? seen) (> (string-length seen) 0) (not (string=? seen token)))
+    0.0
+    (if fair 1.0 0.0)))
+
+(define (note-fork! row compared?)
+  (if (and compared? (hash? row))
+    (hash-put! row "fork" #t)
+    #f)
+  row)
+
 (define (make-policy)
   (let ((p (evo:policy "ucb" (quote ()))))
     (if (not (hash-put! p "arms" (list (arm-row "band-0") (arm-row "band-1"))))
@@ -628,6 +643,14 @@
 (define edsl-res #f)
 (define mood-now "day")
 (define biome-pin #f)
+; Kept places, style by band. A clear may recombine two of them once the
+; map has a pair. archive-wait skips that many clears after a keep.
+; archive-offers caps how many children a run may try.
+(define world-archive #f)
+(define archive-on #f)
+(define archive-wait 0)
+(define archive-offers 0)
+(define tune-pick-on #f)
 (define banner-id 0)
 (define banner-kind "")
 (define banner-text "")
@@ -711,11 +734,14 @@
 (define (edsl-remember! form id)
   (if (edsl-has? edsl-pool id)
     #f
-    (set! edsl-pool
-          (let ((next (append edsl-pool (list form))))
-            (if (> (edsl-len next) 12)
-              (edsl-drop-evolved next)
-              next)))))
+    (begin
+      (set! edsl-pool
+            (let ((next (append edsl-pool (list form))))
+              (if (> (edsl-len next) 12)
+                (edsl-drop-evolved next)
+                next)))
+      (archive-remember! form)
+      #t)))
 
 ; Install a spec that already passed the gate. Does not move the runner,
 ; the combo, or the camera.
@@ -737,6 +763,109 @@
         (set! edsl-hint "")
         (set! rules-dirty #t)
         #t))))
+
+; The same install, without pinning the venue. The next clear still
+; steps garden, city, space, coast. A recombined world uses this.
+(define (edsl-enter-look text)
+  (load-slow!)
+  (let ((found (edsl-check text)))
+    (if (not (and (hash? found) (hash-ref found "ok" #f)))
+      #f
+      (begin
+        (set! biome-now (hash-ref found "id"))
+        (set! edsl-form (hash-ref found "form"))
+        (set! edsl-spec (if (string=? (hash-ref found "recipe" "") "mix")
+                          (edsl-pub found)
+                          #f))
+        (set! edsl-enter? #f)
+        (set! edsl-ready #f)
+        (set! edsl-theme-now "")
+        (set! edsl-hint "")
+        (set! rules-dirty #t)
+        #t))))
+
+(define (archive-load!)
+  (if archive-on
+    world-archive
+    (begin
+      (require "lib/archive")
+      (set! world-archive (archive-blank))
+      (set! archive-on #t)
+      world-archive)))
+
+(define (archive-remember! form)
+  (if (not (and (string? form) (> (string-length form) 0)))
+    #f
+    (begin
+      (load-slow!)
+      (archive-load!)
+      (archive-keep! world-archive form band))))
+
+(define (venue-form name)
+  (let ((preset (if (string? name) (edsl-preset name) #f)))
+    (if (string? preset)
+      preset
+      (if (and (string? edsl-form) (> (string-length edsl-form) 0))
+        edsl-form
+        #f))))
+
+; speak? is the child asking 换一个. A quiet clear stays silent when
+; there is nothing to offer yet, or the cap is already spent.
+(define (archive-offer! speak?)
+  (load-slow!)
+  (archive-load!)
+  (if (or biome-pin
+          (>= archive-offers 4)
+          (not (archive-ready? world-archive)))
+    (if speak?
+      (begin
+        (note! "ROLLBACK" "cap" "biome" "还是原来的世界" "world")
+        #f)
+      #f)
+    (let ((child (archive-child world-archive)))
+      (if (not (string? child))
+        (if speak?
+          (begin
+            (note! "ROLLBACK" "shape" "biome" "还是原来的世界" "world")
+            #f)
+          #f)
+        (begin
+          (set! archive-offers (+ archive-offers 1))
+          (if (and llm-slot (not (channel:try-recv llm-slot)))
+            (begin
+              (note! "ROLLBACK" "busy" "biome" "还是原来的世界" "world")
+              #f)
+            (begin
+              (set! slot-mine #t)
+              (set! trial-open #t)
+              (let ((gate (try (edsl-gate child) (catch (e) #f))))
+                (set! trial-open #f)
+                (if (and (hash? gate) (string=? (hash-ref gate "verdict" "") "KEEP"))
+                  (begin
+                    (edsl-remember! child (hash-ref gate "id" "grown"))
+                    (edsl-enter-look child)
+                    (set! archive-wait 2)
+                    (note-fork! (note! "KEEP" "fair" "biome" "这个世界长大了一点" "world") #t))
+                  (note! "ROLLBACK"
+                         (if (hash? gate) (hash-ref gate "why" "trial") "trial")
+                         "biome" "还是原来的世界" "world"))
+                (release-slot!)
+                (and (hash? gate) (string=? (hash-ref gate "verdict" "") "KEEP")))))))))
+
+; Remember the venue this clear stepped to. Offer a child only when
+; two kept worlds are already on the map and the cooldown is over.
+(define (archive-visit!)
+  (load-slow!)
+  (archive-load!)
+  (let ((form (venue-form biome-now)))
+    (if (string? form)
+      (archive-keep! world-archive form band)
+      #f))
+  (if (> archive-wait 0)
+    (set! archive-wait (- archive-wait 1))
+    (if biome-pin
+      #f
+      (archive-offer! #f))))
 
 ; evo:trial on the tick, holding the chat token the way a garden phrase does.
 (define (consider-edsl! text say enter? banner?)
@@ -866,8 +995,8 @@
     (set! goal-lock #f)
     ; A spoken world stays through the gate. An unpinned clear steps to
     ; the venue for this level (garden, city, space, coast). The scene
-    ; below follows how the run went. A recombined world is not installed
-    ; on its own, and a dream is not started on a clock.
+    ; below follows how the run went. A recombined world is offered on a
+    ; later tick, from two kept places, and a dream is not started on a clock.
     (if biome-pin
       (begin
         (set! edsl-ready #f)
@@ -919,13 +1048,17 @@
     ;; The coin spread step is a fairness trial when it moves. Queue it
     ;; with the roster restyle so neither lands on the crossing frame; the
     ;; drainer runs one per tick after the gate. Same KEEP/ROLLBACK verdict,
-    ;; a tick or two later. queue-chase! only arms the sliced autopilot (no
-    ;; trial here), so it stays inline.
-    (let ((gate-pace speed-now))
+    ;; a tick or two later. An unpinned clear also queues one archive visit.
+    ;; queue-chase! only arms the sliced autopilot (no trial here), so it
+    ;; stays inline.
+    (let ((gate-pace speed-now)
+          (jobs (list (lambda () (consider-coins! played bumps got-coins got-swaps near gate-pace))
+                      (lambda () (roster-evolve! "Level clear")))))
       (set! gate-followups
             (append gate-followups
-                    (list (lambda () (consider-coins! played bumps got-coins got-swaps near gate-pace))
-                          (lambda () (roster-evolve! "Level clear"))))))
+                    (if biome-pin
+                      jobs
+                      (append jobs (list (lambda () (archive-visit!))))))))
     (queue-chase! played bumps (chase-sum chase-recent) speed-now race)
     (set! tune-due #t)))
 
@@ -2108,13 +2241,35 @@
                     (set! card-phase 1)
                     #t)))))))))))
 
+(define (publish-ok? how)
+  (or (string=? how "rebind") (string=? how "set-code")))
+
 (define (publish-trio! g air mag)
   (let ((a (publish-named! "rule-double-jump" air))
         (m (publish-named! "rule-magnet" mag))
         (ghow (publish-named! "rule-gravity" g)))
-    (and (not (string=? a "fail"))
-         (not (string=? m "fail"))
-         (not (string=? ghow "fail")))))
+    (and (publish-ok? a) (publish-ok? m) (publish-ok? ghow))))
+
+(define (cards-saved)
+  (hash "g" g-now "air" air-now "mag" magnet-now
+        "lock" g-lock "held" g-held "ids" deck-ids))
+
+(define (cards-put! saved)
+  (set! g-now (hash-ref saved "g" g-now))
+  (set! air-now (hash-ref saved "air" air-now))
+  (set! magnet-now (hash-ref saved "mag" magnet-now))
+  (set! g-lock (equal? (hash-ref saved "lock" #f) #t))
+  (set! g-held (equal? (hash-ref saved "held" #f) #t))
+  (set! deck-ids (let ((ids (hash-ref saved "ids" (list))))
+                   (if (pair? ids) ids (list)))))
+
+(define (cards-near? a b)
+  (and (number? a) (number? b) (< (world-abs (- a b)) 0.02)))
+
+(define (cards-rules-back? saved)
+  (and (cards-near? (try (rule-gravity) (catch (e) #f)) (hash-ref saved "g" #f))
+       (cards-near? (try (rule-double-jump) (catch (e) #f)) (hash-ref saved "air" #f))
+       (cards-near? (try (rule-magnet) (catch (e) #f)) (hash-ref saved "mag" #f))))
 
 (define (seal-cards! cleared?)
   (let* ((spec card-spec)
@@ -2148,15 +2303,11 @@
           (if (or (not fair)
                   (not trial) (not (evo:trial-ok? trial)) (not (evo:feasible? trial)))
             (note! "ROLLBACK" "reachable" "cards" "这样合在一起过不去" "cards")
-            (let ((prev-g g-now)
-                  (prev-air air-now)
-                  (prev-mag magnet-now)
-                  (prev-lock g-lock)
-                  (prev-held g-held)
-                  (prev-ids deck-ids)
+            (let ((saved (cards-saved))
                   (new-g (hash-ref spec "g"))
                   (new-air (hash-ref spec "air"))
-                  (new-mag (hash-ref spec "magnet")))
+                  (new-mag (hash-ref spec "magnet"))
+                  (snap (fork-snap "cards")))
               (set! g-now new-g)
               (set! air-now new-air)
               (set! magnet-now new-mag)
@@ -2171,13 +2322,13 @@
                   (set! published-magnet magnet-now)
                   (note! "KEEP" "fair" "cards" "这几张可以一起用" "cards"))
                 (begin
-                  (set! g-now prev-g)
-                  (set! air-now prev-air)
-                  (set! magnet-now prev-mag)
-                  (set! g-lock prev-lock)
-                  (set! g-held prev-held)
-                  (set! deck-ids prev-ids)
-                  (publish-trio! prev-g prev-air prev-mag)
+                  ; The snapshot puts the rule defines back. Deck fields
+                  ; are not part of that AST, so they come from the hash.
+                  ; Republish only when the restore did not actually return.
+                  (if (not (and snap (fork-restore snap) (cards-rules-back? saved)))
+                    (publish-trio! (hash-ref saved "g") (hash-ref saved "air") (hash-ref saved "mag"))
+                    #f)
+                  (cards-put! saved)
                   (note! "ROLLBACK" "commit" "cards" "这样合在一起过不去" "cards")))))
           (release-slot!)
           #t)))))
@@ -2353,9 +2504,31 @@
       #f)
     row)))
 
-; Coin lanes, pattern mix, density, and arc probability. One knob, then
-; the same evo:trial the other arms use. A collapsed lane weight, or a
-; coin sitting in an obstacle, rolls back.
+; Coin lanes, pattern mix, density, and arc probability. Up to three
+; knobs are scored beside the tick. Only the better one is installed,
+; and only after its snapshot is put back. A collapsed lane weight, or
+; a coin sitting in an obstacle, rolls back.
+(define (coin-score-rows cands pace engage)
+  (let loop ((xs cands) (acc (list)))
+    (if (or (not (pair? xs)) (null? xs))
+      (reverse acc)
+      (let* ((row (car xs))
+             (params (hash-ref row "params" coin-params))
+             (road (coin-sample seed params pace))
+             (audit (coin-consider coin-params params road pace engage))
+             (why (hash-ref audit "why" "trial"))
+             (fair (string=? (hash-ref audit "kind" "") "KEEP"))
+             (fit (hash-ref audit "fit" 0.0)))
+        (loop (cdr xs)
+              (cons (hash "score" (if fair (+ 1.0 (if (number? fit) fit 0.0)) 0.0)
+                          "fair" fair
+                          "params" params
+                          "why" why
+                          "label" (hash-ref row "why" "lanes")
+                          "knob" (hash-ref row "knob" 0)
+                          "engage" (hash-ref audit "engage" 0.0))
+                    acc))))))
+
 (define (consider-coins! played bumps coins swaps near . rest)
   (load-coins!)
   ; The gate queues this a tick later; capture the pace it crossed at so
@@ -2365,39 +2538,50 @@
   (let ((step (coin-step coin-params played bumps coins swaps near pace-now)))
     (if (not (hash-ref step "moved" #f))
       #f
-      (let* ((params (hash-ref step "params" coin-params))
-             (pace (if (and (number? pace-now) (> pace-now 0.1)) pace-now 8.0))
-             (road (coin-sample seed params pace))
+      (let* ((pace (if (and (number? pace-now) (> pace-now 0.1)) pace-now 8.0))
              (engage (coin-engage coins swaps near))
-             (audit (coin-consider coin-params params road pace engage))
-             (fair (string=? (hash-ref audit "kind" "") "KEEP"))
-             (why (hash-ref audit "why" "trial"))
-             (cand (evo:candidate (hash-ref step "why" "lanes")
+             (mood (hash-ref step "mood" "hold"))
+             (knob (coin-get coin-params "knob" 0))
+             (cands (coin-forks coin-params mood knob))
+             (rows (coin-score-rows
+                     (if (pair? cands)
+                       cands
+                       (list (hash "params" (hash-ref step "params" coin-params)
+                                   "why" (hash-ref step "why" "lanes")
+                                   "knob" (hash-ref step "knob" 0))))
+                     pace engage))
+             (best (fork-choose rows))
+             (winner (if (hash? best) best (car rows)))
+             (fair (hash-ref winner "fair" #f))
+             (why (hash-ref winner "why" "trial"))
+             (params (hash-ref winner "params" coin-params))
+             (token (coin-blob params))
+             (cand (evo:candidate (hash-ref winner "label" "lanes")
                                   (hash "id" (string-append "c" (int-str level-n))
                                         "target" "rule-coins")))
-             (trial (open-trial cand
-                                (hash "timeout-ms" 1500
-                                      "apply" (lambda (c) #t)
-                                      "evaluate"
-                                      (lambda (c)
-                                        (hash "status" "ok"
-                                              "objectives"
-                                              (hash "fair" (if fair 1.0 0.0)
-                                                    "engage" (hash-ref audit "engage" 0.0))
-                                              "constraints"
-                                              (hash "budget" 0.0
-                                                    "geometry" (if (string=? why "overlap") 1.0 0.0)
-                                                    "reachable" (if (or (string=? why "reachable")
-                                                                        (string=? why "engage"))
-                                                                  1.0 0.0)
-                                                    "safe" (if (or (string=? why "entropy")
-                                                                   (string=? why "floor")
-                                                                   (string=? why "bounds")
-                                                                   (string=? why "step"))
-                                                             1.0 0.0))
-                                              "behavior"
-                                              (hash "band" (exact->inexact band)
-                                                    "engage" (hash-ref audit "engage" 0.0))))))))
+             (trial (fork-wrap
+                      (lambda ()
+                        (open-trial cand
+                          (fork-spec token
+                            (lambda (seen)
+                              (hash "status" "ok"
+                                    "objectives"
+                                    (hash "fair" (fork-fair seen token fair)
+                                          "engage" (hash-ref winner "engage" 0.0))
+                                    "constraints"
+                                    (hash "budget" 0.0
+                                          "geometry" (if (string=? why "overlap") 1.0 0.0)
+                                          "reachable" (if (or (string=? why "reachable")
+                                                              (string=? why "engage"))
+                                                        1.0 0.0)
+                                          "safe" (if (or (string=? why "entropy")
+                                                         (string=? why "floor")
+                                                         (string=? why "bounds")
+                                                         (string=? why "step"))
+                                                   1.0 0.0))
+                                    "behavior"
+                                    (hash "band" (exact->inexact band)
+                                          "engage" (hash-ref winner "engage" 0.0))))))))))
         (if (trial-busy? trial)
           #f
           (begin
@@ -2408,11 +2592,18 @@
               (note! "ROLLBACK" (if (string=? why "") "trial" why) "spread"
                      "Coins stay spread" "lanes")
               (begin
-                (set! coin-params (coin-keep coin-params step))
-                (note! "KEEP" (hash-ref step "why" "fair") "spread"
-                       "Coins found a new path" "lanes")))
+                ; The snapshot is already back. Losers never wrote this.
+                (set! coin-params
+                      (coin-keep coin-params
+                                 (hash "moved" #t
+                                       "why" (hash-ref winner "label" "fair")
+                                       "knob" (hash-ref winner "knob" 0)
+                                       "params" params)))
+                (note-fork! (note! "KEEP" (hash-ref winner "label" "fair") "spread"
+                                  "Coins found a new path" "lanes")
+                            (> (length rows) 1))))
             (release-slot!)
-            #t)))))))
+            #t))))))))
 
 ; A step that the numbers already forbid does not take a slice. A legal
 ; step walks the proving road twelve frames at a time, under the rules
@@ -2438,6 +2629,32 @@
                 (set! chase-i 0)
                 (set! chase-phase 1))))))))))
 
+; One slice, not the whole road. Alive is the shadow score. A full
+; clear of the primary walk still outranks it.
+(define (chase-slice-alive? params rules)
+  (let ((pieces (chase-pieces params))
+        (body (make-player 0.4)))
+    (let ((r (try (autopilot-slice pieces rules body pieces 0 12) (catch (e) #f))))
+      (and (pair? r) (player-alive? (lref r 2))))))
+
+(define (chase-alt-rows state primary mood pace rules)
+  (let loop ((xs (chase-alts state primary mood pace)) (acc (list)))
+    (if (or (not (pair? xs)) (null? xs))
+      (reverse acc)
+      (let* ((row (car xs))
+             (params (hash-ref row "params" primary))
+             (static (chase-static-why state params pace))
+             (alive (and (string=? static "") (chase-slice-alive? params rules))))
+        (loop (cdr xs)
+              (cons (hash "score" (if alive 1.0 0.0)
+                          "fair" (if alive #t #f)
+                          "params" params
+                          "why" (if alive "" (if (string=? static "") "reachable" static))
+                          "label" (hash-ref row "why" "pace")
+                          "knob" (hash-ref row "knob" 0)
+                          "mood" (hash-ref row "mood" mood))
+                    acc))))))
+
 (define (seal-chase! cleared?)
   (let* ((plan chase-plan)
          (params (if (hash? plan) (hash-ref plan "params" chase) chase))
@@ -2448,36 +2665,67 @@
          (pace-now (pace-of rules))
          (static (chase-static-why chase params pace-now))
          (why (if cleared? (if (string=? static "") "" static) "reachable"))
-         (fair (string=? why "")))
-    (let* ((label (if (string? step-why) step-why "pace"))
-           (cand (evo:candidate label (hash "id" (string-append "r" (int-str level-n))
-                                             "target" "rule-chase")))
-           (trial (open-trial cand
-                              (hash "timeout-ms" 1500
-                                    "apply" (lambda (c) #t)
-                                    "evaluate"
-                                    (lambda (c)
-                                      (hash "status" "ok"
-                                            "objectives" (hash "fair" (if fair 1.0 0.0))
-                                            "constraints"
-                                            (hash "budget" 0.0
-                                                  "geometry" 0.0
-                                                  "reachable" (if fair 0.0 1.0)
-                                                  "safe" 0.0)
-                                            "behavior"
-                                            (hash "band" (exact->inexact band)
-                                                  "speed" (exact->inexact (chase-get params "speed" 2.1)))))))))
-      (if (trial-busy? trial)
-        #f
-        (begin
-          (if (or (not fair)
-                  (not trial) (not (evo:trial-ok? trial)) (not (evo:feasible? trial)))
-            (chase-note! "ROLLBACK" (if (string=? why "") "trial" why) mood race)
-            (begin
-              (set! chase (chase-keep chase plan))
-              (chase-note! "KEEP" step-why mood race)))
-          (release-slot!)
-          #t)))))
+         (fair (string=? why ""))
+         (primary (hash "score" (if fair 2.0 0.0)
+                        "fair" fair
+                        "params" params
+                        "why" why
+                        "label" (if (string? step-why) step-why "pace")
+                        "knob" (if (hash? plan) (hash-ref plan "knob" 0) 0)
+                        "mood" mood))
+         (rows (cons primary (chase-alt-rows chase params mood pace-now rules)))
+         (best (fork-choose rows))
+         (winner (if (hash? best) best primary))
+         (win-fair (hash-ref winner "fair" #f))
+         (win-params (hash-ref winner "params" params))
+         (token (chase-blob win-params))
+         (cand (evo:candidate (hash-ref winner "label" "pace")
+                              (hash "id" (string-append "r" (int-str level-n))
+                                    "target" "rule-chase")))
+         (trial (fork-wrap
+                  (lambda ()
+                    (open-trial cand
+                      (fork-spec token
+                        (lambda (seen)
+                          (hash "status" "ok"
+                                "objectives" (hash "fair" (fork-fair seen token win-fair))
+                                "constraints"
+                                (hash "budget" 0.0
+                                      "geometry" 0.0
+                                      "reachable" (if win-fair 0.0 1.0)
+                                      "safe" 0.0)
+                                "behavior"
+                                (hash "band" (exact->inexact band)
+                                      "speed" (exact->inexact (chase-get win-params "speed" 2.1)))))))))))
+    (if (trial-busy? trial)
+      #f
+      (begin
+        (if (or (not win-fair)
+                (not trial)
+                (not (evo:trial-ok? trial))
+                (not (evo:feasible? trial)))
+          (chase-note! "ROLLBACK"
+                       (let ((w (hash-ref winner "why" "trial")))
+                         (if (string=? w "") "trial" w))
+                       (hash-ref winner "mood" mood)
+                       race)
+          (begin
+            ; Put the winner on only after the snapshot is back. A shadow
+            ; that merely stayed alive cannot beat a walk that cleared.
+            (set! chase
+                  (chase-keep chase
+                              (hash "moved" #t
+                                    "why" (hash-ref winner "label" step-why)
+                                    "knob" (hash-ref winner "knob" 0)
+                                    "params" win-params
+                                    "race" race)))
+            (note-fork! (chase-note! "KEEP"
+                                     (hash-ref winner "label" step-why)
+                                     (hash-ref winner "mood" mood)
+                                     race)
+                        (> (length rows) 1))))
+        (release-slot!)
+        #t))))
 
 (define (step-chase!)
   (let ((rules (if (hash? chase-rules) chase-rules (rules-hash))))
@@ -3804,6 +4052,14 @@
   (if (compose-wanted? text) (thing-show! text) #f)
   (thing-start! text))
 
+; 换一个城市 is a venue steer and is handled before this. A bare
+; 换一个 asks the kept worlds for one child.
+(define (grow-ask? text)
+  (and (string? text)
+       (or (string=? text "换一个")
+           (string=? text "再换一个")
+           (string=? (string-downcase text) "another world"))))
+
 (define (on-wish c msg)
   (set! wish-locale (wish-lang (hash-ref msg "lang" "")))
   (if (wish-has-audio? msg)
@@ -3826,7 +4082,11 @@
                  (let ((theme (edsl-place text biome-now)))
                    (if theme
                      (edsl-hear! theme)
-                     (offer-wish! text)))))))))))
+                     (if (grow-ask? text)
+                       (if (or (llm-posting?) (chat-open?) trial-open)
+                         (note! "ROLLBACK" "busy" "biome" "还是原来的世界" "world")
+                         (archive-offer! #t))
+                       (offer-wish! text))))))))))))
   (flush-notes! c)
   (if rules-dirty
     (begin (send c (rules-msg)) (set! rules-dirty #f))
@@ -4384,16 +4644,32 @@
           pending))
         #t))))
 
+(define (load-tune-pick!)
+  (if tune-pick-on
+    #t
+    (begin
+      (require "lib/tune-pick")
+      (set! tune-pick-on #t)
+      #t)))
+
+; Three children, one gate. The shortlist is this tune list. A spoken
+; biome wish still waits on llm:chat; that delay is not this path.
 (define (tune-commit!)
   (set! tune-due #f)
-  (let ((born (music-evolve tune-now (+ (floor seed) level-n))))
-    (let ((gate (music-gate born)))
-      (if (string=? (hash-ref gate "verdict" "") "KEEP")
-        (begin
-          (set! tune-prev tune-now)
-          (set! tune-now born)
-          (tune-send! "KEEP" "fair" born))
-        (tune-send! "ROLLBACK" (hash-ref gate "why" "bounds") tune-now)))))
+  (load-tune-pick!)
+  (let* ((base (+ (floor seed) level-n))
+         (pace (if (and (number? speed-now) (> speed-now 0.1)) speed-now 8.0))
+         (forms (list (music-evolve tune-now base)
+                      (music-evolve tune-now (+ base 3))
+                      (music-evolve tune-now (+ base 7))))
+         (born (tune-choose forms pace))
+         (gate (music-gate born)))
+    (if (string=? (hash-ref gate "verdict" "") "KEEP")
+      (begin
+        (set! tune-prev tune-now)
+        (set! tune-now born)
+        (tune-send! "KEEP" "fair" born))
+      (tune-send! "ROLLBACK" (hash-ref gate "why" "bounds") tune-now))))
 
 (define (maybe-tune!)
   (if (and tune-due (not gate-tick) (not (llm-posting?)) (not trial-open))
@@ -4414,6 +4690,8 @@
 
 (define (on-tick c msg)
   (set! gate-tick #f)
+  (record-hold! (or (llm-posting?) (chat-open?)))
+  (record-flush!)
   (note-hearts! msg)
   (absorb-skill! msg)
   (if (and (player-alive? player) (> (hash-ref msg "jump" 0) 0))
@@ -4909,6 +5187,7 @@
 (define (main)
   (set-code (read-file "core/hot.aura"))
   (eval-current)
+  (charter-boot!)
   (boot-pals!)
   (set! policy (make-policy))
   (publish-all!)

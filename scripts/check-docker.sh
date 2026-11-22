@@ -6,6 +6,15 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+if grep -q 'AURA_SANDBOX:-off' docker/entrypoint.sh run.sh; then
+  echo "play still defaults the sandbox off" >&2
+  exit 1
+fi
+if ! grep -q -- '--preset dev --grant network' docker/entrypoint.sh; then
+  echo "entrypoint lost the dev grant" >&2
+  exit 1
+fi
+
 IMAGE="${LUMEN_IMAGE:-lumen-run:local}"
 if [[ -z "${LUMEN_IMAGE:-}" ]]; then
   sha_amd64="$(curl -fsSL --max-time 20 "https://github.com/cybrid-systems/aura/releases/download/nightly/aura-nightly-linux-x86_64.tar.gz.sha256" | awk 'NF { print $1; exit }')"

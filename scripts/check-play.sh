@@ -32,6 +32,13 @@ fail() {
   exit 1
 }
 
+if grep -q 'AURA_SANDBOX:-off' docker/entrypoint.sh run.sh; then
+  fail "play still defaults the sandbox off"
+fi
+if ! grep -q -- '--preset dev --grant network' docker/entrypoint.sh; then
+  fail "entrypoint lost the dev grant"
+fi
+
 hide="$(mktemp -d)"
 mkdir -p "$hide/bin"
 ln -s "$(command -v dirname)" "$hide/bin/dirname"

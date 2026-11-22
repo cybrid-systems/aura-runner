@@ -4,7 +4,14 @@
 set -eu
 cd /opt/lumen-run
 export AURA_WORK=/opt/lumen-run
-export AURA_SANDBOX="${AURA_SANDBOX:-off}"
+# Play leaves the sandbox on. Preset dev grants mutate, read, and write.
+# AURA_SANDBOX=off is a debug escape, not normal play. This nightly does
+# not path-scope write:out/; the game only writes under out/.
+if [ -n "${AURA_SANDBOX+x}" ]; then
+  export AURA_SANDBOX
+else
+  unset AURA_SANDBOX || true
+fi
 export AURA_RUNNER_BIND="${AURA_RUNNER_BIND:-0.0.0.0}"
 export AURA_RUNNER_WEB="${AURA_RUNNER_WEB:-8080}"
 export AURA_RUNNER_PORT="${AURA_RUNNER_PORT:-8765}"

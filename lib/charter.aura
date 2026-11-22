@@ -1,0 +1,51 @@
+; The constitution for the run. std/contract refuses a change to the
+; motion and collision defines. Hot rule numbers stay writable.
+; This nightly's worldline snapshot is (mutate :snapshot) / :restore;
+; mw:snapshot answers -1 until a workspace exists, so the fork module
+; uses the snapshot that actually restores.
+(require "std/contract" all:)
+(require "std/string" all:)
+
+(define charter-names
+  (list "step" "collide" "finish-step" "road-at" "road-height" "road-grade"
+        "grade-for-pace" "pace-on-grade" "launch-jump"))
+
+(define (charter-set)
+  (let loop ((ns charter-names) (s (contract:set)))
+    (if (or (not (pair? ns)) (null? ns))
+      s
+      (loop (cdr ns) (contract:protect s (car ns))))))
+
+(define charter (charter-set))
+
+(define (charter-boot!)
+  (try (contract:activate! charter) (catch (e) #f))
+  charter)
+
+(define (charter-blocked? name op)
+  (not (contract:report-ok?
+         (contract:check-mutation charter
+                                  (if (string? op) op "mutate:rebind")
+                                  (if (string? name) name "")))))
+
+(define (charter-why name)
+  (cond
+    ((or (string=? name "collide") (string=? name "launch-jump")) "不能改碰撞")
+    ((string=? name "step") "不能改步子")
+    (else "不能改这条路")))
+
+(define (charter-cue) "被宪法拒绝")
+
+(define (charter-mentions? text name)
+  (and (string? text)
+       (or (string-contains? text (string-append "(define (" name " "))
+           (string-contains? text (string-append "(define (" name ")"))
+           (string-contains? text (string-append "(define " name " ")))))
+
+(define (charter-hit? text)
+  (let loop ((ns charter-names))
+    (if (or (not (pair? ns)) (null? ns))
+      #f
+      (if (charter-mentions? text (car ns))
+        #t
+        (loop (cdr ns))))))

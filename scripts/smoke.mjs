@@ -75,7 +75,7 @@ const log = path.join(root, "out", "smoke-aura.log");
 fs.mkdirSync(path.dirname(log), { recursive: true });
 const child = spawn(aura, ["--quiet", "--preset", "dev", "--grant", "network", "core/main.aura"], {
   cwd: root,
-  env: { ...process.env, AURA_SANDBOX: process.env.AURA_SANDBOX || "off", AURA_RUNNER_PORT: String(port), AURA_EVO_LOG: path.join(root, "out", "evo.jsonl") },
+  env: { ...process.env, AURA_RUNNER_PORT: String(port), AURA_EVO_LOG: path.join(root, "out", "evo.jsonl") },
   stdio: ["ignore", "pipe", "pipe"],
 });
 let logText = "";

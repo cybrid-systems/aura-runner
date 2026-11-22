@@ -10,8 +10,11 @@ source "$ROOT/scripts/aura-path.sh"
 
 cache="$(mktemp -d)"
 export AURA_CACHE_DIR="$cache"
-export AURA_SANDBOX=off
+# Play-like path. Leave the sandbox on unless the caller already set it.
 export AURA_WORK="$ROOT"
+if [ -z "${AURA_SANDBOX+x}" ]; then
+  unset AURA_SANDBOX || true
+fi
 unset LLM_API_KEY LLM_BASE_URL LLM_MODEL LUMEN_LLM LUMEN_MINIMAX_KEY LUMEN_DEEPSEEK_KEY || true
 
 port_free() {

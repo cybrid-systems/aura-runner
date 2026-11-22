@@ -1,0 +1,100 @@
+; Two aims for a synthesized phrase: it stays pleasant, and its tempo
+; sits near the pace the run is using. A cheap surrogate drops the
+; obvious misses. Only the one that remains is handed to music-gate.
+; A spoken wish still waits on llm:chat; this path is the tune list.
+(require "std/pareto" all:)
+(require "std/surrogate" all:)
+(require "lib/music")
+
+(define (tune-abs x)
+  (if (< x 0.0) (- 0.0 x) x))
+
+(define (tune-target pace)
+  (if (and (number? pace) (> pace 1.0))
+    (min 120.0 (max 84.0 (+ 76.0 (* (- pace 6.0) 4.0))))
+    96.0))
+
+(define (tune-row form pace)
+  (let ((found (if (string? form) (music-check form) (music-refuse "shape"))))
+    (let ((ok (and (hash? found) (hash-ref found "ok" #f)))
+          (tempo (if (hash? found) (hash-ref found "tempo" 96.0) 96.0))
+          (layers (if (hash? found) (hash-ref found "layers" 2.0) 2.0))
+          (gain (if (hash? found) (hash-ref found "gain" 0.12) 0.12)))
+      (hash "form" (if (string? form) form "")
+            "pleasure" (if ok 1.0 0.0)
+            "fit" (max 0.0 (- 1.0 (/ (tune-abs (- tempo (tune-target pace))) 50.0)))
+            "feat" (list (exact->inexact tempo) (exact->inexact layers) (exact->inexact gain))))))
+
+(define (tune-beats? a b)
+  (pareto:dominates?
+    (list (hash-ref a "pleasure" 0.0) (hash-ref a "fit" 0.0))
+    (list (hash-ref b "pleasure" 0.0) (hash-ref b "fit" 0.0))
+    (list "max" "max")))
+
+(define (tune-front rows)
+  (let loop ((xs rows) (acc (list)))
+    (if (or (not (pair? xs)) (null? xs))
+      (reverse acc)
+      (let ((row (car xs)))
+        (let ((lost (let scan ((ys rows))
+                      (if (or (not (pair? ys)) (null? ys))
+                        #f
+                        (if (tune-beats? (car ys) row)
+                          #t
+                          (scan (cdr ys)))))))
+          (loop (cdr xs) (if lost acc (cons row acc))))))))
+
+(define (tune-nth xs i)
+  (let loop ((ys xs) (k 0))
+    (if (or (not (pair? ys)) (null? ys))
+      #f
+      (if (= k i) (car ys) (loop (cdr ys) (+ k 1))))))
+
+(define (tune-best rows)
+  (let loop ((xs rows) (best #f) (score -1.0))
+    (if (or (not (pair? xs)) (null? xs))
+      best
+      (let ((n (+ (hash-ref (car xs) "pleasure" 0.0) (hash-ref (car xs) "fit" 0.0))))
+        (if (> n score)
+          (loop (cdr xs) (car xs) n)
+          (loop (cdr xs) best score))))))
+
+; Fit a kNN on the phrases already checked, then keep a single
+; candidate. A point the front already dominated cannot come back.
+(define (tune-prescreen rows)
+  (let ((front (tune-front rows)))
+    (if (or (not (pair? front)) (null? (cdr front)))
+      (hash "keep" front "dropped" (- (length rows) (length front)))
+      (let ((model (surr:fit! (surr:knn (hash "k" 1 "sense" "max"))
+                              (map (lambda (r) (hash-ref r "feat" (list 96.0 2.0 0.12))) rows)
+                              (map (lambda (r) (hash-ref r "pleasure" 0.0)) rows))))
+        (let ((screen (try (surr:prescreen model
+                                           (map (lambda (r) (hash-ref r "feat" (list 96.0 2.0 0.12))) front)
+                                           1
+                                           (hash "acq" "ei" "best" 1.0))
+                           (catch (e) #f))))
+          (let ((sel (if (hash? screen) (hash-ref screen "selected" (list)) (list))))
+            (if (and (pair? sel) (number? (hash-ref (car sel) "index" #f)))
+              (let ((i (floor (+ (hash-ref (car sel) "index" 0) 0.001))))
+                (let ((picked (let ((row (tune-nth front i)))
+                                (if row (list row) (list (tune-best front))))))
+                  (hash "keep" picked
+                        "dropped" (- (length rows) (length picked)))))
+              (hash "keep" (list (tune-best front))
+                    "dropped" (- (length rows) 1)))))))))
+
+(define (tune-screen forms pace)
+  (let ((rows (map (lambda (f) (tune-row f pace)) forms)))
+    (let ((screen (tune-prescreen rows)))
+      (let ((keep (hash-ref screen "keep" (list))))
+        (hash "form" (if (pair? keep) (hash-ref (car keep) "form" "") "")
+              "trials" (if (pair? keep) 1 0)
+              "dropped" (hash-ref screen "dropped" 0)
+              "candidates" (length forms))))))
+
+(define (tune-choose forms pace)
+  (let ((screen (tune-screen forms pace)))
+    (let ((form (hash-ref screen "form" "")))
+      (if (and (string? form) (> (string-length form) 0))
+        form
+        (if (and (pair? forms) (string? (car forms))) (car forms) "")))))

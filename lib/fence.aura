@@ -1,0 +1,15 @@
+; Play may write the boot line and the evolution log, both under out/.
+; This nightly's preset does not path-scope write (ci is documented as
+; "write not yet path-scoped"), so the game itself refuses any other path.
+(require "std/string" all:)
+
+(define (fence-ok? path)
+  (and (string? path)
+       (or (string=? path "out")
+           (string-prefix? path "out/")
+           (string-prefix? path "./out/"))))
+
+(define (fence-write path text)
+  (if (fence-ok? path)
+    (try (write-file path text) (catch (e) #f))
+    #f))

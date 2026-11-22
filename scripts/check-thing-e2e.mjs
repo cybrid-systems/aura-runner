@@ -64,7 +64,7 @@ function startMock() {
 }
 
 function startAura(extraEnv) {
-  const env = { ...process.env, AURA_RUNNER_PORT: String(port), AURA_SANDBOX: process.env.AURA_SANDBOX || "off", ...extraEnv };
+  const env = { ...process.env, AURA_RUNNER_PORT: String(port), ...extraEnv };
   const child = spawn(aura, ["--quiet", "--preset", "dev", "--grant", "network", "core/main.aura"], { cwd: root, env, stdio: ["ignore", "pipe", "pipe"] });
   let text = "";
   child.stdout.on("data", (c) => { text += c.toString(); });

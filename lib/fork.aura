@@ -1,0 +1,58 @@
+; A candidate is installed on a snapshot, scored, then the snapshot is
+; put back. The live binding changes only after that, and only for the
+; winner. (mutate :snapshot) is the worldline snapshot on this nightly.
+(require "std/string" all:)
+
+(define (fork-snap tag)
+  (let ((id (try (mutate :snapshot (if (string? tag) tag "fork")) (catch (e) -1))))
+    (if (and (number? id) (>= id 0)) id #f)))
+
+(define (fork-restore id)
+  (and (number? id)
+       (equal? (try (mutate :restore id) (catch (e) #f)) #t)))
+
+(define (fork-quote s)
+  (if (not (string? s))
+    ""
+    (string-replace (string-replace s "\\" "\\\\") "\"" "\\\"")))
+
+(define (fork-body text)
+  (string-append "(lambda () \"" (fork-quote text) "\")"))
+
+; apply rebinds fork-offer to the candidate text. evaluate reads that
+; define, so a constant-true apply cannot score a candidate that was
+; never installed. The caller passes the spec to open-trial / evo:trial.
+(define (fork-spec token score-fn)
+  (hash "timeout-ms" 1500
+        "apply" (lambda (c)
+                  (try (mutate :rebind "fork-offer" (fork-body token) "fork")
+                       (catch (e) #f))
+                  #t)
+        "evaluate" (lambda (c)
+                     (let ((seen (try (fork-offer) (catch (e) ""))))
+                       (score-fn (if (string? seen) seen ""))))))
+
+(define (fork-wrap thunk)
+  (let ((snap (fork-snap "fork")))
+    (let ((result (try (thunk) (catch (e) #f))))
+      ; Restore puts the workspace back. The scratch offer is cleared
+      ; again so a missed snapshot cannot leave the token installed.
+      ; Do not eval-current here: that would reset every other hot define.
+      (if snap (fork-restore snap) #f)
+      (try (mutate :rebind "fork-offer" "(lambda () \"\")" "fork") (catch (e) #f))
+      result)))
+
+; Higher score wins. A tie keeps the earlier row, which is the one the
+; level already walked. The live value is not written here.
+(define (fork-choose rows)
+  (let loop ((xs rows) (best #f) (score -1.0))
+    (if (or (not (pair? xs)) (null? xs))
+      best
+      (let ((row (car xs))
+            (n (if (hash? (car xs)) (hash-ref (car xs) "score" -1.0) -1.0)))
+        (if (and (number? n) (> n score))
+          (loop (cdr xs) row n)
+          (loop (cdr xs) best score))))))
+
+(define (fork-score row)
+  (if (hash? row) (hash-ref row "score" -1.0) -1.0))

@@ -66,7 +66,7 @@ Hold Space, speak, and release. Built-in lines apply at once and the combo stays
 
 ## Evolution
 
-A world, the runner, or a phrase is proposed while the run stays up. `evo:trial` returns KEEP or ROLLBACK. Only KEEP rebinds, live, with no restart. With no LLM key, a themed recipe takes that same gate. A clear steps the venue with the level (garden, city, space, coast) and the garden scene follows how that level went. A city the child names stays until they ask again. The kept pool is not recombined into a new world on its own, and a world is not dreamed on a clock.
+A world, the runner, or a phrase is proposed while the run stays up. `evo:trial` returns KEEP or ROLLBACK. Only KEEP rebinds, live, with no restart. With no LLM key, a themed recipe takes that same gate. A clear steps the venue with the level (garden, city, space, coast) and the garden scene follows how that level went. A city the child names stays until they ask again. A clear, or saying 换一个, can recombine two kept worlds into one new place. That child still has to pass the same gate, and a world is not dreamed on a clock.
 
 A thing round, and a friend who is already here, each take one small seeded step beside the tick before the same KEEP. When a world is proposed, light, fog, and particle density can move by PSO, and particle kind, surface, and props are ant credits. The friend's motion is chosen from the same motion list, which only moves the picture. The search reads the local check only, one generation at a time, and leaves the physics step alone. One `evo:trial` still decides what is installed.
 
@@ -147,7 +147,7 @@ lumen.toml.example   Commented settings. Copy to lumen.toml.
 
 ## Checks
 
-`./run.sh` downloads a prebuilt binary and does not compile. `aura test` needs `AURA_SANDBOX=off` and a nightly binary on `PATH`; that CI job uses `ghcr.io/cybrid-systems/aura:nightly` ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). The smoke job installs the same release on a runner without build tools.
+`./run.sh` downloads a prebuilt binary and does not compile. Play leaves the sandbox on. `./run.sh` and the container pass `AURA_SANDBOX` through only when it is already set. Setting it to `off` is a debug escape, not normal play. Preset `dev` grants mutate, read, and write. This nightly does not path-scope `write:out/`, so the game itself only writes under `out/`. `aura test` needs `AURA_SANDBOX=off` and a nightly binary on `PATH`; that CI job uses `ghcr.io/cybrid-systems/aura:nightly` ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). The smoke job installs the same release on a runner without build tools and plays with the sandbox left on.
 
 | Command | Checks |
 | --- | --- |
@@ -168,6 +168,8 @@ lumen.toml.example   Commented settings. Copy to lumen.toml.
 | `bash scripts/check-runsh.sh` | `./run.sh` downloads a prebuilt binary and serves the page |
 | `bash scripts/check-play.sh` | `./play.sh` questions, hidden key, gitignored env and config |
 | `bash scripts/check-docker.sh` | Image serves the page and the core with no LLM |
+| `bash scripts/check-sandbox.sh` | Play leaves the sandbox on; a denied write does not land |
+| `bash scripts/evo-report.sh` | Local evolution report, with no key and no home path |
 | `node scripts/smoke.mjs` | Seeded end-to-end run |
 | `node scripts/mock-llm-e2e.mjs` | Mock LLM rebind |
 | `node scripts/check-edsl-e2e.mjs` | EDSL gate and voice switch |

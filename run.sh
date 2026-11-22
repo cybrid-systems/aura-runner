@@ -111,10 +111,15 @@ if [[ -z "$aura_ver" ]]; then
   rm -f "$_ver_err"
 fi
 
-# A trial leaves the parent read-only unless the sandbox is off, and a
-# kept phrase has to rebind.
+# Play leaves the sandbox on. Preset dev grants mutate, read, and write.
+# AURA_SANDBOX=off is a debug escape, not normal play. This nightly does
+# not path-scope write:out/; the game only writes under out/.
 export AURA_WORK="$ROOT"
-export AURA_SANDBOX="${AURA_SANDBOX:-off}"
+if [[ -n "${AURA_SANDBOX+x}" ]]; then
+  export AURA_SANDBOX
+else
+  unset AURA_SANDBOX || true
+fi
 export AURA_EVO_LOG="$ROOT/out/evo.jsonl"
 export AURA_RUNNER_PORT="$AURA_PORT"
 export AURA_RUNNER_WEB="$WEB_PORT"

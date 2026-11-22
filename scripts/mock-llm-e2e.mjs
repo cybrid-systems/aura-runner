@@ -114,7 +114,6 @@ function startAura(log, base) {
     env: cleanEnv({
       ...process.env,
       AURA_RUNNER_PORT: String(port),
-      AURA_SANDBOX: process.env.AURA_SANDBOX || "off",
       AURA_EVO_LOG: path.join(root, "out", "mock-evo.jsonl"),
       LLM_API_KEY: "mock-key",
       LLM_BASE_URL: base,

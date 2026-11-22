@@ -281,6 +281,8 @@
     (else
      (hash "harsh" 1.0 "fatigue" 0.0 "consonant" 0.0))))
 
+(define tune-live "")
+
 (define (music-gate text)
   (let* ((found (if (string? text) (music-check text) (music-refuse "shape")))
          (ok (and (hash? found) (hash-ref found "ok" #f)))
@@ -292,13 +294,16 @@
                               (hash "id" "tune" "target" "tune-form")))
          (trial (evo:trial cand
                            (hash "timeout-ms" 4000
-                                 "apply" (lambda (c) #t)
+                                 "apply" (lambda (c)
+                                           (set! tune-live (if (string? text) text ""))
+                                           (and (string? tune-live) (> (string-length tune-live) 0)))
                                  "evaluate"
                                  (lambda (c)
-                                   (hash "status" "ok"
-                                         "objectives" (hash "fair" (if ok 1.0 0.0))
-                                         "constraints" viol
-                                         "behavior" (hash "band" 0.0)))))))
+                                   (let ((live (and ok (string=? tune-live (if (string? text) text "")))))
+                                     (hash "status" "ok"
+                                           "objectives" (hash "fair" (if live 1.0 0.0))
+                                           "constraints" viol
+                                           "behavior" (hash "band" 0.0))))))))
     (let ((keep (and ok trial (evo:trial-ok? trial) (evo:feasible? trial))))
       (hash "verdict" (if keep "KEEP" "ROLLBACK")
             "why" (if keep "fair" why)

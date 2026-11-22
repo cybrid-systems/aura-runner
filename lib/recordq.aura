@@ -1,0 +1,42 @@
+; evo:record! mutates, and a record during llm:chat wedges that POST.
+; While a chat is in flight the row waits here. The tick flushes it
+; once the POST has left the interpreter.
+(require "std/evo" all:)
+
+(define record-hold #f)
+(define record-queue (list))
+
+(define (record-hold! v)
+  (set! record-hold (if v #t #f)))
+
+(define (record-count)
+  (length record-queue))
+
+(define (record-write! arm kind why margin)
+  (try (evo:record! (if (string? arm) arm "")
+                    (if (string? kind) kind "")
+                    (if (string? why) why "")
+                    (if (number? margin)
+                      (hash "arm" arm "margin" margin)
+                      (hash "arm" (if (string? arm) arm "")))
+                    "" 0)
+       (catch (e) #f)))
+
+(define (record-note! arm kind why margin)
+  (if record-hold
+    (begin
+      (set! record-queue (cons (list arm kind why margin) record-queue))
+      #f)
+    (record-write! arm kind why margin)))
+
+(define (record-flush!)
+  (if (or record-hold (null? record-queue))
+    #f
+    (let ((rows (reverse record-queue)))
+      (set! record-queue (list))
+      (let loop ((xs rows))
+        (if (or (not (pair? xs)) (null? xs))
+          #t
+          (let ((row (car xs)))
+            (record-write! (car row) (car (cdr row)) (car (cdr (cdr row))) (car (cdr (cdr (cdr row)))))
+            (loop (cdr xs))))))))

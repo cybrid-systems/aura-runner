@@ -72,7 +72,7 @@ async function readUntil(io, pred, limit = 40) {
 function startAura(port, env) {
   const child = spawn(aura, ["--quiet", "--preset", "dev", "--grant", "network", "core/main.aura"], {
     cwd: root,
-    env: { ...env, AURA_RUNNER_PORT: String(port), AURA_SANDBOX: "off" },
+    env: { ...env, AURA_RUNNER_PORT: String(port) },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let text = "";

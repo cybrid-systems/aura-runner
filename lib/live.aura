@@ -5,6 +5,7 @@
 ; the running modules were compiled against, so it is not the keep path.
 (require "std/string" all:)
 (require "lib/pals")
+(require "lib/charter")
 
 (define (num-src n)
   (let ((s (number->string (exact->inexact n))))
@@ -27,6 +28,7 @@
     "(define (motif-form) \"" motif "\")\n"
     "(define (scene-form) \"" (if (and (string? scene) (> (string-length scene) 0)) scene default-scene) "\")\n"
     "(define (pals-form) \"" (if (and (string? pals) (> (string-length pals) 0)) pals default-pals) "\")\n"
+    "(define (fork-offer) \"\")\n"
     "0"))
 
 ; hot.aura writes (define (motif-form) "…"). The live workspace stores
@@ -55,7 +57,11 @@
 ; is what actually keeps it. LUMEN_SKIP_REBIND / LUMEN_SKIP_SETCODE are
 ; test switches for those two steps.
 (define (publish-rule! name body full-src)
-  (let ((rb (if (env-on? "LUMEN_SKIP_REBIND")
+  (if (or (charter-blocked? name "mutate:rebind")
+          (charter-hit? body)
+          (charter-hit? full-src))
+    "charter"
+    (let ((rb (if (env-on? "LUMEN_SKIP_REBIND")
               #f
               (try (mutate :rebind name body "tune") (catch (e) #f)))))
     (if (equal? rb #t)
@@ -64,7 +70,7 @@
         "fail"
         (if (try (set-code full-src) (catch (e) #f))
           (begin (eval-current) "set-code")
-          "fail")))))
+          "fail"))))))
 
 (define (extract-balanced s mark)
   (if (not (string? s))

@@ -247,6 +247,47 @@
                     "params" params
                     "pace" pace))))))))
 
+(define (coin-same-params? a b)
+  (and (not (coin-apart? (coin-w a "left") (coin-w b "left")))
+       (not (coin-apart? (coin-w a "center") (coin-w b "center")))
+       (not (coin-apart? (coin-w a "right") (coin-w b "right")))
+       (not (coin-apart? (coin-w a "mix") (coin-w b "mix")))
+       (not (coin-apart? (coin-w a "density") (coin-w b "density")))
+       (not (coin-apart? (coin-w a "arc") (coin-w b "arc")))))
+
+(define (coin-blob params)
+  (string-append
+    (number->string (exact->inexact (coin-w params "left"))) " "
+    (number->string (exact->inexact (coin-w params "center"))) " "
+    (number->string (exact->inexact (coin-w params "right"))) " "
+    (number->string (exact->inexact (coin-w params "mix"))) " "
+    (number->string (exact->inexact (coin-w params "density"))) " "
+    (number->string (exact->inexact (coin-w params "arc")))))
+
+; Up to three different knob steps. The first is the one coin-step
+; would have kept. Later knobs are the shadow candidates. The live
+; state is not written.
+(define (coin-forks state mood knob)
+  (let loop ((k 0) (use knob) (acc (list)))
+    (if (or (>= k 3) (>= (length acc) 3))
+      (reverse acc)
+      (let ((slot (modulo use 4))
+            (params (coin-attempt state mood (modulo use 4))))
+        (loop (+ k 1)
+              (+ use 1)
+              (if (and params
+                       (let seen ((ys acc))
+                         (if (or (not (pair? ys)) (null? ys))
+                           #t
+                           (if (coin-same-params? params (hash-ref (car ys) "params" #f))
+                             #f
+                             (seen (cdr ys))))))
+                (cons (hash "params" params
+                            "why" (coin-knob-name slot)
+                            "knob" (modulo (+ slot 1) 4))
+                      acc)
+                acc))))))
+
 (define (coin-keep state step)
   (let ((params (hash-ref step "params" state)))
     (hash "left" (coin-w params "left")

@@ -88,8 +88,6 @@ jobs:
 
   smoke:
     runs-on: ubuntu-latest
-    env:
-      AURA_SANDBOX: "off"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -103,6 +101,10 @@ jobs:
           bin="$(install_aura "$RUNNER_TEMP")"
           echo "$(dirname "$bin")" >> "$GITHUB_PATH"
           "$bin" --version
+      - name: Sandbox stays on for play
+        run: bash scripts/check-sandbox.sh
+      - name: Evolution report stays local
+        run: bash scripts/evo-report.sh
       - name: First install from an empty cache
         run: bash scripts/check-install.sh
       - name: No-compile ./run.sh

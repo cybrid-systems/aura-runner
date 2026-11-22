@@ -56,6 +56,11 @@ wait_url() {
   return 1
 }
 
+if grep -q 'AURA_SANDBOX:-off' run.sh docker/entrypoint.sh; then
+  echo "play still defaults the sandbox off" >&2
+  exit 1
+fi
+
 echo "clean ./run.sh" >&2
 start=$(date +%s.%N)
 ./run.sh > /tmp/lumen-runsh.out 2> /tmp/lumen-runsh.err &
