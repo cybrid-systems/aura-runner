@@ -593,32 +593,49 @@ The remaining spikes are the physics sub-step loop (`pump`, gameplay, not
 deferrable) and the dream proving walk. The boot spikes (ticks 7–71) are the
 deferred module compile (`load-slow-one`), one-time.
 
-### The dream walk, attributed (and why the budget stays 12)
+### The dream walk, attributed (budget 12 → 3, landed)
 
 Instrumenting `step-dream!` separates the walk from the seal: the walk
-(`autopilot-slice`, 12 physics steps) is p50 85 ms / p90 102 / max 142; the
-seal (`seal-sliced!`) is ~58 ms, of which the sub-steps are cheap
+(`autopilot-slice`, 12 physics steps) was p50 ~116 ms / max 157; the seal
+(`seal-sliced!`) is ~58 ms, of which the sub-steps are cheap
 (`layout-form` 3 ms, `remember-hint!` 4 ms, `phrase-search` 1 ms) — the rest
 is the `evo:trial` workspace machinery and the rebind. The walk runs wholly
 on the tree-walker (`closure:stats` ir-calls=0, ~7 ms/step), the same
 runtime-bound physics cost as the live tick.
 
-Halving the slice budget (12 → 6 → 4) cuts the walk spike (85 → 47 → 30 ms
-p50) and the >80 ms frame count (394 → 290 at budget 4 over 2500 ticks), but
-it is **not landed**: the dream seal installs `motif-now`, which shapes the
-chunks spawned afterwards. The seal's `run-ms` is `start + (K/budget)*dt`,
-so a smaller budget seals later in simulated time, the road ahead differs,
-and the player's bumps diverge. Differential (seed 42, 1500 ticks, LLM off):
-budget 4 vs 12 gives stateDiff 487 and a changed verdict bag
-(BUMP/run/bump 15 → 18, ROLLBACK/motif/geometry 4 → 3). That is a gameplay
-change for the same seed, not a perf optimization — it breaks the seeded
-run. The gate-tick fix above is different: it defers a seal by at most one
-tick, only when it coincides with a gate, and the tested run is
-verdict-identical. The dream budget shifts every seal systematically.
+**Landed: the slice budget is 3, not 12.** Controlled back-to-back (same
+machine, seed 42, 2500 ticks, instrumented `pump` + walk):
 
-The dream walk spike therefore stays until the physics autopilot runs on
-IR/JIT (runtime-side, aura#5388 + the variadic `piece` form); no runner-side
-budget change preserves the seeded run.
+| budget | walk p50 / max | pump p50 / p90 | >80 ms frames |
+|---|---|---|---|
+| 12 | 116 / 157 ms | 47 / 57 ms | 534 |
+| 4 | 38 / 67 ms | 46 / 56 ms | 779 |
+| **3** | **29 / 49 ms** | 46 / 57 ms | **500** |
+
+Three, not four: the walk and the physics `pump` share the frame, so the
+slice must keep walk + pump under the frame budget. Three's 29 + 46 = 75 ms
+stays below 80; four's 38 + 46 = 84 crossed it on more ticks (779 > 534),
+trading a smaller spike for more threshold crossings. Three cuts the walk
+spike 75% and the >80 ms frame count 534 → 500, with pump unchanged. The
+same total walk spreads over more ticks, so the dream finishes in ~6 s
+instead of ~1.5 s — still well inside the 22 s `next-dream` gap, and the
+dream/chase windows rarely overlap.
+
+The trade (accepted): the dream seal installs `motif-now`, which shapes the
+chunks spawned afterwards. The seal's `run-ms` is `start + (K/budget)*dt`,
+so the smaller budget seals later in simulated time, the road ahead differs,
+and the seeded run's bumps shift with it. Differential (seed 42, 1500 ticks,
+LLM off): budget 4 vs 12 gave stateDiff 487 and a changed verdict bag
+(BUMP/run/bump 15 → 18, ROLLBACK/motif/geometry 4 → 3). The road stays
+autopilot-proven fair; the cosmetic phrase simply lands later, and the
+seeded run is no longer bit-identical to the budget-12 run. This is a
+gameplay-visible timing shift, not a verdict-preserving optimization like
+the gate-tick fix above (which defers a seal by at most one tick and keeps
+the tested run verdict-identical). It was landed with that trade explicit.
+
+The deeper fix — the walk itself getting cheaper — still waits on the
+physics autopilot running on IR/JIT (runtime-side, aura#5388 + the variadic
+`piece` form).
 
 | file | what it is |
 |---|---|

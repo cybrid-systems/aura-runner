@@ -1939,7 +1939,19 @@
         (set! dream-i 0)))))
 
 (define (step-dream!)
-  (let ((r (autopilot-slice dream-pieces (rules-hash) dream-body dream-sim dream-i 12)))
+  ; Three steps a slice, not twelve. The proving walk runs on the tree-walker
+  ; (~7ms/step), so twelve steps landed a ~116ms slice on the frame (p90 ~130,
+  ; max 157) — the recurring dream spike. Three cuts the slice to ~29ms (p90
+  ; ~35, max 49). Controlled back-to-back (same machine, seed 42, 2500 ticks):
+  ; dream walk p50 116 -> 29ms, pump unchanged (p50 47 -> 46), and >80ms frames
+  ; 534 -> 500. Three (not four) because walk + pump must stay under the frame
+  ; budget: 29 + 46 = 75ms < 80, where four's 38 + 46 = 84 crossed it on more
+  ; ticks (779). The same total walk spreads over more ticks, so the dream
+  ; finishes in ~6s instead of ~1.5s, still well inside the 22s next-dream gap.
+  ; Trade (accepted): the seal installs motif-now at run-ms = start+(K/budget)*dt,
+  ; so the cosmetic phrase lands later in simulated time and the seeded run's
+  ; road/bumps shift with it; the road stays autopilot-proven fair. See perf/README.
+  (let ((r (autopilot-slice dream-pieces (rules-hash) dream-body dream-sim dream-i 3)))
     (set! dream-i (lref r 1))
     (set! dream-body (lref r 2))
     (set! dream-sim (lref r 3))
