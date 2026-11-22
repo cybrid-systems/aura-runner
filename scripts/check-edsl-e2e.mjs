@@ -112,6 +112,19 @@ function stop(child) {
   if (child && child.exitCode === null) child.kill("SIGTERM");
 }
 
+async function wishCity(io, text, biome) {
+  io.send({ op: "wish", text, lang: "zh-CN", source: "voice" });
+  let state = null;
+  for (let i = 0; i < 8 && !state; i++) {
+    io.send({ op: "tick", jump: 0, slide: 0, lane: 0 });
+    const got = await readUntil(io, (m) => m.op === "state", 30);
+    const hit = got.find((m) => m.op === "state" && m.biome === biome && m.spec && m.spec.id === biome);
+    if (hit) state = hit;
+  }
+  if (!state) throw new Error("next city " + JSON.stringify(text) + " did not reach " + biome);
+  return state;
+}
+
 async function offline() {
   console.log("offline start");
   const port = 18772;
@@ -145,6 +158,13 @@ async function offline() {
     const banner = String(state.banner || "");
     if (!banner.includes("糖果") && !banner.includes("Candy")) throw new Error("banner " + state.banner);
     console.log(`offline KEEP ${state.biome} x ${x0.toFixed(1)} -> ${state.x.toFixed(1)} combo ${state.combo}`);
+    const beijing = await wishCity(io, "下一个城市", "beijing");
+    if (!String(beijing.banner || "").includes("北京") && !String(beijing.banner || "").includes("Beijing")) {
+      throw new Error("beijing banner " + beijing.banner);
+    }
+    const shanghai = await wishCity(io, "下一个程序", "shanghai");
+    const hangzhou = await wishCity(io, "下一个 城市", "hangzhou");
+    console.log(`tour ${beijing.biome} -> ${shanghai.biome} -> ${hangzhou.biome}`);
   } finally {
     if (sock) sock.end();
     stop(core.child);

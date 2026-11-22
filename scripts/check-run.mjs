@@ -10,7 +10,7 @@ import {
   onLevelGate,
   seeCoin,
 } from "../web/runstate.mjs";
-import { missLine, preferHeard } from "../web/wish.mjs";
+import { missLine, preferHeard, utteranceReady } from "../web/wish.mjs";
 
 let failed = 0;
 function check(name, ok) {
@@ -70,6 +70,13 @@ check("voice-next", hop.biome === "coast" && hop.combo === 3 && hop.level === 2)
 check("heard-city", preferHeard(["去背景", "去北京"]) === "去北京");
 check("heard-top", preferHeard(["跑快点", "再快一点"]) === "跑快点");
 check("heard-tour", preferHeard(["下一个程序", "下一个城市"]) === "下一个城市");
+check("heard-mis-program", preferHeard(["下一个程序"]) === "下一个城市");
+check("heard-mis-cheng", preferHeard(["下一个成市"]) === "下一个城市");
+check("heard-mis-gap", preferHeard(["下一城市"]) === "下一个城市");
+check("heard-song-over-mis", preferHeard(["下一首", "下一个程序"]) === "下一首");
+check("utter-wait", utteranceReady("", "下一个") === false);
+check("utter-partial", utteranceReady("下一", "个城市") === false);
+check("utter-final", utteranceReady("下一个城市", "") === true);
 check("heard-song", preferHeard(["下一", "下一首"]) === "下一首");
 check("heard-song-first", preferHeard(["下一首", "下一个城市"]) === "下一首");
 check("heard-city-first", preferHeard(["下一个城市", "下一首"]) === "下一个城市");

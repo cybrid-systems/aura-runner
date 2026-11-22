@@ -53,6 +53,11 @@ theme-sf sanfrancisco
 steer-change london
 steer-seat london
 steer-one london
+steer-gap london
+steer-mis-cheng london
+steer-mis-prog beijing
+steer-short london
+steer-metro hangzhou
 say-beijing 来到北京了
 say-beijing-en A new world: Beijing
 say-candy 来到糖果云了

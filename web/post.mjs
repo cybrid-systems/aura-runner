@@ -166,7 +166,7 @@ void main() {
       dir = dir / max(length(dir), 1e-4) * px;
       vec3 a = texture(uTex, vUv + dir * 0.75).rgb;
       vec3 b = texture(uTex, vUv - dir * 0.75).rgb;
-      c = mix(c, (a + b) * 0.5, edge * 0.46);
+      c = mix(c, (a + b) * 0.5, edge * 0.22);
     }
   }
   // Quiet frames only. A speed tail is already soft, and sharpening it
@@ -270,7 +270,7 @@ void main() {
       vec3 a = texture(uTex, vUv + dir * 0.75).rgb;
       vec3 b = texture(uTex, vUv - dir * 0.75).rgb;
       // The runner stays on the sharp sample. Scenery edges soften a little.
-      c = mix(c, (a + b) * 0.5, edge * 0.46 * (1.0 - body));
+      c = mix(c, (a + b) * 0.5, edge * 0.22 * (1.0 - body));
     }
   }
   if (uBlur < 0.02) {
@@ -296,7 +296,7 @@ void main() {
     // the whole frame to mush as soon as speed leaves 9 m/s, while the
     // radial step is still a fraction of a pixel. uBlur scales the mix.
     tail = mix(c, tail, 0.7);
-    c = mix(c, tail, (1.0 - sharp) * clamp(uBlur, 0.0, 1.0) * 0.36);
+    c = mix(c, tail, (1.0 - sharp) * clamp(uBlur, 0.0, 1.0) * 0.16);
   }
   c += (fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) - 0.5) / 255.0;
   o = vec4(clamp(c, 0.0, 1.0), 1.0);

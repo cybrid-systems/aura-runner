@@ -20,6 +20,61 @@ export const TOUR_PHRASES = [
   "中国城市", "美国城市", "欧洲城市", "环球旅行",
 ];
 
+// zh-CN often writes 城市 as 成市, 程式, or 程序, and drops the 个.
+// Longer keys first so 下一个程序 is not clipped to 下个程序.
+const TOUR_SWAPS = [
+  ["下一个成市", "下一个城市"],
+  ["下一个程式", "下一个城市"],
+  ["下一个程序", "下一个城市"],
+  ["下一个都市", "下一个城市"],
+  ["下一座成市", "下一座城市"],
+  ["下一座程式", "下一座城市"],
+  ["下一座程序", "下一座城市"],
+  ["下一座都市", "下一座城市"],
+  ["换一个成市", "换一个城市"],
+  ["换一个程式", "换一个城市"],
+  ["换一个程序", "换一个城市"],
+  ["换一个都市", "换一个城市"],
+  ["换一座成市", "换一座城市"],
+  ["换一座程式", "换一座城市"],
+  ["换一座程序", "换一座城市"],
+  ["换一座都市", "换一座城市"],
+  ["另一座成市", "另一座城市"],
+  ["另一座程式", "另一座城市"],
+  ["另一座程序", "另一座城市"],
+  ["另一座都市", "另一座城市"],
+  ["下个成市", "下个城市"],
+  ["下个程式", "下个城市"],
+  ["下个程序", "下个城市"],
+  ["下个都市", "下个城市"],
+  ["换个成市", "换个城市"],
+  ["换个程式", "换个城市"],
+  ["换个程序", "换个城市"],
+  ["换个都市", "换个城市"],
+  ["下座成市", "下一座城市"],
+  ["下座程式", "下一座城市"],
+  ["下座程序", "下一座城市"],
+  ["下座都市", "下一座城市"],
+  ["下座城市", "下一座城市"],
+  ["下一成市", "下一个城市"],
+  ["下一程式", "下一个城市"],
+  ["下一程序", "下一个城市"],
+  ["下一都市", "下一个城市"],
+  ["下一城市", "下一个城市"],
+  ["换成市", "换城市"],
+  ["换程式", "换城市"],
+  ["换程序", "换城市"],
+  ["换都市", "换城市"],
+];
+
+function canonTour(line) {
+  let text = String(line || "");
+  for (const [from, to] of TOUR_SWAPS) {
+    if (text.includes(from)) text = text.split(from).join(to);
+  }
+  return text;
+}
+
 export const CITY_PHRASES = NAMED_CITY_PHRASES.concat(TOUR_PHRASES);
 
 const TRAVEL_MISHEARS = [
@@ -69,7 +124,7 @@ export function mentionsSong(line) {
 export function preferHeard(alternatives) {
   const list = [];
   for (const raw of alternatives || []) {
-    const line = String(raw || "").trim();
+    const line = canonTour(String(raw || "").trim());
     if (line) list.push(line);
   }
   if (!list.length) return "";
@@ -84,6 +139,13 @@ export function preferHeard(alternatives) {
     if (mentionsCity(line)) return line;
   }
   return list[0];
+}
+
+// A final line with nothing still in progress. An interim is not ready:
+// the first guess after Space is often 下一首, and the real 下一个城市
+// arrives as a later final.
+export function utteranceReady(finalText, interimText) {
+  return String(finalText || "").trim().length > 0 && !String(interimText || "").trim();
 }
 
 export function missLine(error) {
@@ -228,7 +290,9 @@ export function installWish({ send, onSong }) {
       interim = nextInterim.trim();
       const line = heard();
       if (line) show(line);
-      if (release && line) submit();
+      // The first interim after Space is often 下一首 or a clipped 下一个.
+      // Sending it drops the final 下一个城市 that the screen then shows.
+      if (release && utteranceReady(nextFinal, nextInterim)) submit();
     };
     engine.onerror = (ev) => {
       if (mine !== epoch) return;
@@ -283,16 +347,22 @@ export function installWish({ send, onSong }) {
     release = true;
     clearTimeout(stopTimer);
     // A release in the same instant as the last syllable drops the audio.
+    // Wait out that tail, then send a finished line. An interim stays
+    // for the settle after onend, where the final usually arrives.
     stopTimer = setTimeout(() => {
       stopTimer = 0;
+      if (utteranceReady(draft, interim)) {
+        submit();
+        return;
+      }
       if (!rec || !listening) {
-        if (heard()) submit();
-        else armSettle();
+        armSettle();
         return;
       }
       try { rec.stop(); } catch {
         listening = false;
-        submit();
+        if (utteranceReady(draft, interim)) submit();
+        else armSettle();
       }
     }, 400);
   }
