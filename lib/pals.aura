@@ -546,6 +546,28 @@
       rows
       (replace-row rows (hash-ref row "name" "") (restyle-row row)))))
 
+; Same friend, a motion the seeded step prefers. Kind, name, and the
+; count stay. A motion the checker refuses leaves the row alone.
+(define (tune-motion rows seed)
+  (if (not (pair? rows))
+    rows
+    (let ((row (rows-last rows)))
+      (if (not (hash? row))
+        rows
+        (begin
+          (require "lib/evolve")
+          (let* ((name (hash-ref row "name" ""))
+                 (motion (evolve-motion seed (hash-ref row "motion" "pace")))
+                 (text (string-append "(pal " (hash-ref row "kind" "friend") " " name " "
+                                      (num-tok (hash-ref row "r" 0.5)) " "
+                                      (num-tok (hash-ref row "g" 0.5)) " "
+                                      (num-tok (hash-ref row "b" 0.5)) " "
+                                      motion ")")))
+            (let ((got (check-pals text)))
+              (if (and (hash? got) (hash-ref got "ok" #f) (pair? (hash-ref got "pals" (list))))
+                (replace-row rows name (car (hash-ref got "pals")))
+                rows))))))))
+
 ; The light-keeper steps to a kitten. Any other look takes next-look.
 (define (evolve-hero hero)
   (let ((kind (if (hash? hero) (hash-ref hero "kind" "keeper") "keeper")))

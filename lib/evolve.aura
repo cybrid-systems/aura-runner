@@ -1,0 +1,173 @@
+; One seeded population step beside a gate. The caller owns fitness and
+; apply. This file does not call evo:trial, does not join a fiber, and
+; does not rebind physics. parallel stays off: swarm:parallel! would
+; join on the caller, and the tick must not wait on that.
+(require "std/swarm" all:)
+
+(define evolve-motions
+  (list "hop" "pace" "float" "follow" "side" "near" "cheer" "pace-ahead"))
+
+(define *evolve-things* (list))
+
+(define (evolve-len xs)
+  (let loop ((ys xs) (n 0))
+    (if (or (not (pair? ys)) (null? ys))
+      n
+      (loop (cdr ys) (+ n 1)))))
+
+(define (evolve-nth xs i)
+  (let loop ((ys xs) (k i))
+    (if (or (not (pair? ys)) (null? ys))
+      #f
+      (if (<= k 0) (car ys) (loop (cdr ys) (- k 1))))))
+
+(define (evolve-member? xs name)
+  (let loop ((ys xs))
+    (if (or (not (pair? ys)) (null? ys))
+      #f
+      (if (and (string? (car ys)) (string? name) (string=? (car ys) name))
+        #t
+        (loop (cdr ys))))))
+
+(define (evolve-seed n)
+  (let ((x (abs (floor (if (number? n) (exact->inexact n) 1.0)))))
+    (modulo x 2147483646)))
+
+(define (evolve-bounds dim)
+  (let loop ((i 0) (acc (list)))
+    (if (>= i dim)
+      (reverse acc)
+      (loop (+ i 1) (cons (list -1.0 1.0) acc)))))
+
+; Two PSO generations, pop small, higher fitness better. The best
+; individual is a list of numbers. A second call with the same seed
+; and the same fitness repeats it.
+(define (evolve-pso seed dim pop fitness)
+  (swarm:init (hash "kind" "pso"
+                    "dim" dim
+                    "pop" pop
+                    "bounds" (evolve-bounds dim)
+                    "seed" (evolve-seed seed)
+                    "parallel" #f
+                    "w" 0.7 "c1" 1.4 "c2" 1.4))
+  (swarm:step! fitness)
+  (swarm:step! fitness)
+  (let ((best (swarm:best)))
+    (if (pair? best) best #f)))
+
+; The nightly pheromone table only accepts these trail names. A new
+; name makes hash-ref raise, so semantic ops are ranked through them
+; and translated back. Seven is the whole table, so a longer list keeps
+; its first seven.
+(define evolve-trails
+  (list "edsl-disp-ref" "full-hash-wrap" "full-disp-bool"
+        "edsl-body-wrap" "full-disp-ref" "edsl-lit-tweak" "edsl-op-swap"))
+
+(define (evolve-pairs trails ops)
+  (let loop ((ts trails) (os ops) (acc (list)))
+    (if (or (not (pair? ts)) (null? ts) (not (pair? os)) (null? os))
+      (reverse acc)
+      (loop (cdr ts) (cdr os) (cons (list (car ts) (car os)) acc)))))
+
+(define (evolve-meaning pairs trail)
+  (let loop ((xs pairs))
+    (if (or (not (pair? xs)) (null? xs))
+      trail
+      (if (and (string? trail) (string=? (car (car xs)) trail))
+        (car (cdr (car xs)))
+        (loop (cdr xs))))))
+
+(define (evolve-keep xs n)
+  (let loop ((ys xs) (k 0) (acc (list)))
+    (if (or (not (pair? ys)) (null? ys) (>= k n))
+      (reverse acc)
+      (loop (cdr ys) (+ k 1) (cons (car ys) acc)))))
+
+; One ant step over operator names. The best is the caller's name, not
+; the trail name. Evaporation stays off so a fresh init depends only on
+; this fitness.
+(define (evolve-ant seed ops fitness)
+  (let* ((n (evolve-len ops))
+         (cap (evolve-len evolve-trails))
+         (use (if (> n cap) cap n)))
+    (if (< use 1)
+      #f
+      (let* ((trails (evolve-keep evolve-trails use))
+             (semantics (evolve-keep ops use))
+             (pairs (evolve-pairs trails semantics)))
+        (swarm:init (hash "kind" "ant"
+                          "pop" use
+                          "ops" trails
+                          "seed" (evolve-seed seed)
+                          "parallel" #f
+                          "evaporate" 1.0))
+        (swarm:step! (lambda (trail) (fitness (evolve-meaning pairs trail))))
+        (let ((best (swarm:best)))
+          (if (string? best) (evolve-meaning pairs best) #f))))))
+
+(define (evolve-known-motion? s)
+  (evolve-member? evolve-motions s))
+
+; A motion other than the one the friend already has. The hit test
+; never reads it. The same seed returns the same word.
+(define (evolve-motion seed current)
+  (let* ((cur (if (and (string? current) (evolve-known-motion? current)) current "pace"))
+         (n (evolve-len evolve-motions))
+         (prefer (evolve-nth evolve-motions (modulo (evolve-seed seed) n)))
+         (best (evolve-ant seed evolve-motions
+                           (lambda (op)
+                             (if (or (not (string? op)) (string=? op cur))
+                               0.0
+                               (if (and (string? prefer) (string=? op prefer)) 1.4 1.0))))))
+    (if (and (string? best) (evolve-known-motion? best) (not (string=? best cur)))
+      best
+      (let ((fallback (evolve-nth evolve-motions (modulo (+ (evolve-seed seed) 1) n))))
+        (if (and (string? fallback) (not (string=? fallback cur)))
+          fallback
+          (if (string=? cur "hop") "pace" "hop"))))))
+
+(define (evolve-sig payload)
+  (cond
+    ((string? payload) payload)
+    ((and (pair? payload) (>= (length payload) 8) (string? (list-ref payload 7)))
+     (list-ref payload 7))
+    (else "")))
+
+; triples are (id score payload). A form already in memory loses a
+; small bonus, so an equal score prefers the one the round has not kept.
+; Score 0 stays 0. The payload is returned unchanged for the caller.
+(define (evolve-thing-rows triples memory)
+  (let loop ((xs triples) (acc (list)))
+    (if (or (not (pair? xs)) (null? xs))
+      (reverse acc)
+      (let* ((r (car xs))
+             (id (car r))
+             (score (if (and (pair? (cdr r)) (number? (car (cdr r)))) (car (cdr r)) 0.0))
+             (payload (if (and (pair? (cdr r)) (pair? (cdr (cdr r)))) (car (cdr (cdr r))) ""))
+             (sig (evolve-sig payload))
+             (bonus (if (and (> score 0.0)
+                             (string? sig)
+                             (> (string-length sig) 0)
+                             (not (evolve-member? memory sig)))
+                      0.05
+                      0.0)))
+        (loop (cdr xs) (cons (list id (+ score bonus) payload) acc))))))
+
+(define (evolve-drop xs sig)
+  (let loop ((ys xs) (acc (list)))
+    (if (or (not (pair? ys)) (null? ys))
+      (reverse acc)
+      (if (and (string? (car ys)) (string=? (car ys) sig))
+        (loop (cdr ys) acc)
+        (loop (cdr ys) (cons (car ys) acc))))))
+
+(define (evolve-thing-memory) *evolve-things*)
+
+; Remember a kept thing form. Eight is enough to stop the next round
+; repeating it, and short enough that an old toy can return.
+(define (evolve-note-thing! sig)
+  (if (and (string? sig) (> (string-length sig) 0))
+    (begin
+      (set! *evolve-things* (evolve-keep (cons sig (evolve-drop *evolve-things* sig)) 8))
+      #t)
+    #f))

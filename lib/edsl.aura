@@ -786,6 +786,141 @@
           (edsl-nth names (modulo (+ i 1 (modulo salt 3)) (edsl-len names)))
           (loop (cdr xs) (+ i 1) at))))))
 
+(define (edsl-next-surface name salt)
+  (let ((names edsl-surfaces))
+    (let loop ((xs names) (i 0))
+      (if (or (not (pair? xs)) (null? xs))
+        (edsl-nth names (modulo salt (edsl-len names)))
+        (if (string=? (car xs) name)
+          (edsl-nth names (modulo (+ i 1 (modulo salt 3)) (edsl-len names)))
+          (loop (cdr xs) (+ i 1)))))))
+
+(define (edsl-ref xs i fallback)
+  (if (and (pair? xs) (>= (length xs) (+ i 1)))
+    (let ((v (list-ref xs i)))
+      (if (number? v) (exact->inexact v) fallback))
+    fallback))
+
+(define (edsl-k ind i)
+  (if (and (pair? ind) (>= (length ind) (+ i 1)) (number? (list-ref ind i)))
+    (exact->inexact (list-ref ind i))
+    0.0))
+
+; Rebuild one checked biome. The id stays the seed id, so a later KEEP
+; still answers to the same name the pool test prints.
+(define (edsl-copy found id surface particles pamt light fog-amt road props)
+  (let ((fog (hash-ref found "fog")))
+    (edsl-emit id
+               (hash-ref found "sky")
+               (list (edsl-ref fog 0 0.5) (edsl-ref fog 1 0.5) (edsl-ref fog 2 0.5) fog-amt)
+               (hash-ref found "body")
+               road
+               (hash-ref found "curb")
+               (hash-ref found "ground")
+               surface
+               light
+               (hash-ref found "mood")
+               particles
+               pamt
+               props
+               "mix")))
+
+(define (edsl-knob found id ind)
+  (let ((k0 (edsl-k ind 0))
+        (k1 (edsl-k ind 1))
+        (k2 (edsl-k ind 2))
+        (road (hash-ref found "road"))
+        (fog (hash-ref found "fog")))
+    (edsl-copy found id
+               (hash-ref found "surface")
+               (hash-ref found "particles")
+               (edsl-clamp (+ (hash-ref found "pamt") (* k2 0.08)) 0.0 0.55)
+               (edsl-clamp (+ (hash-ref found "light") (* k0 0.08)) 0.50 1.0)
+               (edsl-clamp (+ (edsl-ref fog 3 0.16) (* k1 0.05)) 0.08 0.32)
+               (list (edsl-clamp (+ (edsl-ref road 0 0.5) (* k0 0.025)) 0.05 0.98)
+                     (edsl-clamp (+ (edsl-ref road 1 0.5) (* k2 0.025)) 0.05 0.98)
+                     (edsl-clamp (+ (edsl-ref road 2 0.5) (* k1 0.02)) 0.05 0.98))
+               (hash-ref found "props"))))
+
+(define (edsl-apply-op found other id op seed)
+  (let ((surface (hash-ref found "surface"))
+        (particles (hash-ref found "particles"))
+        (pamt (hash-ref found "pamt"))
+        (light (hash-ref found "light"))
+        (fog-amt (edsl-ref (hash-ref found "fog") 3 0.16))
+        (road (hash-ref found "road"))
+        (props (hash-ref found "props")))
+    (cond
+      ((string=? op "particles")
+       (edsl-copy found id surface (edsl-next-part particles (+ seed 2)) pamt light fog-amt road props))
+      ((string=? op "surface")
+       (edsl-copy found id (edsl-next-surface surface seed) particles pamt light fog-amt road props))
+      ((string=? op "props")
+       (edsl-copy found id surface particles pamt light fog-amt road (hash-ref other "props" props)))
+      (else
+       (edsl-copy found id surface particles pamt light fog-amt road props)))))
+
+(define (edsl-prop-kind props)
+  (if (and (pair? props) (hash? (car props)))
+    (hash-ref (car props) "kind" "")
+    ""))
+
+(define (edsl-seen pool)
+  (let loop ((xs pool) (acc (list)))
+    (if (or (not (pair? xs)) (null? xs))
+      acc
+      (let ((chk (edsl-check (car xs))))
+        (if (and (hash? chk) (hash-ref chk "ok" #f))
+          (loop (cdr xs)
+                (cons (string-append (hash-ref chk "surface" "") "|"
+                                     (hash-ref chk "particles" ""))
+                      acc))
+          (loop (cdr xs) acc))))))
+
+; Higher is better. 0 means edsl-check refused the form. A surface or
+; particle pair already in the pool is a little less interesting, so
+; the step keeps a different combination when both are legal.
+(define (edsl-fit found a b seen)
+  (if (not (and (hash? found) (hash-ref found "ok" #f)
+                (hash? a) (hash? b)))
+    0.0
+    (let* ((road (hash-ref found "road"))
+           (ground (hash-ref found "ground"))
+           (rr (edsl-ref road 0 0.0))
+           (rg (edsl-ref road 1 0.0))
+           (rb (edsl-ref road 2 0.0))
+           (gr (edsl-ref ground 0 0.0))
+           (gg (edsl-ref ground 1 0.0))
+           (gb (edsl-ref ground 2 0.0))
+           (sum (+ rr rg rb))
+           (gap (edsl-abs (- (edsl-luma rr rg rb) (edsl-luma gr gg gb))))
+           (margin (+ (max 0.0 (- sum 0.34)) (max 0.0 (- gap 0.07))))
+           (sf (hash-ref found "surface" ""))
+           (pk (hash-ref found "particles" ""))
+           (as (hash-ref a "surface" ""))
+           (bs (hash-ref b "surface" ""))
+           (ap (hash-ref a "particles" ""))
+           (bp (hash-ref b "particles" ""))
+           (fk (edsl-prop-kind (hash-ref found "props" (list))))
+           (ak (edsl-prop-kind (hash-ref a "props" (list))))
+           (bk (edsl-prop-kind (hash-ref b "props" (list))))
+           (novel (+ (if (and (not (string=? sf as)) (not (string=? sf bs))) 0.35
+                       (if (or (not (string=? sf as)) (not (string=? sf bs))) 0.12 0.0))
+                     (if (and (not (string=? pk ap)) (not (string=? pk bp))) 0.25
+                       (if (or (not (string=? pk ap)) (not (string=? pk bp))) 0.08 0.0))
+                     (if (and (not (string=? fk "")) (not (string=? fk ak)) (not (string=? fk bk))) 0.20
+                       (if (and (not (string=? fk ""))
+                                (or (not (string=? fk ak)) (not (string=? fk bk))))
+                         0.08 0.0))))
+           (echo (if (edsl-member? seen (string-append sf "|" pk)) 0.30 0.0))
+           (room (max 0.0 (/ (- EDSL-BUDGET (hash-ref found "cost" 0.0)) EDSL-BUDGET))))
+      (- (+ 1.0 (* 2.0 margin) novel (* 0.1 room)) echo))))
+
+(define (edsl-better text score best best-score)
+  (if (and (string? text) (> score best-score) (> score 0.0))
+    (list text score)
+    (list best best-score)))
+
 (define (edsl-vary found seed)
   (let ((sky (hash-ref found "sky"))
         (fog (hash-ref found "fog"))
@@ -821,37 +956,62 @@
       (hash-ref found "props")
       "mix")))
 
-; Recombine two kept forms, then nudge. A miss falls back to a particle
-; swap on the first form, which stays inside the same contrast gate.
+; Recombine two kept forms, then one PSO step on light, fog, and
+; density and one ant step on particle, surface, and props. Fitness is
+; edsl-check plus a nudge toward a combination the pool does not already
+; hold. The winner is still one form string. The caller records a single
+; evo:trial. A miss falls back to a particle swap on the first form.
 (define (edsl-evolve pool seed)
   (let ((n (edsl-len pool)))
     (if (< n 1)
       #f
       (let ((a (edsl-check (edsl-nth pool (modulo seed n))))
             (b (edsl-check (edsl-nth pool (modulo (+ seed 1) n)))))
-        (if (not (and (hash-ref a "ok" #f) (hash-ref b "ok" #f)))
+        (if (not (and (hash? a) (hash-ref a "ok" #f) (hash? b) (hash-ref b "ok" #f)))
           #f
-          (let ((mixed (edsl-emit
-                         (string-append "evo-" (edsl-int (modulo seed 9000)))
-                         (hash-ref a "sky")
-                         (hash-ref a "fog")
-                         (hash-ref a "body")
-                         (hash-ref b "road")
-                         (hash-ref b "curb")
-                         (hash-ref b "ground")
-                         (hash-ref b "surface")
-                         (hash-ref a "light")
-                         (hash-ref b "mood")
-                         (edsl-next-part (hash-ref a "particles") seed)
-                         (hash-ref a "pamt")
-                         (hash-ref b "props")
-                         "mix")))
-            (let ((chk (edsl-check mixed)))
-              (if (hash-ref chk "ok" #f)
-                mixed
+          (begin
+            (require "lib/evolve")
+            (let* ((id (string-append "evo-" (edsl-int (modulo seed 9000))))
+                   (mixed (edsl-emit
+                            id
+                            (hash-ref a "sky")
+                            (hash-ref a "fog")
+                            (hash-ref a "body")
+                            (hash-ref b "road")
+                            (hash-ref b "curb")
+                            (hash-ref b "ground")
+                            (hash-ref b "surface")
+                            (hash-ref a "light")
+                            (hash-ref b "mood")
+                            (edsl-next-part (hash-ref a "particles") seed)
+                            (hash-ref a "pamt")
+                            (hash-ref b "props")
+                            "mix"))
+                   (checked (edsl-check mixed))
+                   (base (if (and (hash? checked) (hash-ref checked "ok" #f)) checked a))
+                   (seen (edsl-seen pool))
+                   (score-of (lambda (text) (edsl-fit (edsl-check text) a b seen)))
+                   (slot (edsl-better mixed (score-of mixed) #f -1.0))
+                   (ind (evolve-pso seed 3 4
+                                    (lambda (knob) (score-of (edsl-knob base id knob)))))
+                   (pso-text (if (pair? ind) (edsl-knob base id ind) #f))
+                   (slot2 (edsl-better pso-text
+                                       (if (string? pso-text) (score-of pso-text) 0.0)
+                                       (car slot) (car (cdr slot))))
+                   (op (evolve-ant (+ seed 17)
+                                   (list "hold" "particles" "surface" "props")
+                                   (lambda (name)
+                                     (score-of (edsl-apply-op base b id name seed)))))
+                   (ant-text (if (string? op) (edsl-apply-op base b id op seed) #f))
+                   (slot3 (edsl-better ant-text
+                                       (if (string? ant-text) (score-of ant-text) 0.0)
+                                       (car slot2) (car (cdr slot2))))
+                   (best (car slot3)))
+              (if (string? best)
+                best
                 (let ((soft (edsl-vary a seed)))
                   (let ((chk2 (edsl-check soft)))
-                    (if (hash-ref chk2 "ok" #f)
+                    (if (and (hash? chk2) (hash-ref chk2 "ok" #f))
                       soft
                       #f)))))))))))
 

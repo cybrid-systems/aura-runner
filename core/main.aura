@@ -67,13 +67,15 @@
     ((= slow-step 2)
      (begin (require "lib/edsl") (set! slow-step 3)))
     ((= slow-step 3)
-     (begin (require "lib/wish") (set! slow-step 4)))
+     (begin (require "lib/evolve") (set! slow-step 4)))
+    ((= slow-step 4)
+     (begin (require "lib/wish") (set! slow-step 5)))
     (else
      (begin
        (require "lib/voice")
        (set! edsl-pool (edsl-boot))
        (set! slow-mods #t)
-       (set! slow-step 5)))))
+       (set! slow-step 6)))))
 (define (load-slow!)
   (let loop ()
     (if slow-mods
@@ -877,12 +879,13 @@
               (begin
                 (edsl-clear!)
                 (set! biome-now (hash-ref cross "biome" (biome-for-level level-n))))
-              ;; The offline biome evolve is a cosmetic evo:trial (~85ms).
-              ;; Rotate to the level's biome now (cheap, keeps the banner
-              ;; correct) and queue the evolve trial for a later tick. If it
-              ;; KEEPs, consider-edsl! installs the evolved world then; a
-              ;; ROLLBACK leaves the rotation. Same verdict, spread off the
-              ;; crossing frame.
+              ;; The offline biome evolve scores a small population with
+              ;; edsl-check, then one cosmetic evo:trial (~85ms). Rotate to
+              ;; the level's biome now (cheap, keeps the banner correct) and
+              ;; queue that work for a later tick. If it KEEPs, consider-edsl!
+              ;; installs the evolved world then; a ROLLBACK leaves the
+              ;; rotation. Same verdict, spread off the crossing frame. The
+              ;; population step does not join a fiber.
               (begin
                 (edsl-clear!)
                 (set! biome-now (hash-ref cross "biome" (biome-for-level level-n)))
@@ -2684,7 +2687,9 @@
           (pair? wait-pals)
           (and (>= evolve-at 0.0) (< (- run-ms evolve-at) 400.0)))
     #f
-    (let ((rows (if (pair? pals-rows) (evolve-rows pals-rows) pals-rows))
+    (let ((rows (if (pair? pals-rows)
+                  (tune-motion (evolve-rows pals-rows) run-ms)
+                  pals-rows))
           (next (evolve-hero hero-now)))
       (let ((canon (roster-text rows next))
             (changed? (not (string=? (hero-key next) (hero-key hero-now)))))
@@ -3366,15 +3371,18 @@
   (set! thing-quiet #f)
   (thing-hud! "kept" (hash)))
 
-; The round is over. Pick the best fair candidate, record it through
-; evo:trial, check it once more on this fiber, and stage it for the next
-; stretch boundary.
+; The round is over. A small novelty bonus breaks an equal score toward
+; a form this run has not kept. Record the winner through one evo:trial,
+; check it once more on this fiber, and stage it for the next stretch.
 (define (thing-close!)
+  (require "lib/evolve")
   (set! thing-open #f)
   (let* ((rows (thing-in-time thing-rows thing-t0 (+ thing-t0 (thing-deadline-ms))))
          (rows2 (if (null? rows) thing-rows rows))
          (passed (thing-count-fair rows2))
-         (best (thing-pick (map (lambda (r) (list (list-ref r 1) (list-ref r 6) r)) rows2)))
+         (best (thing-pick (evolve-thing-rows
+                             (map (lambda (r) (list (list-ref r 1) (list-ref r 6) r)) rows2)
+                             (evolve-thing-memory))))
          (ms (floor (- (now-ms) thing-t0))))
     (let loop ((rs rows2))
       (if (null? rs)
@@ -3428,6 +3436,7 @@
                         "passed" passed
                         "got" (length rows2)
                         "gen" thing-gen))
+            (evolve-note-thing! (hash-ref again "form" form))
             (set! thing-chosen-at (now-ms))
             (thing-log "gen" thing-gen "chosen" "variant" (list-ref r 1) "score" score
                        "passed" passed "got" (length rows2) "ms" ms)

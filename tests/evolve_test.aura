@@ -1,0 +1,90 @@
+; Seeded population step beside the gates. The same seed repeats. A
+; refused parent does not become a form. An equal thing score prefers
+; a form the memory has not kept. A friend restyle does not grow the
+; roster, and the hit test still does not read the motion.
+(require "std/evo-core" all:)
+(require "lib/evolve")
+(require "lib/thing")
+(require "lib/pals")
+(require "lib/edsl")
+
+(define (show k v)
+  (display k)
+  (display " ")
+  (display v)
+  (newline))
+
+(define (bit ok) (if ok 1 0))
+
+(define (near-zero ind)
+  (if (and (pair? ind) (number? (car ind)))
+    (- 0.0 (abs (car ind)))
+    -1.0))
+
+(define p1 (evolve-pso 7 1 4 near-zero))
+(define p2 (evolve-pso 7 1 4 near-zero))
+(show "pso-same"
+      (bit (and (pair? p1) (pair? p2)
+                (< (abs (- (car p1) (car p2))) 0.000001))))
+
+(define (prefer-surface name)
+  (if (and (string? name) (string=? name "surface")) 3.0 0.1))
+
+(define op (evolve-ant 3 (list "hold" "surface" "particles") prefer-surface))
+(define op2 (evolve-ant 9 (list "hold" "surface" "particles") prefer-surface))
+(show "ant" (bit (and (string=? op "surface") (string=? op2 "surface"))))
+
+(define m11 (evolve-motion 11 "hop"))
+(define m0 (evolve-motion 0 "hop"))
+(show "motion-ok"
+      (bit (and (evolve-known-motion? m11)
+                (not (string=? m11 "hop"))
+                (string=? m11 (evolve-motion 11 "hop"))
+                (evolve-known-motion? m0)
+                (not (string=? m0 "hop"))
+                (not (string=? m11 m0)))))
+
+(define dup "(thing decor 1.2 (name toy))")
+(define fresh "(thing decor 1.2 (name star))")
+(define tied (list (list 1 1.5 dup) (list 2 1.5 fresh)))
+(show "novel" (bit (= (car (thing-pick (evolve-thing-rows tied (list dup)))) 2)))
+(show "tie" (bit (= (car (thing-pick (evolve-thing-rows tied (list)))) 1)))
+(show "zero"
+      (bit (not (thing-pick (evolve-thing-rows
+                              (list (list 1 0.0 dup) (list 2 0.0 fresh))
+                              (list))))))
+(show "score-wins"
+      (bit (= (car (thing-pick (evolve-thing-rows
+                                 (list (list 1 1.8 dup) (list 2 1.5 fresh))
+                                 (list dup))))
+              1)))
+
+(define dull
+  "(biome dull-road (label Dull-Road) (sky 0.55 0.72 0.95 0.86 0.91 0.98) (fog 0.78 0.86 0.94 0.22) (body sun) (road 0.50 0.50 0.50) (curb 0.40 0.40 0.40) (ground 0.52 0.50 0.48) (surface stone) (light 0.80) (mood 0.50) (particles none 0.10) (props (rock 0.20 1.00)) (recipe mix))")
+(show "bad-parent" (bit (string? (edsl-evolve (list dull) 3))))
+
+(define pool (edsl-boot))
+(define e1 (edsl-evolve pool 4))
+(define e2 (edsl-evolve pool 4))
+(define g (if (string? e1) (edsl-gate e1) (hash "verdict" "ROLLBACK" "id" "")))
+(show "keep" (bit (string=? (hash-ref g "verdict" "") "KEEP")))
+(show "new" (bit (and (string=? (hash-ref g "verdict" "") "KEEP")
+                      (not (edsl-builtin? (hash-ref g "id" ""))))))
+(show "stable" (bit (and (string? e1) (string=? e1 e2))))
+(show "id" (hash-ref g "id" ""))
+
+(define base (hash-ref (check-roster default-pals) "pals"))
+(define evolved (evolve-rows base))
+(define tuned (tune-motion evolved 11))
+(define before (find-row evolved "vroom"))
+(define after (find-row tuned "vroom"))
+(show "pal-count" (bit (and (= (length tuned) (length base))
+                            (= (length evolved) (length base)))))
+(show "pal-kind" (bit (and (string=? (hash-ref after "kind") "taxi")
+                           (string=? (hash-ref after "name") "vroom")
+                           (string=? (hash-ref (find-row tuned "mochi") "kind") "kitten"))))
+(show "pal-motion" (bit (and (not (string=? (hash-ref before "motion")
+                                            (hash-ref after "motion")))
+                             (evolve-known-motion? (hash-ref after "motion")))))
+
+(void)

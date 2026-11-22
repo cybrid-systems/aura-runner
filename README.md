@@ -68,6 +68,8 @@ Hold Space, speak, and release. Built-in lines apply at once and the combo stays
 
 A world, the runner, or a phrase is proposed while the run stays up. `evo:trial` returns KEEP or ROLLBACK. Only KEEP rebinds, live, with no restart. With no LLM key, a themed recipe takes that same gate, and later levels recombine the kept pool offline.
 
+That offline step, a thing round, and a friend who is already here each take one small seeded step beside the tick before the same KEEP. Light, fog, and particle density move by PSO. Particle kind, surface, and props are ant credits. The friend's motion is chosen from the same motion list, which only moves the picture. The search reads the local check only, one generation at a time, and leaves the physics step alone. One `evo:trial` still decides what is installed.
+
 The form in [`lib/edsl.aura`](lib/edsl.aura):
 
 ```
