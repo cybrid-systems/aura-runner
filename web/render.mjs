@@ -807,7 +807,7 @@ precision highp float;
 uniform vec3 uSky0; uniform vec3 uSky1; uniform vec3 uHill; uniform vec3 uHill2;
 uniform vec3 uSunCol; uniform vec2 uSun; uniform vec2 uRes;
 uniform float uTime; uniform float uCamZ; uniform float uYaw; uniform float uFov;
-uniform float uSunAmt; uniform float uRush;
+uniform float uSunAmt;
 uniform float uStars;
 uniform vec3 uNebula;
 uniform float uFlash;
@@ -841,14 +841,6 @@ void main() {
   float sunAmt = max(uSunAmt, 0.0);
   c += uSunCol * smoothstep(0.14, 0.0, sd) * 0.5 * sunAmt;
   c += vec3(1.0, 0.97, 0.9) * smoothstep(0.035, 0.0, sd) * sunAmt;
-  // Speed streaks sit on the lower screen edges. uRush is 0 below 12 m/s,
-  // so the centre of the sky is not touched and the branch stays off.
-  if (uRush > 0.5) {
-    float edge = max(smoothstep(0.12, 0.0, uv.x), smoothstep(0.88, 1.0, uv.x));
-    float low = smoothstep(0.62, 0.22, uv.y);
-    float streak = sin(uv.y * 36.0 - uTime * 16.0 + uv.x * 2.0);
-    c += vec3(1.0, 0.98, 0.92) * edge * low * smoothstep(0.25, 0.92, streak) * 0.18;
-  }
   // Pinpoints, not cells. A lit cell used to fill a wide dash.
   if (uStars > 0.01) {
     vec2 cell = vec2(floor((x + 8.0) * 110.0), floor(uv.y * 160.0));
@@ -2416,10 +2408,10 @@ export function createRenderer(canvas, hooks) {
       gl.uniform1f(locs.fov, drawFov);
       const skyShow = visibleSky(st.props, st.sunHide);
       gl.uniform1f(locs.sunAmt, skyShow.shader * (pal.disc == null ? 1 : pal.disc));
-      // The full-screen streak is a real-GPU extra. SwiftShader keeps the
-      // few road-edge quads below and skips this pass.
+      // Fast frames used to paint white bars on the side of the picture.
+      // The road itself carries the speed. The flag stays for the probe.
       const rush = !reduced && speed >= 12 && !software ? 1 : 0;
-      gl.uniform1f(locs.rush, rush);
+      if (locs.rush) gl.uniform1f(locs.rush, rush);
       gl.uniform1f(locs.stars, pal.stars || 0);
       gl.uniform3fv(locs.nebula, pal.nebula || [0, 0, 0]);
       const highPic = usePost && activeProfile.tier === "high" && highReady;
@@ -3609,28 +3601,6 @@ export function createRenderer(canvas, hooks) {
         const sz = moteKind === "star" ? 0.035 : moteKind === "snow" ? 0.05 : 0.07;
         const emit = moteKind === "star" ? 0.85 * tw : moteKind === "petal" ? 0.35 : 0.22;
         push(motes[o], motes[o + 1], motes[o + 2], sz, moteKind === "petal" ? sz * 0.45 : sz, sz, moteKind === "petal" ? 0 : 1, rgb, 0.25, emit, feet.psi);
-      }
-      if (speed >= 10 && n < MAX - 16) {
-        const rows = activeProfile.streak | 0;
-        const scroll = ((st.time || 0) * Math.min(speed, 18)) % 2.4;
-        for (let s = 0; s < rows && n < MAX - 2; s++) {
-          const side = s % 2 === 0 ? -1 : 1;
-          const along = drawS - 0.6 + ((s * 0.85 - scroll + 8) % 5.2);
-          const at = sample(along, px + side * (1.5 + (s % 3) * 0.38));
-          const emit = 0.32 + Math.min(0.55, (speed - 10) / 16);
-          push(at.x, 0.32 + (s % 4) * 0.24, at.z, 0.02, 0.07 + (s % 3) * 0.04, 1.35 + (speed - 10) * 0.06, 0, [1, 0.98, 0.92], 0.2, emit, at.psi);
-        }
-      }
-    }
-    if (!reduced && speed >= 12 && n < MAX - 16) {
-      const scroll = ((st.time || 0) * Math.min(speed, 18)) % 3.4;
-      for (let s = 0; s < 3; s++) {
-        for (const side of [-1, 1]) {
-          const along = drawS + 0.4 + s * 3.4 - scroll;
-          const at = sample(along, side * (2.35 + (s === 1 ? 0.4 : 0)));
-          const h = 0.1 + (s === 2 ? 0.08 : 0);
-          push(at.x, 0.42 + s * 0.28, at.z, 0.03, h, 2.5, 0, [1, 0.98, 0.9], 0.22, 0.55, at.psi);
-        }
       }
     }
     if (reject > 0.2 && !reduced && (n < MAX - 4)) {
