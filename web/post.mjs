@@ -162,11 +162,13 @@ void main() {
     float lD = luma(texture(uTex, vUv + vec2(0.0, -px.y)).rgb);
     vec2 dir = vec2(lL - lR, lU - lD);
     float edge = clamp(length(dir) * 6.0, 0.0, 1.0);
-    if (edge > 0.04) {
+    // Shade and grain stay on the sharp sample. Only a hard silhouette
+    // takes a thin blend, so the road does not go soft.
+    if (edge > 0.22) {
       dir = dir / max(length(dir), 1e-4) * px;
       vec3 a = texture(uTex, vUv + dir * 0.75).rgb;
       vec3 b = texture(uTex, vUv - dir * 0.75).rgb;
-      c = mix(c, (a + b) * 0.5, edge * 0.22);
+      c = mix(c, (a + b) * 0.5, edge * 0.08);
     }
   }
   // Quiet frames only. A speed tail is already soft, and sharpening it
@@ -265,12 +267,13 @@ void main() {
     float lD = luma(texture(uTex, vUv + vec2(0.0, -px.y)).rgb);
     vec2 dir = vec2(lL - lR, lU - lD);
     float edge = clamp(length(dir) * 6.0, 0.0, 1.0);
-    if (edge > 0.04) {
+    // Shade and grain stay on the sharp sample. Only a hard silhouette
+    // takes a thin blend, and the runner stays off that blend.
+    if (edge > 0.22) {
       dir = dir / max(length(dir), 1e-4) * px;
       vec3 a = texture(uTex, vUv + dir * 0.75).rgb;
       vec3 b = texture(uTex, vUv - dir * 0.75).rgb;
-      // The runner stays on the sharp sample. Scenery edges soften a little.
-      c = mix(c, (a + b) * 0.5, edge * 0.22 * (1.0 - body));
+      c = mix(c, (a + b) * 0.5, edge * 0.08 * (1.0 - body));
     }
   }
   if (uBlur < 0.02) {
@@ -292,11 +295,12 @@ void main() {
     tail += texture(uSoft, vUv + step * 2.0).rgb * 0.28;
     tail += texture(uSoft, vUv + step * 3.0).rgb * 0.22;
     tail += texture(uSoft, vUv + step * 4.0).rgb * 0.16;
-    // The eighth-res buffer is only a streak hint. A flat weight turns
-    // the whole frame to mush as soon as speed leaves 9 m/s, while the
-    // radial step is still a fraction of a pixel. uBlur scales the mix.
-    tail = mix(c, tail, 0.7);
-    c = mix(c, tail, (1.0 - sharp) * clamp(uBlur, 0.0, 1.0) * 0.16);
+    // The eighth-res buffer is a streak hint, not the picture. A heavy
+    // mix turns the road ahead to mush as soon as speed leaves 9 m/s.
+    // A step under two pixels adds nothing.
+    tail = mix(c, tail, 0.28);
+    float reach = clamp(span / 2.0, 0.0, 1.0);
+    c = mix(c, tail, (1.0 - sharp) * clamp(uBlur, 0.0, 1.0) * 0.06 * reach);
   }
   c += (fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) - 0.5) / 255.0;
   o = vec4(clamp(c, 0.0, 1.0), 1.0);

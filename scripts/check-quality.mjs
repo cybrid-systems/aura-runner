@@ -460,12 +460,14 @@ assert(postText.includes("FINISH_FS") && !postText.slice(postText.indexOf("const
 assert(postText.includes("uHero"), "high finish keeps the hero sharp");
 assert(postText.includes("uSoft") && postText.includes("8.0 / span"), "speed blur steps at most 8px on the eighth-res tail");
 const finishHigh = postText.slice(postText.indexOf("const FINISH_HIGH_FS"), postText.indexOf("const REFLECT_FS"));
-assert(finishHigh.includes("clamp(uBlur, 0.0, 1.0) * 0.16"), "speed blur scales with uBlur");
-assert(finishHigh.includes("mix(c, tail, 0.7)"), "the soft tail stays a hint of the sharp frame");
+assert(finishHigh.includes("clamp(uBlur, 0.0, 1.0) * 0.06 * reach"), "speed blur scales with uBlur");
+assert(finishHigh.includes("mix(c, tail, 0.28)"), "the soft tail stays a hint of the sharp frame");
+assert(finishHigh.includes("span / 2.0"), "a short step does not veil the road");
 assert(!finishHigh.includes("(1.0 - sharp) * 0.42"), "speed blur is not a flat mix of the eighth-res image");
 assert(!finishHigh.includes("clamp(uBlur, 0.0, 1.0) * 0.36"), "speed blur stays a light mix");
-assert(finishHigh.includes("edge * 0.22 * (1.0 - body)"), "fxaa stays off the runner");
-assert(postText.slice(postText.indexOf("const FINISH_FS"), postText.indexOf("const COMPOSITE_HIGH_FS")).includes("edge * 0.22"), "medium fxaa stays light");
+assert(!finishHigh.includes("clamp(uBlur, 0.0, 1.0) * 0.16"), "speed blur does not go back to the heavier mix");
+assert(finishHigh.includes("edge * 0.08 * (1.0 - body)"), "fxaa stays off the runner");
+assert(postText.slice(postText.indexOf("const FINISH_FS"), postText.indexOf("const COMPOSITE_HIGH_FS")).includes("edge * 0.08"), "medium fxaa stays light");
 assert(finishHigh.includes("/ 255.0"), "the finish dithers under one colour step");
 assert(postText.includes("RGBA16F is filterable"), "the scene buffer samples linearly");
 assert(postText.includes("DOWNSAMPLE_FS") && !postText.includes("blurPass(flat, 2 / flat.w"), "speed blur does not run four full-frame passes");
