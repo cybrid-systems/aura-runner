@@ -133,7 +133,9 @@ try {
   const fair = [];
   let kept = null;
   let ruled = null;
-  for (let i = 0; i < 90 && !kept; i++) {
+  // The proving walk is one physics step at a time (about 16 ms). The
+  // fair form is ~130 steps, so a 90-tick cap gives up before the keep.
+  for (let i = 0; i < 220 && !kept; i++) {
     if (i > 0) io.send({ op: "tick", jump: 0, slide: 0, lane: 0 });
     fair.push(...await readUntil(io, (m) => m.op === "state", 40));
     const landed = fair.some((m) => m.op === "state" && m.motif === fairForm);

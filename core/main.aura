@@ -302,6 +302,7 @@
 ; A kept motif waits here and is autopiloted a few steps per tick.
 ; The reply tick only lays the phrase out, so the run does not stop.
 (define hold-phase 0)
+(define hold-cleared #f)
 (define hold-pieces (list))
 (define hold-sim (list))
 (define hold-body #f)
@@ -2411,23 +2412,39 @@
           (release-slot!)
           #t)))))
 
+; One proving step, then more while this tick still has about 16 ms.
+; The seal is the next tick: the trial does not share the last step.
+; The alive bit is the same one a single budget-N walk would record.
 (define (step-hold!)
-  (let ((rules (if (hash? hold-rules) hold-rules (rules-hash))))
-    (let ((r (autopilot-slice hold-pieces rules hold-body hold-sim hold-i 1)))
-      (set! hold-i (lref r 1))
-      (set! hold-body (lref r 2))
-      (set! hold-sim (lref r 3))
-      ; Sealing opens a trial. chat-open? is the http-post still inside
-      ; this interpreter. A busy flag also stays set while that arm is
-      ; only waiting for the slot, and waiting on it holds the sentence
-      ; past the browser check.
-      (if (and (lref r 0) (not gate-tick) (not (chat-open?))
-               (seal-hold! (if (lref r 4) #t #f)))
-        (set! hold-phase 0)
-        #f))))
+  (let ((rules (if (hash? hold-rules) hold-rules (rules-hash)))
+        (t0 (monotonic-ms)))
+    (let loop ((n 0))
+      (if (or (>= n 8) (not (= hold-phase 1)))
+        #f
+        (let ((r (autopilot-slice hold-pieces rules hold-body hold-sim hold-i 1)))
+          (set! hold-i (lref r 1))
+          (set! hold-body (lref r 2))
+          (set! hold-sim (lref r 3))
+          (if (lref r 0)
+            (begin
+              (set! hold-cleared (if (lref r 4) #t #f))
+              (set! hold-phase 2))
+            (if (< (- (monotonic-ms) t0) 16)
+              (loop (+ n 1))
+              #f)))))))
 
 (define (maybe-hold!)
-  (if (= hold-phase 1) (step-hold!) #f))
+  (cond
+    ((= hold-phase 2)
+     ; chat-open? is the http-post still inside this interpreter.
+     ; A busy trial stays in phase 2 and retries next tick.
+     (if (or gate-tick (chat-open?))
+       #f
+       (if (seal-hold! hold-cleared)
+         (set! hold-phase 0)
+         #f)))
+    ((= hold-phase 1) (step-hold!))
+    (else #f)))
 
 ; An in-progress slice keeps going after a fall so the verdict still lands.
 ; A new dream starts only while the run is alive, a couple of seconds in.
