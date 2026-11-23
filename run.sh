@@ -214,8 +214,8 @@ while kill -0 "$WEB_PID" 2>/dev/null; do
     else
       now_boot="$(cat out/boot.txt 2>/dev/null || true)"
       if [[ -n "$now_boot" && "$now_boot" != "$boot_stamp" ]]; then
+        # The page reads this line. The terminal does not repeat it.
         boot_stamp="$now_boot"
-        echo "$now_boot" >&2
         core_deadline=$((SECONDS + core_wait))
         if (( core_deadline > core_cap )); then core_deadline=$core_cap; fi
       fi
