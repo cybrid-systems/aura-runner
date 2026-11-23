@@ -2316,7 +2316,15 @@
          (load-slow!)
          (set! dream-phase 1)
          (set! dream-open "form"))
-       #f))
+       ; A rejected opening must not retry on every tick: reject-form!
+       ; already recorded the ROLLBACK, and a per-tick retry turned one
+       ; bad layout into 340 decisions in 400 ticks (#57). Back off like
+       ; the one-shot opener did.
+       (begin
+         (set! dream-open #f)
+         (set! dream-phase 0)
+         (set! next-dream (+ run-ms 8000.0))
+         #f)))
     ((string=? dream-open "form")
      (set! dream-form (pattern-form seed (+ next-id 1) band))
      (set! dream-open "layout"))
