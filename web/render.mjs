@@ -328,6 +328,18 @@ function applyMix(pal, spec) {
   }
 }
 
+// A bright fog (Beijing's yellow, a pale sunset) used to cover the road.
+// Keep a tint at the horizon and leave the near picture alone.
+function settleFog(pal) {
+  const fog = pal.fog || [0, 0, 0];
+  const luma = fog[0] * 0.2126 + fog[1] * 0.7152 + fog[2] * 0.0722;
+  if (luma > 0.62) {
+    const cap = 0.055 + (1 - luma) * 0.16;
+    if (pal.fogAmt > cap) pal.fogAmt = cap;
+  }
+  return pal;
+}
+
 // Garden in daylight is the palette above, unchanged. Other venues replace
 // sky, ground, and road colours. A mix recipe is painted from its EDSL spec.
 // Hurdles, gates, coins, and pots stay put so every biome stays readable.
@@ -351,7 +363,7 @@ export function dressPalette(base, biome, mood, spec) {
   // The spec already chose this sky. A named mood must not pull it back.
   if (custom) {
     applyMix(pal, spec);
-    return pal;
+    return settleFog(pal);
   }
   if (name === "city") {
     pal.sky0 = [0.42, 0.52, 0.82];
@@ -383,10 +395,10 @@ export function dressPalette(base, biome, mood, spec) {
     pal.fogAmt = Math.min(0.16, pal.fogAmt);
     pal.hill = [0.08, 0.07, 0.14];
     pal.hill2 = [0.12, 0.08, 0.2];
-    pal.path = [0.12, 0.16, 0.28];
-    pal.grass = [0.07, 0.08, 0.14];
-    pal.grassL = [0.1, 0.12, 0.2];
-    pal.grassR = [0.08, 0.09, 0.16];
+    pal.path = [0.2, 0.26, 0.42];
+    pal.grass = [0.12, 0.14, 0.24];
+    pal.grassL = [0.16, 0.18, 0.32];
+    pal.grassR = [0.14, 0.16, 0.28];
     pal.hedge = [0.2, 0.28, 0.48];
     pal.soil = [0.16, 0.14, 0.18];
     pal.leaf = [0.35, 0.55, 0.9];
@@ -461,7 +473,7 @@ export function dressPalette(base, biome, mood, spec) {
     pal.flower = [0.2, 0.95, 0.9];
     pal.flower2 = [1, 0.35, 0.75];
   }
-  return pal;
+  return settleFog(pal);
 }
 
 function cube() {
@@ -962,6 +974,8 @@ void main() {
   c = mix(c, vec3(1.0, 0.95, 0.88), puff * band * 0.24);
   c = mix(c, vec3(1.0, 0.97, 0.93), smoothstep(0.5, 0.98, cloudC) * smoothstep(0.62, 0.9, uv.y) * 0.12);
   vec2 sun = vec2(x, uv.y) - uSun;
+  // UV is 0..1 on both axes, so a circle there is 16:9 wide on screen.
+  sun.x *= uRes.x / max(uRes.y, 1.0);
   float sd = length(sun);
   float sunAmt = max(uSunAmt, 0.0);
   c += uSunCol * smoothstep(0.14, 0.0, sd) * 0.5 * sunAmt;
@@ -1153,9 +1167,13 @@ void main() {
   vec3 specCol = mix(vec3(1.0, 0.96, 0.88), vC, metal);
   col += specCol * spec * mix(0.45, 0.06, rough) * (1.0 + sheen);
   if (asBox) {
-    float edge = min(min(0.5 - abs(vL.x), 0.5 - abs(vL.y)), 0.5 - abs(vL.z));
-    col *= 0.76 + 0.24 * smoothstep(0.0, 0.16, edge);
-    if (vHalf.y < 0.12) col *= 1.0 - 0.22 * smoothstep(0.32, 0.48, abs(vL.x));
+    // A deck is one run of slabs. Darkening local Z put a black lip on
+    // every join, and the post sharpen turned that lip into a seam.
+    bool deck = vHalf.y < 0.12 && vHalf.x > 0.7;
+    float edge = min(0.5 - abs(vL.x), 0.5 - abs(vL.y));
+    if (!deck) edge = min(edge, 0.5 - abs(vL.z));
+    if (!deck) col *= 0.76 + 0.24 * smoothstep(0.0, 0.16, edge);
+    if (vHalf.y < 0.12 && vHalf.x < 1.2) col *= 1.0 - 0.22 * smoothstep(0.32, 0.48, abs(vL.x));
     // Path slabs are the wide, mid-rough tiles. Curbs and the dashed
     // centre line reuse those pixels instead of extra instances.
     if (vHalf.y < 0.1 && vHalf.x > 0.7 && rough > 0.4 && rough < 0.7 && vKind < 0.5) {
@@ -1211,10 +1229,13 @@ void main() {
     o = vec4(mix(shade, uFog, fog * 0.7), 1.0);
     return;
   }
-  float edge = min(min(0.5 - abs(vL.x), 0.5 - abs(vL.y)), 0.5 - abs(vL.z));
+  // A deck is one run of slabs. Darkening local Z put a black lip on
+  // every join, and the post sharpen turned that lip into a seam.
+  bool deck = vHalf.y < 0.12 && vHalf.x > 0.7;
+  float edge = min(0.5 - abs(vL.x), 0.5 - abs(vL.y));
+  if (!deck) edge = min(edge, 0.5 - abs(vL.z));
   // A wide deck tile is one face of a run. Bending by local position
   // put a separate highlight pillow on every slab.
-  bool deck = vHalf.y < 0.12 && vHalf.x > 0.7;
   vec3 n = normalize(deck ? vN : vN + vL * smoothstep(0.16, 0.0, edge) * 0.85);
   vec3 L = normalize(uLight);
   float ndl = max(dot(n, L), 0.0);
@@ -1236,8 +1257,8 @@ void main() {
       col += vec3(1.0, 0.96, 0.88) * spec * mix(0.42, 0.08, rough);
     }
   }
-  col *= 0.76 + 0.24 * smoothstep(0.0, 0.16, edge);
-  if (vHalf.y < 0.12) col *= 1.0 - 0.22 * smoothstep(0.32, 0.48, abs(vL.x));
+  if (!deck) col *= 0.76 + 0.24 * smoothstep(0.0, 0.16, edge);
+  if (vHalf.y < 0.12 && vHalf.x < 1.2) col *= 1.0 - 0.22 * smoothstep(0.32, 0.48, abs(vL.x));
   if (vHalf.y < 0.1 && vHalf.x > 0.7 && rough > 0.4 && rough < 0.7 && vKind < 0.5) {
     float side = abs(vL.x);
     if (side > 0.39) {
@@ -2970,17 +2991,23 @@ export function createRenderer(canvas, hooks) {
             for (let s = cursor; s < end - 0.001; s += step) {
               const e = Math.min(end, s + step);
               const mid = (s + e) * 0.5;
-              const tile = onRoad(mid, lat);
+              // Outer grass grows away from the road. Near the camera it
+              // reaches the bottom corners; farther out it sits under buildings.
+              const side = lane === 0 ? -1 : lane === 2 ? 1 : 0;
+              // Low keeps the original grass width. Medium and High extend
+              // it so the corners and the buildings have ground under them.
+              const extra = side === 0 || !usePost ? 0 : (dist < 7 ? 5.5 : 3.6);
+              const tile = onRoad(mid, lat + side * extra * 0.5);
+              const slabW = 1.74 + extra;
               // A tenth of a step made each 2 m slab a different flat colour.
               const deck = roadHeight(mid, pieces);
               const grade = roadGrade(mid, pieces);
               // A ramp is one surface. The flat patchwork stays, and a slope
               // overlaps less so the tilted ends do not flicker.
-              let vary = (laneHash(mid * 0.23 + lane * 17.2) - 0.5) * 0.03;
-              if (Math.abs(grade) > 0.001) vary *= 0.4;
-              const top = vary >= 0 ? mix3(baseTop, [1, 1, 1], vary) : mix3(baseTop, [0.16, 0.18, 0.1], -vary);
+              // One colour along the run. A per-slab tint was a stripe every 2 m.
+              const top = baseTop;
               const lip = Math.abs(grade) > 0.001 ? 0.004 : 0.02;
-              push(tile.x, deck + 0.02, tile.z, 1.74, 0.12, e - s + lip, 0, top, lane === 1 ? 0.55 : 0.8, pal.custom && lane === 1 ? 0.08 : 0, tile.psi, 0, grade, grass);
+              push(tile.x, deck + 0.02, tile.z, slabW, 0.12, e - s + lip, 0, top, lane === 1 ? 0.55 : 0.8, pal.custom && lane === 1 ? 0.08 : 0, tile.psi, 0, grade, grass);
             }
           }
           if (i < spans.length) cursor = spans[i][1];
@@ -3080,12 +3107,15 @@ export function createRenderer(canvas, hooks) {
               const kind = laneHash(z * 0.37 + side * 4);
               if (kind > 0.62) {
                 const at = onRoad(cz, side * (5.15 + laneHash(z * 0.2 + side) * 0.5));
-                const y = 2.25 + laneHash(z + side) * 0.7;
-                push(at.x, y, at.z, 1.1, 1.1, 1.1, 1, [0.42, 0.55, 0.9], 0.3, 0.28, at.psi);
-                push(at.x, y, at.z, 1.85, 0.08, 1.85, 1, [0.7, 0.88, 1], 0.2, 0.45, at.psi);
+                const r = 0.62 + laneHash(z + side) * 0.28;
+                const body = laneHash(z * 0.4 + side) > 0.5 ? [0.62, 0.58, 0.95] : [0.78, 0.55, 0.42];
+                contactShadow(at.x, at.z, at.psi, 0, r * 0.9);
+                push(at.x, r, at.z, r * 2, r * 2, r * 2, 1, body, 0.42, 0.06, at.psi);
+                push(at.x, r, at.z, r * 3.1, r * 0.1, r * 3.1, 1, [0.82, 0.9, 1], 0.22, 0.35, at.psi);
               } else if (kind > 0.28) {
                 const at = onRoad(cz, side * (5.05 + laneHash(z + side) * 0.7));
-                push(at.x, 1.1, at.z, 0.68, 0.5, 0.58, 1, [0.48, 0.44, 0.42], 0.7, 0.08, at.psi);
+                contactShadow(at.x, at.z, at.psi, 0, 0.4);
+                push(at.x, 0.28, at.z, 0.72, 0.5, 0.62, 1, [0.62, 0.56, 0.5], 0.62, 0.05, at.psi);
               } else {
                 const inner = side * 4.2;
                 const outer = side * 6.05;

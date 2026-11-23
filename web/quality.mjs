@@ -27,12 +27,12 @@ export const POLICY_TEXT = `(quality lumen
   (reduced-auto low)
   (dpr-medium 2)
   (dpr-high 2)
-  (shadow-medium 1024)
-  (shadow-high 2048)
+  (shadow-medium 512)
+  (shadow-high 1024)
   (bloom-medium 0.18)
   (bloom-high 0.26)
   (pcf-medium 4)
-  (pcf-high 9)
+  (pcf-high 4)
   (fov-medium 0.045)
   (fov-high 0.07)
   (shake-medium 0.04)
@@ -539,7 +539,7 @@ export function tierProfile(tier, policy, caps) {
     pcf: high ? use.pcfHigh : use.pcfMedium,
     shadowSize,
     bloomAmt: high ? use.bloomHigh : use.bloomMedium,
-    chain: high ? "half" : "quarter",
+    chain: "quarter",
     fovKick: high ? use.fovHigh : use.fovMedium,
     shake: high ? use.shakeHigh : use.shakeMedium,
     exposure: high ? use.exposureHigh : use.exposureMedium,

@@ -1,0 +1,73 @@
+; The road index must answer the same height and grade as a full scan,
+; including a hole, a slope, an overlap, and a slab that is not in order.
+; A step with no rival, flyer, or popper must hand back the same list.
+(require "lib/phys")
+(require "std/math" all:)
+
+(define (expect name ok)
+  (display name)
+  (display " ")
+  (display (if ok 1 0))
+  (newline)
+  (if ok #t (error (string-append "road-fast: " name))))
+
+(define (scan x pieces)
+  (let loop ((ps pieces) (hit #f) (lip 0.0) (best -1.0))
+    (if (null? ps)
+      (if hit hit (list lip 0.0))
+      (let ((q (car ps)))
+        (if (not (= (piece-k q) 1.0))
+          (loop (cdr ps) hit lip best)
+          (let* ((x0 (piece-x q))
+                 (w (piece-w q))
+                 (x1 (+ x0 w))
+                 (y0 (piece-y q))
+                 (rise (piece-nth q 6 0.0)))
+            (if (and (>= x x0) (< x x1))
+              (let* ((t (if (> w 0.0001) (/ (- x x0) w) 0.0))
+                     (grade (if (> w 0.0001) (/ rise w) 0.0)))
+                (loop (cdr ps) (list (+ y0 (* rise t)) grade) lip best))
+              (if (and (<= x1 x) (> x1 best))
+                (loop (cdr ps) hit (+ y0 rise) x1)
+                (loop (cdr ps) hit lip best)))))))))
+
+(define (close? a b)
+  (let ((d (- a b)))
+    (< (if (< d 0.0) (- 0.0 d) d) 0.0000001)))
+
+(define (same-road? x pieces)
+  (let ((a (road-at x pieces))
+        (b (scan x pieces)))
+    (and (close? (car a) (car b))
+         (close? (car (cdr a)) (car (cdr b))))))
+
+(define course
+  (list (piece 5.0 1.0 0.4 0.4 1.0 1.0)
+        (piece 1.0 0.0 4.0 0.2 0.0  -1.0 1.0)
+        (piece 3.0 3.0 0.6 0.4 0.2 1.0)
+        (piece 2.0 4.0 1.5 1.0 0.0 1.0)
+        (piece 1.0 6.0 5.0 0.2 1.0 -1.0 -0.5)
+        (piece 9.0 8.0 0.6 0.6 1.0 1.0)
+        (piece 1.0 3.5 2.0 0.2 0.4 -1.0 0.2)))
+
+(define (sweep pieces)
+  (let loop ((i 0) (ok #t))
+    (if (or (not ok) (> i 160))
+      ok
+      (loop (+ i 1) (same-road? (* (exact->inexact i) 0.1) pieces)))))
+
+(expect "flat-slope-gap" (sweep course))
+(expect "before" (same-road? -2.0 course))
+(expect "lip" (same-road? 5.2 course))
+(expect "repeat" (and (same-road? 2.0 course) (same-road? 2.0 course)))
+
+(define flat (list (piece 1.0 0.0 30.0 0.2 0.0) (piece 7.0 4.0 0.8 0.8 0.0 1.0)))
+(define again (step-rivals (nudge-flyers (step-poppers flat (make-player 1.0) PHYS-DT) PHYS-DT) (make-player 1.0) PHYS-DT))
+(expect "same-list" (eq? again flat))
+
+(define rules (rules-of 32.0 11.2 8.0 0.48 0.12 0.12))
+(define p0 (make-player 1.0))
+(define stepped (step p0 flat rules PHYS-DT))
+(define p1 (car stepped))
+(expect "moved" (> (player-x p1) (player-x p0)))
+(expect "still-same" (eq? (car (cdr stepped)) flat))

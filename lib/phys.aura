@@ -180,26 +180,39 @@
           (piece 10.0 x (piece-w q) (piece-h q) (piece-y q) next look spd aim1 cool2 cool-max commit))))))
 
 (define (step-rivals pieces p dt)
-  (let loop ((ps pieces) (acc (list)))
-    (if (null? ps)
-      (reverse acc)
-      (let ((q (car ps)))
-        (if (= (piece-k q) 10.0)
-          (loop (cdr ps) (cons (step-one-rival q p dt) acc))
-          (loop (cdr ps) (cons q acc)))))))
+  (if (not (has-kind? pieces 10.0))
+    pieces
+    (let loop ((ps pieces) (acc (list)))
+      (if (null? ps)
+        (reverse acc)
+        (let ((q (car ps)))
+          (if (= (piece-k q) 10.0)
+            (loop (cdr ps) (cons (step-one-rival q p dt) acc))
+            (loop (cdr ps) (cons q acc))))))))
 
 ; The piece list comes back unchanged when no flyer moved, so a stretch
 ; without a flyer does not rebuild it. Nothing moved means the same list
 ; is returned (the gate's digest is byte-identical); the allocation and
 ; the reverse go away on the frames that touch no flyer.
+; One walk, no cons cells. A stretch with none of this kind returns the
+; same list and allocates nothing. The rebuild below still runs when
+; one is present, and still returns the original list if it did not move.
+(define (has-kind? ps k)
+  (let loop ((ys ps))
+    (if (null? ys)
+      #f
+      (if (= (car (car ys)) k) #t (loop (cdr ys))))))
+
 (define (nudge-flyers pieces dt)
-  (let loop ((ps pieces) (acc (list)) (moved #f))
-    (if (null? ps)
-      (if moved (reverse acc) pieces)
-      (let ((q (car ps)))
-        (if (= (piece-k q) 8.0)
-          (loop (cdr ps) (cons (shift-one q (* (- 0.0 (piece-nth q 7 0.0)) dt)) acc) #t)
-          (loop (cdr ps) (cons q acc) moved))))))
+  (if (not (has-kind? pieces 8.0))
+    pieces
+    (let loop ((ps pieces) (acc (list)) (moved #f))
+      (if (null? ps)
+        (if moved (reverse acc) pieces)
+        (let ((q (car ps)))
+          (if (= (piece-k q) 8.0)
+            (loop (cdr ps) (cons (shift-one q (* (- 0.0 (piece-nth q 7 0.0)) dt)) acc) #t)
+            (loop (cdr ps) (cons q acc) moved)))))))
 
 (define (piece-k q) (car q))
 (define (piece-x q) (car (cdr q)))
@@ -353,25 +366,104 @@
 ; flat piece reports height 0 and grade 0. Over a hole the height is the
 ; lip of the ground that ended just behind, and the grade is 0. Before
 ; any ground, both are 0.
+;
+; The hot path used to walk every piece, and piece-nth, about nine times
+; a step. Ground slabs do not move, so the first call for a list packs
+; them into a flat vector (x0 x1 y0 rise). Later calls on that same list
+; — including later steps, when nothing rebuilt the list — read the
+; vector. A run of slabs in order can stop once a slab starts past x.
+; An overlap or a backwards slab still scans the whole vector, and the
+; later slab in list order still wins. The last (list, x) answer is
+; reused, so height and grade at the same x are one lookup.
+(define road-ix #f)
+(define road-ix-ps #f)
+(define road-ix-qs #f)
+(define road-ix-n 0)
+(define road-ix-sorted #f)
+(define road-memo #f)
+(define road-memo-ps #f)
+(define road-memo-x 0.0)
+(define road-memo-on #f)
+
+; Ground cons cells survive a flyer, a popper, or a picked-up coin: those
+; rebuild the list around the same slabs. Matching the cells reuses the
+; vector instead of walking piece-nth again.
+(define (road-same-ground? pieces)
+  (let ((qs road-ix-qs) (n road-ix-n))
+    (if (not qs)
+      #f
+      (let loop ((ys pieces) (i 0))
+        (if (null? ys)
+          (= i n)
+          (let ((q (car ys)))
+            (if (= (car q) 1.0)
+              (if (and (< i n) (eq? q (vector-ref qs i)))
+                (loop (cdr ys) (+ i 1))
+                #f)
+              (loop (cdr ys) i))))))))
+
+(define (road-index! pieces)
+  (if (and road-ix (eq? pieces road-ix-ps))
+    road-ix-n
+    (if (road-same-ground? pieces)
+      (begin
+        (set! road-ix-ps pieces)
+        (if road-memo-on (set! road-memo-ps pieces) #f)
+        road-ix-n)
+      (let loop ((ys pieces) (acc (list)) (qs (list)) (prev -1.0) (sorted #t) (n 0))
+        (if (null? ys)
+          (begin
+            (set! road-ix (list->vector (reverse acc)))
+            (set! road-ix-qs (list->vector (reverse qs)))
+            (set! road-ix-ps pieces)
+            (set! road-ix-n n)
+            (set! road-ix-sorted sorted)
+            n)
+          (let ((q (car ys)))
+            (if (= (piece-k q) 1.0)
+              (let* ((x0 (piece-x q))
+                     (w (piece-w q))
+                     (x1 (+ x0 w))
+                     (rise (piece-nth q 6 0.0))
+                     (ok (or (< n 1) (>= x0 (- prev 0.0000001)))))
+                (loop (cdr ys)
+                      (cons rise (cons (piece-y q) (cons x1 (cons x0 acc))))
+                      (cons q qs)
+                      x1
+                      (and sorted ok)
+                      (+ n 1)))
+              (loop (cdr ys) acc qs prev sorted n))))))))
+
+(define (road-lookup x pieces)
+  (let ((n (road-index! pieces)))
+    (let loop ((i 0) (hit #f) (lip 0.0) (best -1.0))
+      (if (>= i n)
+        (if hit hit (list lip 0.0))
+        (let* ((b (* i 4))
+               (x0 (vector-ref road-ix b))
+               (x1 (vector-ref road-ix (+ b 1))))
+          (if (and road-ix-sorted (> x0 x))
+            (if hit hit (list lip 0.0))
+            (let ((y0 (vector-ref road-ix (+ b 2)))
+                  (rise (vector-ref road-ix (+ b 3))))
+              (if (and (>= x x0) (< x x1))
+                (let* ((w (- x1 x0))
+                       (t (if (> w 0.0001) (/ (- x x0) w) 0.0))
+                       (grade (if (> w 0.0001) (/ rise w) 0.0)))
+                  (loop (+ i 1) (list (+ y0 (* rise t)) grade) lip best))
+                (if (and (<= x1 x) (> x1 best))
+                  (loop (+ i 1) hit (+ y0 rise) x1)
+                  (loop (+ i 1) hit lip best))))))))))
+
 (define (road-at x pieces)
-  (let loop ((ps pieces) (hit #f) (lip 0.0) (best -1.0))
-    (if (null? ps)
-      (if hit hit (list lip 0.0))
-      (let ((q (car ps)))
-        (if (not (= (piece-k q) 1.0))
-          (loop (cdr ps) hit lip best)
-          (let* ((x0 (piece-x q))
-                 (w (piece-w q))
-                 (x1 (+ x0 w))
-                 (y0 (piece-y q))
-                 (rise (piece-nth q 6 0.0)))
-            (if (and (>= x x0) (< x x1))
-              (let* ((t (if (> w 0.0001) (/ (- x x0) w) 0.0))
-                     (grade (if (> w 0.0001) (/ rise w) 0.0)))
-                (loop (cdr ps) (list (+ y0 (* rise t)) grade) lip best))
-              (if (and (<= x1 x) (> x1 best))
-                (loop (cdr ps) hit (+ y0 rise) x1)
-                (loop (cdr ps) hit lip best)))))))))
+  (if (and road-memo-on (eq? pieces road-memo-ps) (= x road-memo-x))
+    road-memo
+    (let ((hit (road-lookup x pieces)))
+      (set! road-memo-on #t)
+      (set! road-memo-ps pieces)
+      (set! road-memo-x x)
+      (set! road-memo hit)
+      hit)))
 
 (define (road-height x pieces)
   (car (road-at x pieces)))
@@ -503,14 +595,16 @@
           (piece 9.0 x (piece-w q) (piece-h q) y1 lane 0.0 vx vy1 fuse1))))))
 
 (define (step-poppers pieces player dt)
-  (let ((px (player-x player)))
-    (let loop ((ps pieces) (acc (list)))
-      (if (null? ps)
-        (reverse acc)
-        (let ((q (car ps)))
-          (if (= (piece-k q) 9.0)
-            (loop (cdr ps) (cons (step-one-pop q px dt pieces) acc))
-            (loop (cdr ps) (cons q acc))))))))
+  (if (not (has-kind? pieces 9.0))
+    pieces
+    (let ((px (player-x player)))
+      (let loop ((ps pieces) (acc (list)))
+        (if (null? ps)
+          (reverse acc)
+          (let ((q (car ps)))
+            (if (= (piece-k q) 9.0)
+              (loop (cdr ps) (cons (step-one-pop q px dt pieces) acc))
+              (loop (cdr ps) (cons q acc)))))))))
 
 ; Returns (list player pieces event).
 ; event is "ok" "coin" "spring" "bump" "oops" "dead".

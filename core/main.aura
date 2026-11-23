@@ -1599,9 +1599,70 @@
         "banner" banner-text "banner-gain" banner-gain
         "tune" (tune-public)))
 
-; The event is part of the hash when it is built. A later hash-set! on
-; this value is the site cybrid-systems/aura #5274 exits from.
+; Steady ticks omit the look (pals, spec, scene, props). Welcome and a
+; tick that also sends rules carry the full picture. The page keeps the
+; last look when a key is absent. The event is part of the hash when it
+; is built. A later hash-set! on this value is the site
+; cybrid-systems/aura #5274 exits from.
+(define state-full #t)
 (define (state-msg ev)
+  (let ((full state-full))
+    (set! state-full #f)
+    (if full
+      (state-full-msg ev)
+      (state-slim-msg ev))))
+
+(define (state-slim-msg ev)
+  (hash "op" "state"
+        "x" (player-x player)
+        "y" (player-y player)
+        "vy" (player-vy player)
+        "alive" #t
+        "score" (floor (score-now player))
+        "slide" (if (> (pxs player 3) 0.0) 1 0)
+        "lane" (player-lane player)
+        "lx" (player-lx player)
+        "band" band
+        "g" g-now
+        "jump" jump-now
+        "air" air-now
+        "magnet" magnet-now
+        "speed" speed-now
+        "worth" (loot-worth loot-now)
+        "pace" pace
+        "level" level-n
+        "goal" level-x1
+        "level0" level-x0
+        "slide-dur" slide-now
+        "rev" rule-rev
+        "run" (floor run-ms)
+        "hue" hue-now
+        "seed" seed
+        "event" ev
+        "grace" (player-grace player)
+        "hearts" run-hearts
+        "over" (if run-over #t #f)
+        "defeats" run-defeats
+        "pressure" pressure-now
+        "combo" level-combo
+        "near" level-near
+        "overtakes" level-overtakes
+        "skill" (floor skill-seen)
+        "chunks" (length chunks)
+        "bend" bend-now
+        "loot" loot-now
+        "ahead" (obstacles-ahead)
+        "llm-busy" (if (or motif-busy scene-busy pals-busy) #t #f)
+        "motif-busy" (if motif-busy #t #f)
+        "scene-busy" (if scene-busy #t #f)
+        "pals-busy" (if pals-busy #t #f)
+        "watchdogs" llm-watchdogs
+        "stall" (if stall-waiting #t #f)
+        "mult" run-mult
+        "biome" biome-now
+        "mood" mood-now))
+
+(define (state-full-msg ev)
   (hash "op" "state"
         "x" (player-x player)
         "y" (player-y player)
@@ -1773,15 +1834,29 @@
           (note-play! ev held)
           ev)))))
 
-(define (prune-world ps x)
-  (let loop ((ys ps) (acc (list)))
+; Drop coins that were picked up and pieces that have fallen behind.
+; Nothing to drop means the same list, so the road index stays warm.
+(define (prune-drop? q cut)
+  (or (= (piece-k q) 0.0)
+      (< (+ (piece-x q) (piece-w q)) cut)))
+
+(define (prune-needed? ps cut)
+  (let loop ((ys ps))
     (if (null? ys)
-      (reverse acc)
-      (let ((q (car ys)))
-        (if (or (= (piece-k q) 0.0)
-                (< (+ (piece-x q) (piece-w q)) (- x 8.0)))
-          (loop (cdr ys) acc)
-          (loop (cdr ys) (cons q acc)))))))
+      #f
+      (if (prune-drop? (car ys) cut) #t (loop (cdr ys))))))
+
+(define (prune-world ps x)
+  (let ((cut (- x 8.0)))
+    (if (not (prune-needed? ps cut))
+      ps
+      (let loop ((ys ps) (acc (list)))
+        (if (null? ys)
+          (reverse acc)
+          (let ((q (car ys)))
+            (if (prune-drop? q cut)
+              (loop (cdr ys) acc)
+              (loop (cdr ys) (cons q acc)))))))))
 
 (define (keep-event cur next)
   (cond
@@ -4769,6 +4844,7 @@
             (begin
               (send c (welcome-msg))
               (send-all-chunks c)
+              (set! state-full #t)
               (send c (state-msg "ok")))))))))
 
 (define (take-hello-venue! msg)
@@ -4795,6 +4871,7 @@
     (send-welcome! c)
     (try (open-road!) (catch (e) #f))
     (send-all-chunks c)
+    (set! state-full #t)
     (send c (state-msg "ok"))
     (flush-notes! c)))
 
@@ -4807,12 +4884,14 @@
     (send-welcome! c)
     (try (open-road!) (catch (e) #f))
     (send-all-chunks c)
+    (set! state-full #t)
     (send c (state-msg "ok"))
     (flush-notes! c)))
 
 (define (on-resync c msg)
   (send c (hash "op" "resync" "seed" seed))
   (send-all-chunks c)
+  (set! state-full #t)
   (send c (state-msg "ok"))
   (flush-notes! c))
 
@@ -4957,7 +5036,7 @@
     (poll-llm! c)
     (send-new-chunks c)
     (if rules-dirty
-      (begin (send c (rules-msg)) (set! rules-dirty #f))
+      (begin (send c (rules-msg)) (set! rules-dirty #f) (set! state-full #t))
       #f)
     ; Decisions go out before state. The rebind check stops at state, so a
     ; note sent after it can sit unread when the deadline lands on that tick.
@@ -4968,6 +5047,11 @@
     ; note goes out with this tick's flush-notes below.
     (maybe-gate-followup!)
     (flush-notes! c)
+    ; A trial that landed after the first rules send still has to reach
+    ; the page on this tick, picture and all.
+    (if rules-dirty
+      (begin (send c (rules-msg)) (set! rules-dirty #f) (set! state-full #t))
+      #f)
     (send c (state-msg ev))))
 
 (define (on-cards c msg)
@@ -5035,6 +5119,7 @@
   (flush-notes! c)
   (send c (rules-msg))
   (set! rules-dirty #f)
+  (set! state-full #t)
   (send c (state-msg "ok")))
 
 (define (on-audit c msg)
@@ -5210,23 +5295,80 @@
             (set! buf (string-append buf got))
             (read-msg c)))))))
 
+(define (num-field h k)
+  (let ((n (hash-ref h k 0)))
+    (if (number? n) n 0)))
+
+; Several ticks already sitting in the socket become one step. dt is
+; capped at a tenth of a second, the same cap pump! uses for a live
+; tick, so a stall does not fast-forward the road. Jump and slide are
+; kept if either tick asked. Lane presses in the same direction fold
+; into one step. The newest pose fields win.
+(define (merge-ticks a b)
+  (let ((dt (min 100.0 (+ (exact->inexact (num-field a "dt"))
+                          (exact->inexact (num-field b "dt")))))
+        (lane (+ (num-field a "lane") (num-field b "lane"))))
+    (hash "op" "tick"
+          "jump" (max (num-field a "jump") (num-field b "jump"))
+          "slide" (max (num-field a "slide") (num-field b "slide"))
+          "lane" (if (> lane 0.0) 1 (if (< lane 0.0) -1 0))
+          "skill" (num-field b "skill")
+          "combo" (num-field b "combo")
+          "near" (num-field b "near")
+          "overtakes" (num-field b "overtakes")
+          "level" (num-field b "level")
+          "hearts" (num-field b "hearts")
+          "dt" dt
+          "x" (num-field b "x"))))
+
+(define (take-batch c)
+  (let ((first (read-msg c)))
+    (if (not first)
+      #f
+      (let loop ((acc (list first)))
+        (let ((more (take-line)))
+          (if more (loop (cons more acc)) (reverse acc)))))))
+
+; Returns "bye" or "ok". Consecutive ticks in one read are one
+; dispatch, so a disconnect does not simulate the whole backlog.
+(define (dispatch-batch c lines)
+  (let loop ((xs lines) (tick #f))
+    (if (null? xs)
+      (if tick
+        (begin
+          (try (dispatch c tick) (catch (e) (send c (hash "op" "err" "why" "drop"))))
+          "ok")
+        "ok")
+      (let ((msg (try (json-parse (car xs)) (catch (e) #f))))
+        (if (not (hash? msg))
+          (begin
+            (if tick
+              (try (dispatch c tick) (catch (e) (send c (hash "op" "err" "why" "drop"))))
+              #f)
+            (send c (hash "op" "err" "why" "json"))
+            (loop (cdr xs) #f))
+          (let ((op (hash-ref msg "op" "")))
+            (if (string=? op "tick")
+              (loop (cdr xs) (if tick (merge-ticks tick msg) msg))
+              (begin
+                (if tick
+                  (try (dispatch c tick) (catch (e) (send c (hash "op" "err" "why" "drop"))))
+                  #f)
+                (if (string=? op "bye")
+                  "bye"
+                  (begin
+                    (try (dispatch c msg) (catch (e) (send c (hash "op" "err" "why" "drop"))))
+                    (loop (cdr xs) #f)))))))))))
+
 (define (serve-client c)
   (set! buf "")
   (let loop ()
-    (let ((line (read-msg c)))
-      (if (not line)
+    (let ((lines (take-batch c)))
+      (if (not lines)
         #f
-        (let ((msg (try (json-parse line) (catch (e) #f))))
-          (if (not (hash? msg))
-            (begin (send c (hash "op" "err" "why" "json")) (loop))
-            (if (string=? (hash-ref msg "op" "") "bye")
-              #t
-              (begin
-                ; One bad message used to kill the listener. The page then
-                ; stayed on the last boot line forever.
-                (try (dispatch c msg)
-                     (catch (e) (send c (hash "op" "err" "why" "drop"))))
-                (loop)))))))))
+        (if (string=? (dispatch-batch c lines) "bye")
+          #t
+          (loop))))))
 
 (define (start-llm!)
   (set! llm-provider (choose-provider))
@@ -5420,6 +5562,12 @@
   (boot-pals!)
   (set! policy (make-policy))
   (publish-all!)
+  ; The deferred modules used to compile on the first tick after the
+  ; runner moved (about a quarter of a second, once). Load them before
+  ; the port opens so a tick never pays that compile.
+  (boot-note! 93 "正在读余下的规则")
+  (load-slow!)
+  (boot-note! 95 "规则好了")
   ; Bind before the model fibers. A taken port used to exit while those
   ; three receivers were still blocked, and the runtime warned about them.
   (let ((port (port-number)))
