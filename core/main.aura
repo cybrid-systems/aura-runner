@@ -3250,7 +3250,8 @@
                  "scene" (wish-cue-or "The garden stayed" "llm")))
         (set! wish-mine #f)
         (send c (rules-msg))
-        (set! rules-dirty #f)))))
+        (set! rules-dirty #f)
+        (set! state-full #t)))))
 
 ; A pal form and a hero form written next to each other are one phrase.
 ; Searching (pal before (hero used to drop the runner.
@@ -3287,7 +3288,8 @@
                  "pals" (wish-cue-or "The friends stayed" "llm")))
         (set! wish-mine #f)
         (send c (rules-msg))
-        (set! rules-dirty #f)))))
+        (set! rules-dirty #f)
+        (set! state-full #t)))))
 
 (define (take-motif! c msg)
   (let ((tok (hash-ref msg "token" -1)))
@@ -3312,7 +3314,8 @@
                  "llm" (wish-cue-or "That shape drifted away" "llm")))
         (set! wish-mine #f)
         (send c (rules-msg))
-        (set! rules-dirty #f)))))
+        (set! rules-dirty #f)
+        (set! state-full #t)))))
 
 ; Send on the caller. The worker is the only receiver, and we do not
 ; enqueue a second job while it is still inside llm:chat, so this does
@@ -3438,7 +3441,8 @@
                     (refine-miss theme hint fallback held enter "shape")))))))
           (refine-miss theme hint fallback held enter "llm"))
         (send c (rules-msg))
-        (set! rules-dirty #f))))
+        (set! rules-dirty #f)
+        (set! state-full #t))))
 
 (define (ask-pals!)
   (if (or pals-working (not pals-req))
@@ -4359,7 +4363,7 @@
                        (wish-world! c text))))))))))))
   (flush-notes! c)
   (if rules-dirty
-    (begin (send c (rules-msg)) (set! rules-dirty #f))
+    (begin (send c (rules-msg)) (set! rules-dirty #f) (set! state-full #t))
     #f))
 
 (define (poll-llm! c)
@@ -5138,7 +5142,8 @@
                  (else "The light shifted")))
         (flush-notes! c)
         (send c (rules-msg))
-        (set! rules-dirty #f)))))
+        (set! rules-dirty #f)
+        (set! state-full #t)))))
 
 (define (on-propose c msg)
   (let ((text (hash-ref msg "form" "")))
@@ -5210,7 +5215,8 @@
         (note! "KEEP" name "provider" (provider-label name))
         (flush-notes! c)
         (send c (rules-msg))
-        (set! rules-dirty #f)))))
+        (set! rules-dirty #f)
+        (set! state-full #t)))))
 
 (define (chat-url base)
   (let ((n (string-length base)))
