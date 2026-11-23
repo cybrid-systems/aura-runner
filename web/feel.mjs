@@ -5,7 +5,9 @@
 const GRADE = {
   garden: { sat: 1.06, contrast: 1.04, lift: [0.012, 0.008, 0.0], gain: [1.04, 1.01, 0.94] },
   city: { sat: 1.02, contrast: 1.08, lift: [0.0, 0.004, 0.01], gain: [1.04, 0.99, 0.94] },
-  space: { sat: 1.12, contrast: 1.1, lift: [0.0, 0.0, 0.02], gain: [0.88, 0.94, 1.14] },
+  // Warm dust stays warm, but the gain does not pile more yellow on the sky.
+  beijing: { sat: 0.94, contrast: 1.18, lift: [0.0, 0.0, 0.008], gain: [0.9, 0.96, 1.06] },
+  space: { sat: 1.16, contrast: 1.24, lift: [0.01, 0.012, 0.03], gain: [0.9, 0.96, 1.16] },
   coast: { sat: 1.05, contrast: 1.03, lift: [0.008, 0.014, 0.012], gain: [1.0, 1.03, 0.98] },
   ice: { sat: 0.86, contrast: 1.08, lift: [0.016, 0.03, 0.04], gain: [0.84, 0.98, 1.1] },
 };

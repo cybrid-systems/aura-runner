@@ -176,6 +176,12 @@
 (define seed 1)
 (define player (make-player 1.2))
 (define world (list))
+; Static road in a vector, movers in a short list. The tick steps this
+; instead of copying `world` every frame. `world` stays empty.
+(define live-st (live-blank))
+(define staged-chunk #f)
+(define tick-built #f)
+(define tick-rules #f)
 (define chunks (list))
 (define next-id 0)
 (define next-x 0.0)
@@ -982,7 +988,7 @@
 ; Centre of the rival nearest the runner, or #f when this level has none.
 (define (nearest-rival-x)
   (let ((px (player-x player)))
-    (let loop ((ps world) (best #f) (dist 1000000.0))
+    (let loop ((ps (live-movers live-st)) (best #f) (dist 1000000.0))
       (if (null? ps)
         best
         (let ((q (car ps)))
@@ -1290,45 +1296,62 @@
                        (if toss (list toss) (list))
                        (if rival (list rival) (list))))
          (installed (thing-boundary! id))
-         (thing (thing-for-chunk id)))
-    (set! chunks (append chunks (list (hash "id" id "x0" x0 "x1" x1
-                                            "band" b "origin" origin "hue" h
-                                            "margin" margin
-                                            "thing" thing
-                                            "pieces" with))))
-    (set! world (append world with))
-    (set! next-x x1)
-    (set! next-id (+ id 1))
-    (if (and (not slide-hinted) (any-gate? placed))
-      (begin
-        (set! slide-hinted #t)
-        (note! "KEEP" "tutorial" "gate" "Slide under the bar"))
-      #f)
-    id))
+          (thing (thing-for-chunk id)))
+      (set! chunks (append chunks (list (hash "id" id "x0" x0 "x1" x1
+                                              "band" b "origin" origin "hue" h
+                                              "margin" margin
+                                              "thing" thing
+                                              "pieces" with))))
+      (set! live-st (live-absorb live-st with))
+      (set! next-x x1)
+      (set! next-id (+ id 1))
+      (if (and (not slide-hinted) (any-gate? placed))
+        (begin
+          (set! slide-hinted #t)
+          (note! "KEEP" "tutorial" "gate" "Slide under the bar"))
+        #f)
+      installed
+      id))
 
-(define (spawn-chunk!)
+; Build the next chunk without installing it. The live tick either
+; builds or installs, never both, so layout does not stack on a step.
+(define (make-next-chunk)
   (let ((why (choose-band)))
     (apply-feel! why)
-    ; Every other stretch uses the latest kept phrase, so a mutation
-    ; shows up before the seeded road has repeated itself.
-    ; choose-band and apply-feel already ran, so speed-now is the pace
-    ; this stretch will be run at. Ground is laid in time at that pace.
     (if (and (pair? motif-pieces) (> motif-span 0.5) (= (modulo next-id 2) 1))
       (let ((laid (layout-form motif-now (rules-hash))))
         (if (and (hash? laid) (> (hash-ref laid "x1" 0.0) 0.5))
-          (add-chunk! "motif" (hash-ref laid "pieces") (hash-ref laid "x1")
-                      band hue-now (hash-ref laid "margin" 9.0))
-          (add-chunk! "motif" motif-pieces motif-span band hue-now 9.0)))
+          (hash "origin" "motif" "pieces" (hash-ref laid "pieces")
+                "x1" (hash-ref laid "x1") "margin" (hash-ref laid "margin" 9.0))
+          (hash "origin" "motif" "pieces" motif-pieces "x1" motif-span "margin" 9.0)))
       (let ((ch (chunk-or-fallback (pattern-chunk seed next-id band speed-now) speed-now)))
         (if ch
-          (add-chunk! (hash-ref ch "origin" "offline")
-                      (hash-ref ch "pieces") (hash-ref ch "x1") band hue-now
-                      (hash-ref ch "margin" 9.0))
-          ; Layout of the fallback itself failed. Still step the cursor so
-          ; ensure-ahead cannot spin in place and leave the road empty.
-          (add-chunk! "fallback"
-                      (list (piece 3.0 1.2 0.7 0.45 0.0))
-                      8.0 band hue-now 9.0))))))
+          ch
+          (hash "origin" "fallback"
+                "pieces" (list (piece 3.0 1.2 0.7 0.45 0.0))
+                "x1" 8.0 "margin" 9.0))))))
+
+(define (install-chunk! ch)
+  (add-chunk! (hash-ref ch "origin" "offline")
+              (hash-ref ch "pieces")
+              (hash-ref ch "x1")
+              band hue-now
+              (hash-ref ch "margin" 9.0)))
+
+(define (spawn-chunk!)
+  (install-chunk! (make-next-chunk)))
+
+(define (road-due? hint)
+  (let* ((px (player-x player))
+         (want (road-horizon))
+         (h (if (and (number? hint) (> hint 0.0)) hint 0.0))
+         (from (min (+ px 80.0) (max px h))))
+    (not (> next-x (+ from want)))))
+
+(define (road-one!)
+  (if staged-chunk
+    (begin (install-chunk! staged-chunk) (set! staged-chunk #f) (set! tick-built #t))
+    (begin (set! staged-chunk (make-next-chunk)) (set! tick-built #t))))
 
 ; Seconds of road in front of the runner. A fixed 42 m is only a few
 ; seconds once the pace is up, and a slow tick used to let the picture
@@ -1374,12 +1397,20 @@
         (px (player-x player))
         (want (road-horizon)))
     (let ((from (min (+ px 80.0) (max px hint))))
-      (let loop ((guard 0))
-        (if (or (>= guard budget) (> next-x (+ from want)))
+      (if (= budget 1)
+        (if (> next-x (+ from want))
           #t
-          (begin
-            (spawn-chunk!)
-            (loop (+ guard 1))))))))
+          (road-one!))
+        (begin
+          (if staged-chunk
+            (begin (install-chunk! staged-chunk) (set! staged-chunk #f))
+            #f)
+          (let loop ((guard 0))
+            (if (or (>= guard budget) (> next-x (+ from want)))
+              #t
+              (begin
+                (spawn-chunk!)
+                (loop (+ guard 1))))))))))
 
 (define (sync-rules!)
   (publish-named! "rule-gravity" g-now)
@@ -1432,6 +1463,8 @@
   (set! slide-hinted #f)
   (set! player (make-player 1.2))
   (set! world (list))
+  (set! live-st (live-blank))
+  (set! staged-chunk #f)
   (set! chunks (list))
   (set! next-id 0)
   (set! next-x 0.0)
@@ -1599,9 +1632,70 @@
         "banner" banner-text "banner-gain" banner-gain
         "tune" (tune-public)))
 
-; The event is part of the hash when it is built. A later hash-set! on
-; this value is the site cybrid-systems/aura #5274 exits from.
+; Steady ticks omit the look (pals, spec, scene, props). Welcome and a
+; tick that also sends rules carry the full picture. The page keeps the
+; last look when a key is absent. The event is part of the hash when it
+; is built. A later hash-set! on this value is the site
+; cybrid-systems/aura #5274 exits from.
+(define state-full #t)
 (define (state-msg ev)
+  (let ((full state-full))
+    (set! state-full #f)
+    (if full
+      (state-full-msg ev)
+      (state-slim-msg ev))))
+
+(define (state-slim-msg ev)
+  (hash "op" "state"
+        "x" (player-x player)
+        "y" (player-y player)
+        "vy" (player-vy player)
+        "alive" #t
+        "score" (floor (score-now player))
+        "slide" (if (> (pxs player 3) 0.0) 1 0)
+        "lane" (player-lane player)
+        "lx" (player-lx player)
+        "band" band
+        "g" g-now
+        "jump" jump-now
+        "air" air-now
+        "magnet" magnet-now
+        "speed" speed-now
+        "worth" (loot-worth loot-now)
+        "pace" pace
+        "level" level-n
+        "goal" level-x1
+        "level0" level-x0
+        "slide-dur" slide-now
+        "rev" rule-rev
+        "run" (floor run-ms)
+        "hue" hue-now
+        "seed" seed
+        "event" ev
+        "grace" (player-grace player)
+        "hearts" run-hearts
+        "over" (if run-over #t #f)
+        "defeats" run-defeats
+        "pressure" pressure-now
+        "combo" level-combo
+        "near" level-near
+        "overtakes" level-overtakes
+        "skill" (floor skill-seen)
+        "chunks" (length chunks)
+        "bend" bend-now
+        "loot" loot-now
+        "ahead" (obstacles-ahead)
+        "llm-busy" (if (or motif-busy scene-busy pals-busy) #t #f)
+        "motif-busy" (if motif-busy #t #f)
+        "scene-busy" (if scene-busy #t #f)
+        "pals-busy" (if pals-busy #t #f)
+        "watchdogs" llm-watchdogs
+        "stall" (if stall-waiting #t #f)
+        "mult" run-mult
+        "biome" biome-now
+        "mood" mood-now))
+
+(define (state-full-msg ev)
   (hash "op" "state"
         "x" (player-x player)
         "y" (player-y player)
@@ -1705,17 +1799,7 @@
 ; faster on a 120-piece road; verified equal over 19k seed/position/motion
 ; combinations.
 (define (obstacles-ahead)
-  (let* ((px (player-x player))
-         (x0 px)
-         (x1 (+ px 40.0)))
-    (let loop ((ps world) (n 0))
-      (if (null? ps)
-        n
-        (let* ((q (car ps)) (x (piece-x q)))
-          (loop (cdr ps)
-                (if (and (> x x0) (< x x1) (obstacle-kind? (piece-k q)))
-                  (+ n 1)
-                  n)))))))
+  (live-ahead live-st (player-x player)))
 
 (define (mark-cleared!)
   (let loop ((cs chunks))
@@ -1747,14 +1831,24 @@
     (if (null? ys) #f
       (if (= (car ys) id) #t (loop (cdr ys))))))
 
+(define (rules-now)
+  (if tick-rules
+    tick-rules
+    (begin (set! tick-rules (rules-hash)) tick-rules)))
+
+(define (prune-chunks-fast cs x)
+  (if (or (null? cs) (>= (hash-ref (car cs) "x1") (- x 24.0)))
+    cs
+    (prune-chunks cs x)))
+
 (define (one-step!)
   ; Score from before the step. pay-bump floors at zero, so adding the
   ; cost back would inflate a total under 15. Drag from that bump goes too.
   (let ((before (player-score player)))
-    (let ((r (step player world (rules-hash) PHYS-DT)))
+    (let ((r (step-live player live-st (rules-now) PHYS-DT)))
       (set! player (car r))
-      (set! world (prune-world (car (cdr r)) (player-x player)))
-      (set! chunks (prune-chunks chunks (player-x player)))
+      (set! live-st (car (cdr r)))
+      (set! chunks (prune-chunks-fast chunks (player-x player)))
       (if (> (length cleared) 32)
         (set! cleared (take-n cleared 32))
         #f)
@@ -1773,15 +1867,29 @@
           (note-play! ev held)
           ev)))))
 
-(define (prune-world ps x)
-  (let loop ((ys ps) (acc (list)))
+; Drop coins that were picked up and pieces that have fallen behind.
+; Nothing to drop means the same list, so the road index stays warm.
+(define (prune-drop? q cut)
+  (or (= (piece-k q) 0.0)
+      (< (+ (piece-x q) (piece-w q)) cut)))
+
+(define (prune-needed? ps cut)
+  (let loop ((ys ps))
     (if (null? ys)
-      (reverse acc)
-      (let ((q (car ys)))
-        (if (or (= (piece-k q) 0.0)
-                (< (+ (piece-x q) (piece-w q)) (- x 8.0)))
-          (loop (cdr ys) acc)
-          (loop (cdr ys) (cons q acc)))))))
+      #f
+      (if (prune-drop? (car ys) cut) #t (loop (cdr ys))))))
+
+(define (prune-world ps x)
+  (let ((cut (- x 8.0)))
+    (if (not (prune-needed? ps cut))
+      ps
+      (let loop ((ys ps) (acc (list)))
+        (if (null? ys)
+          (reverse acc)
+          (let ((q (car ys)))
+            (if (prune-drop? q cut)
+              (loop (cdr ys) acc)
+              (loop (cdr ys) (cons q acc)))))))))
 
 (define (keep-event cur next)
   (cond
@@ -2134,19 +2242,10 @@
         (set! dream-i 0)))))
 
 (define (step-dream!)
-  ; Three steps a slice, not twelve. The proving walk runs on the tree-walker
-  ; (~7ms/step), so twelve steps landed a ~116ms slice on the frame (p90 ~130,
-  ; max 157) — the recurring dream spike. Three cuts the slice to ~29ms (p90
-  ; ~35, max 49). Controlled back-to-back (same machine, seed 42, 2500 ticks):
-  ; dream walk p50 116 -> 29ms, pump unchanged (p50 47 -> 46), and >80ms frames
-  ; 534 -> 500. Three (not four) because walk + pump must stay under the frame
-  ; budget: 29 + 46 = 75ms < 80, where four's 38 + 46 = 84 crossed it on more
-  ; ticks (779). The same total walk spreads over more ticks, so the dream
-  ; finishes in ~6s instead of ~1.5s, still well inside the 22s next-dream gap.
-  ; Trade (accepted): the seal installs motif-now at run-ms = start+(K/budget)*dt,
-  ; so the cosmetic phrase lands later in simulated time and the seeded run's
-  ; road/bumps shift with it; the road stays autopilot-proven fair. See perf/README.
-  (let ((r (autopilot-slice dream-pieces (rules-hash) dream-body dream-sim dream-i 3)))
+  ; One proving step a tick. The live pump already uses most of the 50 ms
+  ; budget, so a three-step walk does not fit beside it. The phrase still
+  ; has to clear the autopilot before it is kept; the seal just lands later.
+  (let ((r (autopilot-slice dream-pieces (rules-hash) dream-body dream-sim dream-i 1)))
     (set! dream-i (lref r 1))
     (set! dream-body (lref r 2))
     (set! dream-sim (lref r 3))
@@ -2791,7 +2890,7 @@
 
 (define (step-chase!)
   (let ((rules (if (hash? chase-rules) chase-rules (rules-hash))))
-    (let ((r (autopilot-slice chase-road rules chase-body chase-sim chase-i 12)))
+    (let ((r (autopilot-slice chase-road rules chase-body chase-sim chase-i 2)))
       (set! chase-i (lref r 1))
       (set! chase-body (lref r 2))
       (set! chase-sim (lref r 3))
@@ -2807,7 +2906,7 @@
     (step-chase!)))
 
 (define (maybe-dream!)
-  (if (or (env-on? "LUMEN_SKIP_DREAM") (> hold-phase 0) (> card-phase 0) (> primer-phase 0) (llm-posting?) (chat-open?))
+  (if (or tick-built (env-on? "LUMEN_SKIP_DREAM") (> hold-phase 0) (> card-phase 0) (> primer-phase 0) (llm-posting?) (chat-open?))
     #f
     (cond
       ((= dream-phase 1) (step-dream!))
@@ -3151,7 +3250,8 @@
                  "scene" (wish-cue-or "The garden stayed" "llm")))
         (set! wish-mine #f)
         (send c (rules-msg))
-        (set! rules-dirty #f)))))
+        (set! rules-dirty #f)
+        (set! state-full #t)))))
 
 ; A pal form and a hero form written next to each other are one phrase.
 ; Searching (pal before (hero used to drop the runner.
@@ -3188,7 +3288,8 @@
                  "pals" (wish-cue-or "The friends stayed" "llm")))
         (set! wish-mine #f)
         (send c (rules-msg))
-        (set! rules-dirty #f)))))
+        (set! rules-dirty #f)
+        (set! state-full #t)))))
 
 (define (take-motif! c msg)
   (let ((tok (hash-ref msg "token" -1)))
@@ -3213,7 +3314,8 @@
                  "llm" (wish-cue-or "That shape drifted away" "llm")))
         (set! wish-mine #f)
         (send c (rules-msg))
-        (set! rules-dirty #f)))))
+        (set! rules-dirty #f)
+        (set! state-full #t)))))
 
 ; Send on the caller. The worker is the only receiver, and we do not
 ; enqueue a second job while it is still inside llm:chat, so this does
@@ -3339,7 +3441,8 @@
                     (refine-miss theme hint fallback held enter "shape")))))))
           (refine-miss theme hint fallback held enter "llm"))
         (send c (rules-msg))
-        (set! rules-dirty #f))))
+        (set! rules-dirty #f)
+        (set! state-full #t))))
 
 (define (ask-pals!)
   (if (or pals-working (not pals-req))
@@ -4260,7 +4363,7 @@
                        (wish-world! c text))))))))))))
   (flush-notes! c)
   (if rules-dirty
-    (begin (send c (rules-msg)) (set! rules-dirty #f))
+    (begin (send c (rules-msg)) (set! rules-dirty #f) (set! state-full #t))
     #f))
 
 (define (poll-llm! c)
@@ -4429,6 +4532,8 @@
           #f
           (begin
             (set! world (list))
+            (set! live-st (live-blank))
+            (set! staged-chunk #f)
             (set! chunks (list))
             (set! next-id 0)
             (set! next-x 0.0)
@@ -4707,6 +4812,8 @@
     (set! rewind-quiet #t)
     (set! player (make-player 1.2))
     (set! world (list))
+    (set! live-st (live-blank))
+    (set! staged-chunk #f)
     (set! chunks (list))
     (set! next-id 0)
     (set! next-x 0.0)
@@ -4769,6 +4876,7 @@
             (begin
               (send c (welcome-msg))
               (send-all-chunks c)
+              (set! state-full #t)
               (send c (state-msg "ok")))))))))
 
 (define (take-hello-venue! msg)
@@ -4795,6 +4903,7 @@
     (send-welcome! c)
     (try (open-road!) (catch (e) #f))
     (send-all-chunks c)
+    (set! state-full #t)
     (send c (state-msg "ok"))
     (flush-notes! c)))
 
@@ -4807,12 +4916,14 @@
     (send-welcome! c)
     (try (open-road!) (catch (e) #f))
     (send-all-chunks c)
+    (set! state-full #t)
     (send c (state-msg "ok"))
     (flush-notes! c)))
 
 (define (on-resync c msg)
   (send c (hash "op" "resync" "seed" seed))
   (send-all-chunks c)
+  (set! state-full #t)
   (send c (state-msg "ok"))
   (flush-notes! c))
 
@@ -4914,6 +5025,8 @@
 
 (define (on-tick c msg)
   (set! gate-tick #f)
+  (set! tick-built #f)
+  (set! tick-rules #f)
   (record-hold! (or (llm-posting?) (chat-open?)))
   (record-flush!)
   (note-hearts! msg)
@@ -4947,27 +5060,35 @@
     (advance-pace!)
     (maybe-hold!)
     (maybe-cards!)
-    (maybe-chase!)
+    ; A chunk install lays coins. That tick does not also walk a chase
+    ; or a dream, so the two costs do not share the frame.
+    (let ((hint (hash-ref msg "x" 0)))
+      (if (road-due? hint)
+        #f
+        (maybe-chase!))
+      (ensure-ahead! hint 1))
     (maybe-dream!)
     (maybe-primer!)
     (maybe-guests!)
-    ; One chunk a tick: a pace step that widens the horizon lays the rest
-    ; on later frames instead of stacking several ~40ms spawns here.
-    (ensure-ahead! (hash-ref msg "x" 0) 1)
     (poll-llm! c)
     (send-new-chunks c)
     (if rules-dirty
-      (begin (send c (rules-msg)) (set! rules-dirty #f))
+      (begin (send c (rules-msg)) (set! rules-dirty #f) (set! state-full #t))
       #f)
     ; Decisions go out before state. The rebind check stops at state, so a
     ; note sent after it can sit unread when the deadline lands on that tick.
     ; A level's tune trial waits until no chat is holding the slot.
-    (maybe-tune!)
+    (if tick-built #f (maybe-tune!))
     ; One queued gate follow-up (biome / roster evolve) per tick, after the
     ; tune so at most one cosmetic trial lands on a frame. Its KEEP/ROLLBACK
     ; note goes out with this tick's flush-notes below.
-    (maybe-gate-followup!)
+    (if tick-built #f (maybe-gate-followup!))
     (flush-notes! c)
+    ; A trial that landed after the first rules send still has to reach
+    ; the page on this tick, picture and all.
+    (if rules-dirty
+      (begin (send c (rules-msg)) (set! rules-dirty #f) (set! state-full #t))
+      #f)
     (send c (state-msg ev))))
 
 (define (on-cards c msg)
@@ -5021,7 +5142,8 @@
                  (else "The light shifted")))
         (flush-notes! c)
         (send c (rules-msg))
-        (set! rules-dirty #f)))))
+        (set! rules-dirty #f)
+        (set! state-full #t)))))
 
 (define (on-propose c msg)
   (let ((text (hash-ref msg "form" "")))
@@ -5035,6 +5157,7 @@
   (flush-notes! c)
   (send c (rules-msg))
   (set! rules-dirty #f)
+  (set! state-full #t)
   (send c (state-msg "ok")))
 
 (define (on-audit c msg)
@@ -5092,7 +5215,8 @@
         (note! "KEEP" name "provider" (provider-label name))
         (flush-notes! c)
         (send c (rules-msg))
-        (set! rules-dirty #f)))))
+        (set! rules-dirty #f)
+        (set! state-full #t)))))
 
 (define (chat-url base)
   (let ((n (string-length base)))
@@ -5210,23 +5334,80 @@
             (set! buf (string-append buf got))
             (read-msg c)))))))
 
+(define (num-field h k)
+  (let ((n (hash-ref h k 0)))
+    (if (number? n) n 0)))
+
+; Several ticks already sitting in the socket become one step. dt is
+; capped at a tenth of a second, the same cap pump! uses for a live
+; tick, so a stall does not fast-forward the road. Jump and slide are
+; kept if either tick asked. Lane presses in the same direction fold
+; into one step. The newest pose fields win.
+(define (merge-ticks a b)
+  (let ((dt (min 100.0 (+ (exact->inexact (num-field a "dt"))
+                          (exact->inexact (num-field b "dt")))))
+        (lane (+ (num-field a "lane") (num-field b "lane"))))
+    (hash "op" "tick"
+          "jump" (max (num-field a "jump") (num-field b "jump"))
+          "slide" (max (num-field a "slide") (num-field b "slide"))
+          "lane" (if (> lane 0.0) 1 (if (< lane 0.0) -1 0))
+          "skill" (num-field b "skill")
+          "combo" (num-field b "combo")
+          "near" (num-field b "near")
+          "overtakes" (num-field b "overtakes")
+          "level" (num-field b "level")
+          "hearts" (num-field b "hearts")
+          "dt" dt
+          "x" (num-field b "x"))))
+
+(define (take-batch c)
+  (let ((first (read-msg c)))
+    (if (not first)
+      #f
+      (let loop ((acc (list first)))
+        (let ((more (take-line)))
+          (if more (loop (cons more acc)) (reverse acc)))))))
+
+; Returns "bye" or "ok". Consecutive ticks in one read are one
+; dispatch, so a disconnect does not simulate the whole backlog.
+(define (dispatch-batch c lines)
+  (let loop ((xs lines) (tick #f))
+    (if (null? xs)
+      (if tick
+        (begin
+          (try (dispatch c tick) (catch (e) (send c (hash "op" "err" "why" "drop"))))
+          "ok")
+        "ok")
+      (let ((msg (try (json-parse (car xs)) (catch (e) #f))))
+        (if (not (hash? msg))
+          (begin
+            (if tick
+              (try (dispatch c tick) (catch (e) (send c (hash "op" "err" "why" "drop"))))
+              #f)
+            (send c (hash "op" "err" "why" "json"))
+            (loop (cdr xs) #f))
+          (let ((op (hash-ref msg "op" "")))
+            (if (string=? op "tick")
+              (loop (cdr xs) (if tick (merge-ticks tick msg) msg))
+              (begin
+                (if tick
+                  (try (dispatch c tick) (catch (e) (send c (hash "op" "err" "why" "drop"))))
+                  #f)
+                (if (string=? op "bye")
+                  "bye"
+                  (begin
+                    (try (dispatch c msg) (catch (e) (send c (hash "op" "err" "why" "drop"))))
+                    (loop (cdr xs) #f)))))))))))
+
 (define (serve-client c)
   (set! buf "")
   (let loop ()
-    (let ((line (read-msg c)))
-      (if (not line)
+    (let ((lines (take-batch c)))
+      (if (not lines)
         #f
-        (let ((msg (try (json-parse line) (catch (e) #f))))
-          (if (not (hash? msg))
-            (begin (send c (hash "op" "err" "why" "json")) (loop))
-            (if (string=? (hash-ref msg "op" "") "bye")
-              #t
-              (begin
-                ; One bad message used to kill the listener. The page then
-                ; stayed on the last boot line forever.
-                (try (dispatch c msg)
-                     (catch (e) (send c (hash "op" "err" "why" "drop"))))
-                (loop)))))))))
+        (if (string=? (dispatch-batch c lines) "bye")
+          #t
+          (loop))))))
 
 (define (start-llm!)
   (set! llm-provider (choose-provider))
@@ -5420,6 +5601,12 @@
   (boot-pals!)
   (set! policy (make-policy))
   (publish-all!)
+  ; The deferred modules used to compile on the first tick after the
+  ; runner moved (about a quarter of a second, once). Load them before
+  ; the port opens so a tick never pays that compile.
+  (boot-note! 93 "正在读余下的规则")
+  (load-slow!)
+  (boot-note! 95 "规则好了")
   ; Bind before the model fibers. A taken port used to exit while those
   ; three receivers were still blocked, and the runtime warned about them.
   (let ((port (port-number)))

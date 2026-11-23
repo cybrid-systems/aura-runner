@@ -134,17 +134,66 @@ function encodeFrame(text) {
   return Buffer.concat([header, payload]);
 }
 
+// A tick that arrives while the core is still chewing the previous one
+// joins that pending tick. dt is capped at 100 ms, the same cap the
+// core uses for a live step, so a slow core does not fast-forward.
+function coalesceTick(prev, next) {
+  if (!prev) return next;
+  const dt = Math.min(100, (Number(prev.dt) || 0) + (Number(next.dt) || 0));
+  const lane = (Number(prev.lane) || 0) + (Number(next.lane) || 0);
+  return Object.assign({}, next, {
+    dt,
+    jump: Math.max(Number(prev.jump) || 0, Number(next.jump) || 0),
+    slide: Math.max(Number(prev.slide) || 0, Number(next.slide) || 0),
+    lane: lane > 0 ? 1 : lane < 0 ? -1 : 0,
+  });
+}
+
 function attachSocket(ws) {
   const aura = net.connect({ host: "127.0.0.1", port: auraPort });
   aura.setNoDelay(true);
   let buf = Buffer.alloc(0);
+  // One tick is in flight until the core answers with state or an error.
+  // Anything that arrives meanwhile folds into a single follow-up, so the
+  // socket cannot grow a backlog while a step runs long.
+  let tickFlight = false;
+  let pendingTick = null;
+  function writeLine(text) {
+    aura.write(text.endsWith("\n") ? text : text + "\n");
+  }
+  function releaseTick() {
+    tickFlight = false;
+    if (!pendingTick) return;
+    const next = pendingTick;
+    pendingTick = null;
+    tickFlight = true;
+    writeLine(JSON.stringify(next));
+  }
+  function forwardText(text) {
+    let msg = null;
+    try { msg = JSON.parse(text); } catch { msg = null; }
+    if (!msg || msg.op !== "tick") {
+      writeLine(text);
+      return;
+    }
+    if (tickFlight) {
+      pendingTick = coalesceTick(pendingTick, msg);
+      return;
+    }
+    tickFlight = true;
+    writeLine(JSON.stringify(msg));
+  }
   aura.on("data", (chunk) => {
     buf = Buffer.concat([buf, chunk]);
     let nl;
     while ((nl = buf.indexOf(0x0a)) >= 0) {
       const line = buf.subarray(0, nl).toString("utf8");
       buf = buf.subarray(nl + 1);
-      if (line.length) ws.write(encodeFrame(line));
+      if (!line.length) continue;
+      ws.write(encodeFrame(line));
+      let op = "";
+      try { op = JSON.parse(line).op || ""; } catch { op = ""; }
+      if (op === "state" || op === "err") releaseTick();
     }
   });
   // The core accepts one client. Drop that socket as soon as the browser
@@ -186,8 +235,8 @@ function attachSocket(ws) {
       if (op === 8) { dropAura(); try { ws.end(); } catch { /* closed */ } return; }
       if (op === 9) { ws.write(Buffer.from([0x8a, payload.length, ...payload])); continue; }
       if (op === 1) {
-        const text = payload.toString("utf8");
-        aura.write(text.endsWith("\n") ? text : text + "\n");
+        const text = payload.toString("utf8").replace(/\n$/, "");
+        if (text.length) forwardText(text);
       }
     }
   });

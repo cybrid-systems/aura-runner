@@ -41,7 +41,14 @@ float shadeShadow(vec3 world) {
 const LIGHT_LIT = `float sh = shadeShadow(vW);
 float ao = mix(0.62, 1.0, sh);
 float sun = mix(0.35, 1.0, sh);
-vec3 col = vC * (ambient * ao + 0.28 * hemi + (uLightAmt * ndl + 0.12 * wrap) * sun);`;
+vec3 col = vC * (ambient * ao + 0.28 * hemi + (uLightAmt * ndl + 0.12 * wrap) * sun);
+{
+  bool flatDeck = vHalf.y < 0.12 && vHalf.x > 0.7;
+  if (!flatDeck) {
+    float fres = pow(1.0 - max(dot(n, normalize(uEye - vW)), 0.0), 3.0);
+    col += vec3(1.0, 0.97, 0.9) * fres * 0.11;
+  }
+}`;
 
 const SKY_KNEE = `  vec3 over = max(c - vec3(0.9), vec3(0.0));
   c = min(max(c, vec3(0.0)), vec3(0.9)) + over / (vec3(1.0) + over * 10.0);
@@ -127,7 +134,7 @@ vec3 surfaceDetail(vec3 col, float dist) {
       vec2 g = abs(fract(cell) - 0.5);
       float joint = smoothstep(0.5 - w, 0.5, max(g.x, g.y));
       next *= 0.97 + 0.035 * broad + 0.055 * grain * amt;
-      next = mix(next, next * vec3(0.78, 0.74, 0.68), joint * 0.34 * amt);
+      next = mix(next, next * vec3(0.86, 0.82, 0.76), joint * 0.16 * amt);
     } else if (uGround < 1.5) {
       float lane = smoothstep(0.36, 0.1, abs(abs(side) - 0.32));
       next *= 0.975 + 0.03 * broad + 0.045 * grain * amt;
@@ -179,7 +186,7 @@ vec3 surfaceDetail(vec3 col, float dist) {
 }
 vec3 highShade(vec3 col, vec3 fogCol, float fog, float dist) {
   vec3 haze = mix(fogCol, uHaze, clamp(uAerial, 0.0, 1.0) * 0.7);
-  float aerial = min(fog * (1.0 + uAerial * 0.55), 0.34 + uAerial * 0.18);
+  float aerial = min(fog * (1.0 + uAerial * 0.35), 0.16 + uAerial * 0.1);
   vec3 lit = mix(col, haze, clamp(aerial, 0.0, 0.62));
   float gray = dot(lit, vec3(0.299, 0.587, 0.114));
   float far = clamp(dist * 0.0075, 0.0, 1.0) * uAerial;

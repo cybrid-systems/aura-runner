@@ -49,23 +49,32 @@ uniform sampler2D uDepth;
 uniform vec2 uRes;
 in vec2 vUv;
 out vec4 o;
+// Window depth is nonlinear. The same 0.008 meant a few centimetres up
+// close and metres at the horizon. Eye depth matches perspective() near
+// 0.08 and far 80.
+float linZ(float z) {
+  float n = 0.08;
+  float f = 80.0;
+  return (2.0 * n * f) / max(f + n - z * (f - n), 0.0001);
+}
 void main() {
-  float z = texture(uDepth, vUv).r;
-  vec2 px = 2.4 / max(uRes, vec2(1.0));
+  float z = linZ(texture(uDepth, vUv).r);
+  if (z > 36.0) { o = vec4(1.0); return; }
+  vec2 px = 2.2 / max(uRes, vec2(1.0));
   float occ = 0.0;
-  float sz = texture(uDepth, vUv + vec2(px.x, 0.0)).r;
+  float sz = linZ(texture(uDepth, vUv + vec2(px.x, 0.0)).r);
   float diff = z - sz;
-  occ += smoothstep(0.0, 0.008, diff) * (1.0 - smoothstep(0.008, 0.045, diff));
-  sz = texture(uDepth, vUv + vec2(-px.x, px.y * 0.65)).r;
+  occ += smoothstep(0.02, 0.08, diff) * (1.0 - smoothstep(0.08, 0.55, diff));
+  sz = linZ(texture(uDepth, vUv + vec2(-px.x, px.y * 0.65)).r);
   diff = z - sz;
-  occ += smoothstep(0.0, 0.008, diff) * (1.0 - smoothstep(0.008, 0.045, diff));
-  sz = texture(uDepth, vUv + vec2(px.x * 0.45, -px.y)).r;
+  occ += smoothstep(0.02, 0.08, diff) * (1.0 - smoothstep(0.08, 0.55, diff));
+  sz = linZ(texture(uDepth, vUv + vec2(px.x * 0.45, -px.y)).r);
   diff = z - sz;
-  occ += smoothstep(0.0, 0.008, diff) * (1.0 - smoothstep(0.008, 0.045, diff));
-  sz = texture(uDepth, vUv + vec2(-px.x * 0.7, -px.y * 0.8)).r;
+  occ += smoothstep(0.02, 0.08, diff) * (1.0 - smoothstep(0.08, 0.55, diff));
+  sz = linZ(texture(uDepth, vUv + vec2(-px.x * 0.7, -px.y * 0.8)).r);
   diff = z - sz;
-  occ += smoothstep(0.0, 0.008, diff) * (1.0 - smoothstep(0.008, 0.045, diff));
-  float k = clamp(1.0 - occ * 0.18, 0.78, 1.0);
+  occ += smoothstep(0.02, 0.08, diff) * (1.0 - smoothstep(0.08, 0.55, diff));
+  float k = clamp(1.0 - occ * 0.16, 0.82, 1.0);
   o = vec4(k, k, k, 1.0);
 }`;
 
@@ -90,21 +99,22 @@ uniform float uAoAmt;
 uniform float uKeep;
 uniform float uBack;
 uniform float uHit;
+uniform float uDirect;
+uniform vec2 uRes;
 in vec2 vUv;
 out vec4 o;
-// ACES rational fit on the shoulder only. Midtones stay the stylized
-// colour; highlights above 0.8 roll off instead of clipping flat.
+// ACES rational fit across the picture, mixed back toward the stylized
+// colour so midtones do not go grey. Highlights roll off instead of
+// clipping, and the quiet end picks up a little contrast.
 vec3 acesShoulder(vec3 x) {
   vec3 c = max(x, vec3(0.0));
-  vec3 base = min(c, vec3(0.8));
-  vec3 h = max(c - vec3(0.8), vec3(0.0));
   float a = 2.51;
   float b = 0.03;
   float c2 = 2.43;
   float d = 0.59;
   float e = 0.14;
-  vec3 mapped = (h * (a * h + b)) / (h * (c2 * h + d) + e);
-  return clamp(base + mapped * 0.22, 0.0, 1.0);
+  vec3 mapped = clamp((c * (a * c + b)) / (c * (c2 * c + d) + e), 0.0, 1.0);
+  return mix(c, mapped, 0.72);
 }
 void main() {
   vec3 scene = texture(uScene, vUv).rgb;
@@ -139,6 +149,24 @@ void main() {
     col = mix(col, vec3(0.55, 0.7, 0.88), vig * uBack * 0.45);
   }
   if (uHit > 0.001) col = mix(col, vec3(1.0, 0.96, 0.9), uHit * 0.28);
+  // Medium draws this straight to the screen, so the edge pass and the
+  // dither live here. High leaves uDirect at 0 and uses its own finish.
+  if (uDirect > 0.5) {
+    vec2 px = 1.0 / max(uRes, vec2(1.0));
+    float lL = dot(texture(uScene, vUv + vec2(-px.x, 0.0)).rgb, vec3(0.299, 0.587, 0.114));
+    float lR = dot(texture(uScene, vUv + vec2(px.x, 0.0)).rgb, vec3(0.299, 0.587, 0.114));
+    float lU = dot(texture(uScene, vUv + vec2(0.0, px.y)).rgb, vec3(0.299, 0.587, 0.114));
+    float lD = dot(texture(uScene, vUv + vec2(0.0, -px.y)).rgb, vec3(0.299, 0.587, 0.114));
+    vec2 dir = vec2(lL - lR, lU - lD);
+    float edge = clamp(length(dir) * 6.0, 0.0, 1.0);
+    if (edge > 0.35) {
+      dir = dir / max(length(dir), 1e-4) * px;
+      vec3 a = texture(uScene, vUv + dir * 0.5).rgb;
+      vec3 b = texture(uScene, vUv - dir * 0.5).rgb;
+      col = mix(col, (a + b) * 0.5, edge * 0.06);
+    }
+    col += (fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) - 0.5) / 255.0;
+  }
   o = vec4(max(col, vec3(0.0)), 1.0);
 }`;
 
@@ -179,7 +207,9 @@ void main() {
     avg += texture(uTex, vUv - vec2(sp.x, 0.0)).rgb;
     avg += texture(uTex, vUv + vec2(0.0, sp.y)).rgb;
     avg += texture(uTex, vUv - vec2(0.0, sp.y)).rgb;
-    c += (c - avg * 0.25) * 0.18;
+    vec3 hp = c - avg * 0.25;
+    float mag = dot(abs(hp), vec3(0.299, 0.587, 0.114));
+    if (mag > 0.035) c += hp * 0.1;
   }
   if (uBlur > 0.001) {
     vec2 dir = (vUv - uFocus) * uBlur * 0.035;
@@ -282,7 +312,9 @@ void main() {
     avg += texture(uTex, vUv - vec2(sp.x, 0.0)).rgb;
     avg += texture(uTex, vUv + vec2(0.0, sp.y)).rgb;
     avg += texture(uTex, vUv - vec2(0.0, sp.y)).rgb;
-    c += (c - avg * 0.25) * 0.22 * (1.0 - body);
+    vec3 hp = c - avg * 0.25;
+    float mag = dot(abs(hp), vec3(0.299, 0.587, 0.114));
+    if (mag > 0.035) c += hp * 0.1 * (1.0 - body);
   }
   if (uBlur > 0.001) {
     float z = texture(uDepth, vUv).r;
@@ -505,7 +537,11 @@ function colorTex(gl, w, h, hdr) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  if (hdr) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
+  if (hdr === "packed") {
+    // 32-bit float. Medium does not store gloss in alpha, so this is half
+    // the bandwidth of RGBA16F and still leaves room for bloom.
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R11F_G11F_B10F, w, h, 0, gl.RGB, gl.FLOAT, null);
+  } else if (hdr) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
   else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
   return tex;
 }
@@ -643,6 +679,8 @@ export function createPost(gl, compiler) {
     keep: gl.getUniformLocation(composite, "uKeep"),
     back: gl.getUniformLocation(composite, "uBack"),
     hit: gl.getUniformLocation(composite, "uHit"),
+    direct: gl.getUniformLocation(composite, "uDirect"),
+    directRes: gl.getUniformLocation(composite, "uRes"),
     aoDepth: gl.getUniformLocation(aoProg, "uDepth"),
     aoRes: gl.getUniformLocation(aoProg, "uRes"),
     finTex: gl.getUniformLocation(finish, "uTex"),
@@ -712,12 +750,20 @@ export function createPost(gl, compiler) {
   function ensure(w, h, profile) {
     if (failed) return false;
     try {
-      const hdr = !!(profile && profile.hdr);
+      const wantHdr = !!(profile && profile.hdr);
+      // High keeps RGBA16F so the road gloss still has an alpha. Medium
+      // uses a packed float and falls back if the driver refuses it.
+      let hdr = wantHdr && (!profile || profile.tier !== "high") ? "packed" : wantHdr;
       const wantDepth = !!(profile && profile.ssao > 0) && !depthDenied;
       if (!scene || scene.w !== w || scene.h !== h || scene.hdr !== hdr || scene.depthTexOn !== wantDepth) {
         dropTarget(gl, scene);
         scene = null;
         try { scene = target(gl, w, h, hdr, true, wantDepth); } catch { scene = null; }
+        if ((!scene || !scene.ok) && hdr === "packed") {
+          hdr = true;
+          if (scene) dropTarget(gl, scene);
+          try { scene = target(gl, w, h, hdr, true, wantDepth); } catch { scene = null; }
+        }
         if ((!scene || !scene.ok) && wantDepth) {
           depthDenied = true;
           if (scene) dropTarget(gl, scene);
@@ -758,9 +804,11 @@ export function createPost(gl, compiler) {
       aoLive = false;
       if (wantAo) {
         try {
-          if (!aoBuf || aoBuf.w !== qw || aoBuf.h !== qh) {
+          const aw = Math.max(1, Math.min(240, w >> 3));
+          const ah = Math.max(1, Math.min(135, h >> 3));
+          if (!aoBuf || aoBuf.w !== aw || aoBuf.h !== ah) {
             dropTarget(gl, aoBuf);
-            aoBuf = target(gl, qw, qh, false, false);
+            aoBuf = target(gl, aw, ah, false, false);
           }
           aoLive = !!(aoBuf && aoBuf.ok);
         } catch {
@@ -876,6 +924,8 @@ export function createPost(gl, compiler) {
         keep: gl.getUniformLocation(compositeHigh, "uKeep"),
         back: gl.getUniformLocation(compositeHigh, "uBack"),
         hit: gl.getUniformLocation(compositeHigh, "uHit"),
+        direct: gl.getUniformLocation(compositeHigh, "uDirect"),
+        directRes: gl.getUniformLocation(compositeHigh, "uRes"),
         reveal: gl.getUniformLocation(compositeHigh, "uReveal"),
         revealCol: gl.getUniformLocation(compositeHigh, "uRevealCol"),
       };
@@ -1033,7 +1083,10 @@ export function createPost(gl, compiler) {
       reflectOn = true;
     }
     if (highPic && tone.span) tone.span("grade");
-    const gradeOn = !!(profile && profile.fxaa) || (tone.blur > 0);
+    // Medium tones, antialiases, and dithers in the composite, so it does
+    // not take a second full-screen pass. High still finishes on its own.
+    const directTone = !highPic;
+    const gradeOn = !directTone && (!!(profile && profile.fxaa) || (tone.blur > 0));
     const dest = gradeOn && flat && flat.ok ? flat.fb : null;
     gl.bindFramebuffer(gl.FRAMEBUFFER, dest);
     gl.viewport(0, 0, dest ? flat.w : viewW, dest ? flat.h : viewH);
@@ -1073,6 +1126,8 @@ export function createPost(gl, compiler) {
     gl.uniform1f(L.keep, keep);
     gl.uniform1f(L.back, tone.back > 0 ? tone.back : 0);
     gl.uniform1f(L.hit, tone.hit > 0 ? tone.hit : 0);
+    if (L.direct) gl.uniform1f(L.direct, directTone ? 1 : 0);
+    if (L.directRes) gl.uniform2f(L.directRes, viewW, viewH);
     if (highPic) {
       gl.activeTexture(gl.TEXTURE4);
       gl.bindTexture(gl.TEXTURE_2D, reflectOn ? reflBuf.tex : empty);
