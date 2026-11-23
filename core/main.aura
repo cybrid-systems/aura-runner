@@ -303,6 +303,8 @@
 ; The reply tick only lays the phrase out, so the run does not stop.
 (define hold-phase 0)
 (define hold-cleared #f)
+; "propose" is a phrase the player sent. A dream must not replace it.
+(define hold-who "")
 (define hold-pieces (list))
 (define hold-sim (list))
 (define hold-body #f)
@@ -1458,12 +1460,14 @@
     (let ((from (min (+ px 80.0) (max px hint))))
       (if (= budget 1)
         ; A live frame moves a fraction of a metre, so one slice keeps
-        ; the six-second buffer full. A fast-forwarded second (the play
-        ; check) eats that buffer unless this tick finishes about a chunk.
+        ; the six-second buffer full. A fast-forwarded second eats a
+        ; whole chunk. Stopping mid-slice leaves next-x where it was,
+        ; and the runner reaches the end. That tick keeps laying until
+        ; the buffer covers the horizon again.
         (if (or road-job (not (> next-x (+ from want))))
-          (let ((steps (if (> (tick-force-ms) 200.0) 8 1)))
+          (let ((limit (if (> (tick-force-ms) 200.0) 80 1)))
             (let loop ((n 0))
-              (if (or (>= n steps)
+              (if (or (>= n limit)
                       (and (not road-job) (> next-x (+ from want))))
                 #t
                 (begin
@@ -1605,6 +1609,7 @@
   (set! dream-open #f)
   (set! dream-laid #f)
   (set! hold-phase 0)
+  (set! hold-who "")
   (set! tune-job #f)
   (set! chase-seal #f)
   (set! pals-job #f)
@@ -2196,29 +2201,37 @@
                     pending))
     #f))
 
-(define (queue-hold! form laid say)
-  (set! hold-rules (rules-hash))
-  (set! hold-geom (hash-ref laid "geometry" 0.0))
-  (set! hold-budget (hash-ref laid "budget" 0.0))
-  (set! hold-margin (hash-ref laid "margin" 0.0))
-  (set! hold-phase 1)
-  (set! hold-form form)
-  (set! hold-pieces (hash-ref laid "pieces"))
-  (set! hold-span (hash-ref laid "x1"))
-  (set! hold-sim hold-pieces)
-  (set! hold-body (make-player 0.4))
-  (set! hold-i 0)
-  (set! hold-loot (if (string? (hash-ref laid "loot" "")) (hash-ref laid "loot" "") ""))
-  (set! hold-bend (hash-ref laid "bend" -1.0))
-  (set! hold-say (if (string? say) say ""))
-  (show-say! hold-say))
+; A dream opening waits while a proposed phrase is still being proved.
+; A propose replaces a dream that has not sealed yet.
+(define (queue-hold! form laid say who)
+  (if (and (> hold-phase 0) (string=? hold-who "propose") (string=? who "dream"))
+    #f
+    (begin
+      (set! hold-who who)
+      (set! hold-rules (rules-hash))
+      (set! hold-geom (hash-ref laid "geometry" 0.0))
+      (set! hold-budget (hash-ref laid "budget" 0.0))
+      (set! hold-margin (hash-ref laid "margin" 0.0))
+      (set! hold-phase 1)
+      (set! hold-form form)
+      (set! hold-pieces (hash-ref laid "pieces"))
+      (set! hold-span (hash-ref laid "x1"))
+      (set! hold-sim hold-pieces)
+      (set! hold-body (make-player 0.4))
+      (set! hold-i 0)
+      (set! hold-loot (if (string? (hash-ref laid "loot" "")) (hash-ref laid "loot" "") ""))
+      (set! hold-bend (hash-ref laid "bend" -1.0))
+      (set! hold-say (if (string? say) say ""))
+      (show-say! hold-say)
+      #t)))
 
-(define (consider-form! text say)
-  (let ((form (one-line (if (string? text) text ""))))
+(define (consider-form! text say . rest)
+  (let ((who (if (and (pair? rest) (string? (car rest))) (car rest) "propose"))
+        (form (one-line (if (string? text) text ""))))
     (let ((laid (layout-form form (rules-hash))))
       (if (layout-fair? laid)
-        (queue-hold! form laid say)
-        (reject-form! form)))))
+        (queue-hold! form laid say who)
+        (begin (reject-form! form) #f)))))
 
 (define (lref xs i)
   (if (<= i 0) (car xs) (lref (cdr xs) (- i 1))))
@@ -2298,10 +2311,12 @@
 (define (dream-open-step!)
   (cond
     ((string=? dream-open "consider")
-     (load-slow!)
-     (set! dream-phase 1)
-     (consider-form! "(seq (ground 4.0) (gap 5.5) (ground 4.0))" "")
-     (set! dream-open "form"))
+     (if (consider-form! "(seq (ground 4.0) (gap 5.5) (ground 4.0))" "" "dream")
+       (begin
+         (load-slow!)
+         (set! dream-phase 1)
+         (set! dream-open "form"))
+       #f))
     ((string=? dream-open "form")
      (set! dream-form (pattern-form seed (+ next-id 1) band))
      (set! dream-open "layout"))
@@ -2422,26 +2437,23 @@
           (release-slot!)
           #t)))))
 
-; One proving step, then more while this tick still has about 16 ms.
-; The seal is the next tick: the trial does not share the last step.
-; The alive bit is the same one a single budget-N walk would record.
+; Three proving steps a tick. The gated phrase is about 190 steps, and
+; the rebind check only waits 90 ticks, so a single step misses the
+; keep on a slow machine. The alive bit matches one walk of the same
+; length. The trial is the next tick, not this one.
 (define (step-hold!)
-  (let ((rules (if (hash? hold-rules) hold-rules (rules-hash)))
-        (t0 (monotonic-ms)))
-    (let loop ((n 0))
-      (if (or (>= n 8) (not (= hold-phase 1)))
-        #f
-        (let ((r (autopilot-slice hold-pieces rules hold-body hold-sim hold-i 1)))
-          (set! hold-i (lref r 1))
-          (set! hold-body (lref r 2))
-          (set! hold-sim (lref r 3))
-          (if (lref r 0)
-            (begin
-              (set! hold-cleared (if (lref r 4) #t #f))
-              (set! hold-phase 2))
-            (if (< (- (monotonic-ms) t0) 16)
-              (loop (+ n 1))
-              #f)))))))
+  (let ((rules (if (hash? hold-rules) hold-rules (rules-hash))))
+    (if (not (= hold-phase 1))
+      #f
+      (let ((r (autopilot-slice hold-pieces rules hold-body hold-sim hold-i 3)))
+        (set! hold-i (lref r 1))
+        (set! hold-body (lref r 2))
+        (set! hold-sim (lref r 3))
+        (if (lref r 0)
+          (begin
+            (set! hold-cleared (if (lref r 4) #t #f))
+            (set! hold-phase 2))
+          #f)))))
 
 (define (maybe-hold!)
   (cond
@@ -2451,7 +2463,7 @@
      (if (or gate-tick (chat-open?))
        #f
        (if (seal-hold! hold-cleared)
-         (set! hold-phase 0)
+         (begin (set! hold-phase 0) (set! hold-who ""))
          #f)))
     ((= hold-phase 1) (step-hold!))
     (else #f)))
