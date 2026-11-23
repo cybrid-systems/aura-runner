@@ -1265,14 +1265,18 @@
         (list #t pieces #f)
         (if (not (pair? more))
           (list #f pieces (coin-reach-blank (coin-drop pieces) pace span))
-          (if (vector? (list-ref more 10))
-            (list #t
-                  (stamp-coins
-                    (coin-place pieces (list-ref more 0) pace span step cap params seed
-                                (list-ref more 10))
-                    base pressure)
-                  #f)
-            (list #f pieces (coin-reach-more more 12))))))))
+          (if (and (string? (car more)) (string=? (car more) "place"))
+            (let ((placed (coin-place-step more)))
+              (if (car placed)
+                (list #t (stamp-coins (car (cdr placed)) base pressure) #f)
+                (list #f pieces (car (cdr (cdr placed))))))
+            (if (vector? (list-ref more 10))
+              (let ((job (coin-place-start pieces (list-ref more 0) pace span step cap params seed
+                                           (list-ref more 10))))
+                (if (null? (list-ref job 9))
+                  (list #t (stamp-coins pieces base pressure) #f)
+                  (list #f pieces job)))
+              (list #f pieces (coin-reach-more more 4)))))))))
 
 (define (string-pickups pieces band span . rest)
   (if (or (not (pair? pieces)) (not (number? span)) (<= span 1.0))
@@ -1291,22 +1295,72 @@
 
 ; A few seeded stretches, the same way a level lays its coins. The
 ; trial reads this road; it does not run the live player.
+; band x acc phase chunk pick speed use seed
+; phase "pat" lays the pattern. phase "pick" takes one coin-table slice.
+; The finished road matches coin-sample-whole.
+(define (coin-sample-job seed params pace)
+  (list 0 0.0 (list) "pat" #f #f
+        (if (and (number? pace) (> pace 0.1)) pace 8.0)
+        (if (hash? params) params (coin-blank))
+        (floor (if (number? seed) seed 1))))
+
+(define (coin-sample-step job)
+  (load-coins!)
+  (let ((band (list-ref job 0))
+        (x (list-ref job 1))
+        (acc (list-ref job 2))
+        (phase (list-ref job 3))
+        (ch (list-ref job 4))
+        (pick (list-ref job 5))
+        (speed (list-ref job 6))
+        (use (list-ref job 7))
+        (seed (list-ref job 8)))
+    (if (> band 2)
+      (list #t acc #f)
+      (if (string=? phase "pat")
+        (let ((made (chunk-or-fallback (pattern-chunk seed band band speed) speed)))
+          (list #f acc (list band x acc "pick" made #f speed use seed)))
+        (let ((span (hash-ref ch "x1" 8.0))
+              (raw (hash-ref ch "pieces" (list)))
+              (noting coin-note-on))
+          (set! coin-note-on #f)
+          (let ((step (pickup-slice raw band span 1 25.0
+                                    (coin-chunk-seed seed band band)
+                                    use pick)))
+            (set! coin-note-on noting)
+            (if (car step)
+              (list #f acc
+                    (list (+ band 1) (+ x span)
+                          (append acc (shift-pieces (car (cdr step)) x))
+                          "pat" #f #f speed use seed))
+              (list #f acc
+                    (list band x acc "pick" ch (car (cdr (cdr step))) speed use seed)))))))))
+
 (define (coin-sample seed params pace)
+  (let loop ((job (coin-sample-job seed params pace)))
+    (let ((step (coin-sample-step job)))
+      (if (car step)
+        (car (cdr step))
+        (loop (car (cdr (cdr step))))))))
+
+; The unsliced twin. Tests check it against coin-sample.
+(define (coin-sample-whole seed params pace)
   (load-coins!)
   (let ((speed (if (and (number? pace) (> pace 0.1)) pace 8.0))
         (use (if (hash? params) params (coin-blank)))
-        (noting coin-note-on))
+        (noting coin-note-on)
+        (seed-n (floor (if (number? seed) seed 1))))
     (set! coin-note-on #f)
     (let ((road (let loop ((band 0) (x 0.0) (acc (list)))
                   (if (> band 2)
                     acc
                     (let* ((ch (chunk-or-fallback
-                                 (pattern-chunk (floor (if (number? seed) seed 1)) band band speed)
+                                 (pattern-chunk seed-n band band speed)
                                  speed))
                            (span (hash-ref ch "x1" 8.0))
                            (raw (hash-ref ch "pieces" (list)))
                            (placed (string-pickups raw band span 1 25.0
-                                                   (coin-chunk-seed seed band band)
+                                                   (coin-chunk-seed seed-n band band)
                                                    use)))
                       (loop (+ band 1) (+ x span) (append acc (shift-pieces placed x))))))))
       (set! coin-note-on noting)

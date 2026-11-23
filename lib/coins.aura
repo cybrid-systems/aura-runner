@@ -941,21 +941,48 @@
          (made (coin-emit hazards pace table params (cadr chosen) (car chosen) x0 n step base counts)))
     made))
 
-(define (coin-place pieces hazards pace span step cap params seed table)
+; One group of a coin-place. The job is
+; ("place" hazards acc pace span step cap params table groups rng counts).
+; hazards stays the original solids; acc is those solids plus coins so far.
+; Stepping until groups is empty matches the one-shot loop.
+(define (coin-place-start pieces hazards pace span step cap params seed table)
   (let ((gap (* step 1.7))
         (groups (coin-cluster (coin-take pieces) gap))
         (rng (make-random (if (and (number? seed) (> seed 0)) (floor seed) 1))))
+    (list "place" hazards hazards pace span step cap params table groups rng (list 0 0 0))))
+
+(define (coin-place-step job)
+  (let ((hazards (list-ref job 1))
+        (acc (list-ref job 2))
+        (pace (list-ref job 3))
+        (span (list-ref job 4))
+        (step (list-ref job 5))
+        (cap (list-ref job 6))
+        (params (list-ref job 7))
+        (table (list-ref job 8))
+        (groups (list-ref job 9))
+        (rng (list-ref job 10))
+        (counts (list-ref job 11)))
     (if (null? groups)
+      (list #t acc #f)
+      (let ((made (coin-one hazards pace span step cap params table rng (car groups) counts)))
+        (if (and (pair? made) (pair? (cdr made)) (pair? (cdr (cdr made))))
+          (list #f acc
+                (list "place" hazards (append acc (car made)) pace span step cap params table
+                      (cdr groups) (cadr made) (car (cdr (cdr made)))))
+          (list #f acc
+                (list "place" hazards acc pace span step cap params table
+                      (cdr groups) rng counts)))))))
+
+(define (coin-place pieces hazards pace span step cap params seed table)
+  (let ((job (coin-place-start pieces hazards pace span step cap params seed table)))
+    (if (null? (list-ref job 9))
       pieces
-      (let loop ((gs groups) (acc hazards) (rg rng) (counts (list 0 0 0)))
-        (if (null? gs)
-          acc
-          (let ((made (coin-one hazards pace span step cap params table rg (car gs) counts)))
-            ; A short reply must not kill the tick. Skip that group
-            ; and keep the hazards already laid.
-            (if (and (pair? made) (pair? (cdr made)) (pair? (cdr (cdr made))))
-              (loop (cdr gs) (append acc (car made)) (cadr made) (car (cdr (cdr made))))
-              (loop (cdr gs) acc rg counts))))))))
+      (let loop ((job job))
+        (let ((step (coin-place-step job)))
+          (if (car step)
+            (car (cdr step))
+            (loop (car (cdr (cdr step))))))))))
 
 (define (coin-lay pieces pace span step cap params seed)
   (if (or (not (pair? pieces)) (not (number? span)) (<= span 1.0))

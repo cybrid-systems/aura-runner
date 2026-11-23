@@ -1591,7 +1591,13 @@
   (set! scene-next 5000.0)
   (set! pals-next 5000.0)
   (set! dream-phase 0)
+  (set! dream-open #f)
+  (set! dream-laid #f)
   (set! hold-phase 0)
+  (set! tune-job #f)
+  (set! chase-seal #f)
+  (set! pals-job #f)
+  (set! pals-queue (list))
   (if (not speed-lock) (set! speed-now (feel-speed opening-feel)) #f)
   (set! goal-lock #f)
   (set! props (list))
@@ -2273,30 +2279,45 @@
             (release-slot!)
             #t))))))
 
-(define (begin-dream!)
-  (load-slow!)
-  (set! dream-phase 1)
-  (consider-form! "(seq (ground 4.0) (gap 5.5) (ground 4.0))" "")
-  (set! dream-form (pattern-form seed (+ next-id 1) band))
-  (let ((laid (layout-form dream-form (rules-hash))))
-    (if (or (not laid)
-            (> (hash-ref laid "geometry" 1.0) 0.0)
-            (not (margin-ok? laid)))
-      (begin
-        (set! dream-phase 0)
-        (set! next-dream (+ run-ms 8000.0))
-        (remember-hint! dream-form)
-        (note! "ROLLBACK"
-               (if (and laid (> (hash-ref laid "geometry" 1.0) 0.0)) "geometry" "reachable")
-               "motif" "That shape drifted away"
-               (if laid (hash-ref laid "margin" 0.0) 0.0)))
-      (begin
-        (remember-hint! dream-form)
-        (set! dream-pieces (hash-ref laid "pieces"))
-        (set! dream-span (hash-ref laid "x1"))
-        (set! dream-sim dream-pieces)
-        (set! dream-body (make-player 0.4))
-        (set! dream-i 0)))))
+; consider, then the pattern string, then its layout, then the hint.
+; Each is its own tick. The pieces that land are the same ones one
+; layout-form call would have produced.
+(define dream-open #f)
+(define dream-laid #f)
+(define (dream-open-step!)
+  (cond
+    ((string=? dream-open "consider")
+     (load-slow!)
+     (set! dream-phase 1)
+     (consider-form! "(seq (ground 4.0) (gap 5.5) (ground 4.0))" "")
+     (set! dream-open "form"))
+    ((string=? dream-open "form")
+     (set! dream-form (pattern-form seed (+ next-id 1) band))
+     (set! dream-open "layout"))
+    ((string=? dream-open "layout")
+     (set! dream-laid (layout-form dream-form (rules-hash)))
+     (set! dream-open "hint"))
+    (else
+     (let ((laid dream-laid))
+       (set! dream-open #f)
+       (set! dream-laid #f)
+       (remember-hint! dream-form)
+       (if (or (not laid)
+               (> (hash-ref laid "geometry" 1.0) 0.0)
+               (not (margin-ok? laid)))
+         (begin
+           (set! dream-phase 0)
+           (set! next-dream (+ run-ms 8000.0))
+           (note! "ROLLBACK"
+                  (if (and laid (> (hash-ref laid "geometry" 1.0) 0.0)) "geometry" "reachable")
+                  "motif" "That shape drifted away"
+                  (if laid (hash-ref laid "margin" 0.0) 0.0)))
+         (begin
+           (set! dream-pieces (hash-ref laid "pieces"))
+           (set! dream-span (hash-ref laid "x1"))
+           (set! dream-sim dream-pieces)
+           (set! dream-body (make-player 0.4))
+           (set! dream-i 0)))))))
 
 (define (step-dream!)
   ; One proving step a tick. The live pump already uses most of the 50 ms
@@ -2392,7 +2413,7 @@
 
 (define (step-hold!)
   (let ((rules (if (hash? hold-rules) hold-rules (rules-hash))))
-    (let ((r (autopilot-slice hold-pieces rules hold-body hold-sim hold-i 12)))
+    (let ((r (autopilot-slice hold-pieces rules hold-body hold-sim hold-i 1)))
       (set! hold-i (lref r 1))
       (set! hold-body (lref r 2))
       (set! hold-sim (lref r 3))
@@ -2804,14 +2825,55 @@
 
 ; One fork a tick. The same order coin-score-rows used, so the winner
 ; does not change; the gate just does not score every fork on one frame.
-(define (coin-score-rest! cands acc pace engage)
-  (if (null? cands)
-    (coin-apply-choice! (reverse acc))
-    (let ((row (car (coin-score-rows (list (car cands)) pace engage))))
-      (set! gate-followups
-        (cons (lambda () (coin-score-rest! (cdr cands) (cons row acc) pace engage))
-              gate-followups))
-      #t)))
+; One pattern or one coin-table slice of one fork. When that fork's
+; road is finished, the same audit coin-score-rows would have recorded
+; is queued, and the next fork starts on a later tick.
+(define (coin-fork-row cand pace engage road)
+  (let* ((params (hash-ref cand "params" coin-params))
+         (audit (coin-consider coin-params params road pace engage))
+         (why (hash-ref audit "why" "trial"))
+         (fair (string=? (hash-ref audit "kind" "") "KEEP"))
+         (fit (hash-ref audit "fit" 0.0)))
+    (hash "score" (if fair (+ 1.0 (if (number? fit) fit 0.0)) 0.0)
+          "fair" fair
+          "params" params
+          "why" why
+          "label" (hash-ref cand "why" "lanes")
+          "knob" (hash-ref cand "knob" 0)
+          "engage" (hash-ref audit "engage" 0.0))))
+
+; One slice per call. A finished fork records its row on the next
+; tick, and that tick does not also step the next fork. Applying the
+; winner is its own tick. The rows match coin-score-rows.
+(define (coin-score-rest! cands acc pace engage sample)
+  (cond
+    ((and (null? cands) (not sample))
+     (coin-apply-choice! (reverse acc)))
+    (sample
+     (let ((step (coin-sample-step sample)))
+       (set! gate-followups
+         (cons (lambda ()
+                 (if (car step)
+                   (let* ((row (coin-fork-row (car cands) pace engage (car (cdr step))))
+                          (left (cdr cands))
+                          (acc2 (cons row acc)))
+                     (if (null? left)
+                       (set! gate-followups
+                         (cons (lambda () (coin-apply-choice! (reverse acc2)))
+                               gate-followups))
+                       (coin-score-rest! left acc2 pace engage #f)))
+                   (coin-score-rest! cands acc pace engage (car (cdr (cdr step))))))
+               gate-followups))
+       #t))
+    (else
+     (set! gate-followups
+       (cons (lambda ()
+               (coin-score-rest! cands acc pace engage
+                                 (coin-sample-job seed
+                                                   (hash-ref (car cands) "params" coin-params)
+                                                   pace)))
+             gate-followups))
+     #t)))
 
 (define (consider-coins! played bumps coins swaps near . rest)
   (load-coins!)
@@ -2831,17 +2893,12 @@
                         forks
                         (list (hash "params" (hash-ref step "params" coin-params)
                                     "why" (hash-ref step "why" "lanes")
-                                    "knob" (hash-ref step "knob" 0))))))
-             (rows (if (null? (cdr cands))
-                     (coin-score-rows cands pace engage)
-                     #f)))
-        (if rows
-          (coin-apply-choice! rows)
-          (begin
-            (set! gate-followups
-              (cons (lambda () (coin-score-rest! cands (list) pace engage))
-                    gate-followups))
-            #t)))))))
+                                    "knob" (hash-ref step "knob" 0)))))))
+        (begin
+          (set! gate-followups
+            (cons (lambda () (coin-score-rest! cands (list) pace engage #f))
+                  gate-followups))
+          #t))))))
 
 ; A step that the numbers already forbid does not take a slice. A legal
 ; step walks the proving road twelve frames at a time, under the rules
@@ -2965,31 +3022,179 @@
         (release-slot!)
         #t))))
 
+; Shadow-score each alternate one autopilot step at a time. Twelve steps,
+; or an earlier finish, is the same alive? bit chase-slice-alive? returns.
+(define chase-seal #f)
+(define (chase-seal-row row alive static mood)
+  (hash "score" (if alive 1.0 0.0)
+        "fair" (if alive #t #f)
+        "params" (hash-ref row "params" (hash))
+        "why" (if alive "" (if (string=? static "") "reachable" static))
+        "label" (hash-ref row "why" "pace")
+        "knob" (hash-ref row "knob" 0)
+        "mood" (hash-ref row "mood" mood)))
+(define (chase-seal-finish!)
+  (let* ((rows (cons (hash-ref chase-seal "primary") (reverse (hash-ref chase-seal "rows"))))
+         (params (hash-ref chase-seal "params"))
+         (mood (hash-ref chase-seal "mood"))
+         (race (hash-ref chase-seal "race"))
+         (step-why (hash-ref chase-seal "step-why"))
+         (best (fork-choose rows))
+         (winner (if (hash? best) best (hash-ref chase-seal "primary")))
+         (win-fair (hash-ref winner "fair" #f))
+         (win-params (hash-ref winner "params" params))
+         (token (chase-blob win-params))
+         (cand (evo:candidate (hash-ref winner "label" "pace")
+                              (hash "id" (string-append "r" (int-str level-n))
+                                    "target" "rule-chase")))
+         (trial (fork-wrap
+                  (lambda ()
+                    (open-trial cand
+                      (fork-spec token
+                        (lambda (seen)
+                          (hash "status" "ok"
+                                "objectives" (hash "fair" (fork-fair seen token win-fair))
+                                "constraints"
+                                (hash "budget" 0.0 "geometry" 0.0
+                                      "reachable" (if win-fair 0.0 1.0)
+                                      "safe" 0.0)
+                                "behavior"
+                                (hash "band" (exact->inexact band)
+                                      "speed" (exact->inexact (chase-get win-params "speed" 2.1)))))))))))
+    (set! chase-seal #f)
+    (set! chase-phase 0)
+    (if (trial-busy? trial)
+      #f
+      (begin
+        (if (or (not win-fair) (not trial) (not (evo:trial-ok? trial)) (not (evo:feasible? trial)))
+          (chase-note! "ROLLBACK"
+                       (let ((w (hash-ref winner "why" "trial")))
+                         (if (string=? w "") "trial" w))
+                       (hash-ref winner "mood" mood)
+                       race)
+          (begin
+            (set! chase
+                  (chase-keep chase
+                              (hash "moved" #t
+                                    "why" (hash-ref winner "label" step-why)
+                                    "knob" (hash-ref winner "knob" 0)
+                                    "params" win-params
+                                    "race" race)))
+            (note-fork! (chase-note! "KEEP"
+                                     (hash-ref winner "label" step-why)
+                                     (hash-ref winner "mood" mood)
+                                     race)
+                        (> (length rows) 1))))
+        (release-slot!)
+        #t))))
+(define (chase-seal-note! alive)
+  (let* ((row (hash-ref chase-seal "cur"))
+         (static (hash-ref chase-seal "static" ""))
+         (mood (hash-ref chase-seal "mood"))
+         (built (chase-seal-row row alive static mood)))
+    (set! chase-seal
+          (hash "phase" "alt"
+                "alts" (hash-ref chase-seal "alts")
+                "rows" (cons built (hash-ref chase-seal "rows"))
+                "primary" (hash-ref chase-seal "primary")
+                "mood" mood
+                "race" (hash-ref chase-seal "race")
+                "step-why" (hash-ref chase-seal "step-why")
+                "rules" (hash-ref chase-seal "rules")
+                "pace" (hash-ref chase-seal "pace")
+                "params" (hash-ref chase-seal "params")))))
+(define (chase-seal-begin! cleared?)
+  (let* ((plan chase-plan)
+         (params (if (hash? plan) (hash-ref plan "params" chase) chase))
+         (mood (if (hash? plan) (hash-ref plan "mood" "hold") "hold"))
+         (race (if (hash? plan) (hash-ref plan "race" "") ""))
+         (step-why (if (hash? plan) (hash-ref plan "why" "hold") "hold"))
+         (rules (if (hash? chase-rules) chase-rules (rules-hash)))
+         (pace-now (pace-of rules))
+         (static (chase-static-why chase params pace-now))
+         (why (if cleared? (if (string=? static "") "" static) "reachable"))
+         (fair (string=? why ""))
+         (primary (hash "score" (if fair 2.0 0.0)
+                        "fair" fair
+                        "params" params
+                        "why" why
+                        "label" (if (string? step-why) step-why "pace")
+                        "knob" (if (hash? plan) (hash-ref plan "knob" 0) 0)
+                        "mood" mood)))
+    (set! chase-seal
+          (hash "phase" "alt"
+                "alts" (chase-alts chase params mood pace-now)
+                "rows" (list)
+                "primary" primary
+                "mood" mood
+                "race" race
+                "step-why" step-why
+                "rules" rules
+                "pace" pace-now
+                "params" params))
+    (set! chase-phase 2)))
+(define (chase-seal-step!)
+  (if (not chase-seal)
+    #f
+    (let ((phase (hash-ref chase-seal "phase")))
+      (cond
+        ((string=? phase "walk")
+         (let* ((w (hash-ref chase-seal "walk"))
+                (r (autopilot-slice (list-ref w 0) (list-ref w 1)
+                                    (list-ref w 2) (list-ref w 3)
+                                    (list-ref w 4) 1))
+                (left (- (list-ref w 5) 1)))
+           (if (or (not (pair? r)) (car r) (<= left 0))
+             (chase-seal-note! (and (pair? r) (player-alive? (lref r 2))))
+             (set! chase-seal
+                   (hash-set chase-seal "walk"
+                             (list (list-ref w 0) (list-ref w 1)
+                                   (lref r 2) (lref r 3) (lref r 1) left))))))
+        ((string=? phase "trial")
+         (chase-seal-finish!))
+        (else
+         (let ((alts (hash-ref chase-seal "alts" (list))))
+           (if (null? alts)
+             (set! chase-seal (hash-set chase-seal "phase" "trial"))
+             (let* ((row (car alts))
+                    (params (hash-ref row "params" (hash-ref chase-seal "params")))
+                    (static (chase-static-why chase params (hash-ref chase-seal "pace"))))
+               (set! chase-seal (hash-set (hash-set (hash-set chase-seal "alts" (cdr alts))
+                                                    "cur" row)
+                                          "static" static))
+               (if (not (string=? static ""))
+                 (chase-seal-note! #f)
+                 (let ((pieces (chase-pieces params)))
+                   (set! chase-seal
+                         (hash-set (hash-set chase-seal "phase" "walk")
+                                   "walk"
+                                   (list pieces (hash-ref chase-seal "rules")
+                                         (make-player 0.4) pieces 0 12)))))))))))))
+
 (define (step-chase!)
   (let ((rules (if (hash? chase-rules) chase-rules (rules-hash))))
-    (let ((r (autopilot-slice chase-road rules chase-body chase-sim chase-i 2)))
+    (let ((r (autopilot-slice chase-road rules chase-body chase-sim chase-i 1)))
       (set! chase-i (lref r 1))
       (set! chase-body (lref r 2))
       (set! chase-sim (lref r 3))
-      (if (and (lref r 0) (not gate-tick) (not (chat-open?))
-               (seal-chase! (if (lref r 4) #t #f)))
-        (set! chase-phase 0)
+      (if (and (lref r 0) (not gate-tick) (not (chat-open?)))
+        (chase-seal-begin! (if (lref r 4) #t #f))
         #f))))
 
 ; One slice a tick. A phrase, a deck, or a dream already walking goes first.
 (define (maybe-chase!)
-  (if (or (= chase-phase 0) (> hold-phase 0) (> card-phase 0) (> dream-phase 0) (> primer-phase 0))
+  (if (or (= chase-phase 0) (= chase-phase 2) (> hold-phase 0) (> card-phase 0) (> dream-phase 0) (> primer-phase 0))
     #f
     (step-chase!)))
 
 (define (maybe-dream!)
-  (if (or tick-built (env-on? "LUMEN_SKIP_DREAM") (> hold-phase 0) (> card-phase 0) (> primer-phase 0) (llm-posting?) (chat-open?))
+  (if (or tick-built dream-open (env-on? "LUMEN_SKIP_DREAM") (> hold-phase 0) (> card-phase 0) (> primer-phase 0) (llm-posting?) (chat-open?))
     #f
     (cond
-      ((= dream-phase 1) (step-dream!))
+      ((= dream-phase 1) (begin (step-dream!) #t))
       ((> chase-phase 0) #f)
       ((and (player-alive? player) (>= run-ms next-dream))
-       (begin-dream!))
+       (begin (set! dream-open "consider") #t))
       (else #f))))
 
 (define (apply-scene! found form)
@@ -3058,69 +3263,129 @@
 
 ; rest is an optional note arm. Guest cars pass "guest" so a rolled-in
 ; car is not read as a model phrase that restyled the runner.
+; The roster trial used to be one call: check, trial, tell, bind.
+; Each of those is a tick now. The kept phrase is the same one the
+; single call would have published; only the tick it lands on moves.
+(define pals-job #f)
+(define pals-queue (list))
+
 (define (keep-pals! canon merged say hero changed? . rest)
-  (let ((found (check-roster canon))
-        (arm (if (and (pair? rest) (string? (car rest)) (> (string-length (car rest)) 0))
+  (let ((arm (if (and (pair? rest) (string? (car rest)) (> (string-length (car rest)) 0))
                (car rest)
                "pals")))
-    (let* ((cand (evo:candidate canon (hash "id" (string-append "p" (int-str next-id))
-                                            "target" "pals-form")))
-           (trial (open-trial cand
-                              (hash "timeout-ms" 4000
-                                    "apply" (lambda (c) #t)
-                                    "evaluate"
-                                    (lambda (c)
-                                      (hash "status" "ok"
-                                            "objectives"
-                                            (hash "fair" (if (and found (hash-ref found "ok")) 1.0 0.0))
-                                            "constraints"
-                                            (if (and found (hash? (hash-ref found "violations")))
-                                              (hash-ref found "violations")
-                                              (hash "reachable" 1.0))
-                                            "behavior" (hash "band" (exact->inexact band))))))))
-      (if (trial-busy? trial)
-        (begin (set! wait-pals (list canon say)) #f)
+    (set! pals-queue
+      (append pals-queue
+              (list (hash "canon" canon "merged" merged "say" say
+                          "hero" hero "changed" changed? "arm" arm))))
+    #t))
+
+(define (pals-fail! job why)
+  (mark-pals! #f #f)
+  (note! "ROLLBACK" why (hash-ref job "arm" "pals") "The friends stayed")
+  (set! pals-job #f)
+  (set! trial-open #f))
+
+(define (pals-check!)
+  (let ((found (check-roster (hash-ref pals-job "canon" ""))))
+    (if (not (and found (hash-ref found "ok" #f)))
+      (pals-fail! pals-job
+                  (if (and found (string? (hash-ref found "why" #f)))
+                    (hash-ref found "why")
+                    "trial"))
+      (set! pals-job (hash-set (hash-set pals-job "phase" "trial") "found" found)))))
+
+(define (pals-trial!)
+  (let* ((canon (hash-ref pals-job "canon" ""))
+         (found (hash-ref pals-job "found" #f))
+         (cand (evo:candidate canon (hash "id" (string-append "p" (int-str next-id))
+                                          "target" "pals-form")))
+         (trial (open-trial cand
+                            (hash "timeout-ms" 4000
+                                  "apply" (lambda (c) #t)
+                                  "evaluate"
+                                  (lambda (c)
+                                    (hash "status" "ok"
+                                          "objectives"
+                                          (hash "fair" (if (and found (hash-ref found "ok" #f)) 1.0 0.0))
+                                          "constraints"
+                                          (if (and found (hash? (hash-ref found "violations" #f)))
+                                            (hash-ref found "violations")
+                                            (hash "reachable" 1.0))
+                                          "behavior" (hash "band" (exact->inexact band))))))))
+    (if (trial-busy? trial)
+      (begin
+        (set! wait-pals (list canon (hash-ref pals-job "say" "")))
+        (set! pals-job #f))
+      (if (or (not trial) (not (evo:trial-ok? trial)) (not (evo:feasible? trial)))
         (begin
-      (if (or (not found) (not (hash-ref found "ok"))
-              (not trial) (not (evo:trial-ok? trial)) (not (evo:feasible? trial)))
+          (release-slot!)
+          (pals-fail! pals-job "trial"))
         (begin
-          (mark-pals! #f #f)
-          (note! "ROLLBACK" (if (and found (string? (hash-ref found "why")))
-                            (hash-ref found "why")
-                            "trial")
-               arm "The friends stayed"))
-        (let ((prev-form pals-now)
-              (prev-rows pals-rows)
-              (prev-hero hero-now))
-          (set! pals-now canon)
-          (set! pals-rows (hash-ref merged "rows"))
-          (set! hero-now hero)
-          (let ((ev (hash "status" "ok"
-                          "objectives" (hash "fair" 1.0)
-                          "constraints" (hash-ref found "violations")
-                          "behavior" (hash "band" (exact->inexact band))))
-                (search (phrase-search "pals-form")))
-            (try-tell-commit! search cand ev)
-            (if (binding-landed? "pals-form" (pals-body canon) canon)
-              (begin
-                (set! rule-rev (+ rule-rev 1))
-                (set! rules-dirty #t)
-                (mark-pals! #t changed?)
-                (note! "KEEP" "fair" arm
-                      (if (and (string? say) (> (string-length say) 0))
-                        say
-                        (hash-ref merged "cue" "A new friend came along"))
-                      (if changed?
-                        (if (hash? hero) (hash-ref hero "kind" "keeper") "keeper")
-                        (if (string=? arm "pals") "friend" ""))
-                      "Who wants to run with us?"))
-              (begin
-                (set! pals-now prev-form)
-                (set! pals-rows prev-rows)
-                (set! hero-now prev-hero)
-                (mark-pals! #f #f)
-                (note! "ROLLBACK" "commit" arm "The friends stayed")))))
-          (release-slot!)))))))
+          (set! trial-open #t)
+          (set! pals-job (hash-set (hash-set pals-job "phase" "tell") "cand" cand)))))))
+
+(define (pals-tell!)
+  (let* ((found (hash-ref pals-job "found" #f))
+         (cand (hash-ref pals-job "cand" #f))
+         (ev (hash "status" "ok"
+                   "objectives" (hash "fair" 1.0)
+                   "constraints" (hash-ref found "violations" (hash))
+                   "behavior" (hash "band" (exact->inexact band))))
+         (search (phrase-search "pals-form")))
+    (try-tell-commit! search cand ev)
+    (set! pals-job (hash-set pals-job "phase" "bind"))))
+
+(define (pals-bind!)
+  (let ((canon (hash-ref pals-job "canon" ""))
+        (merged (hash-ref pals-job "merged" (hash)))
+        (say (hash-ref pals-job "say" ""))
+        (hero (hash-ref pals-job "hero" #f))
+        (changed? (hash-ref pals-job "changed" #f))
+        (arm (hash-ref pals-job "arm" "pals"))
+        (prev-form pals-now)
+        (prev-rows pals-rows)
+        (prev-hero hero-now))
+    (set! pals-now canon)
+    (set! pals-rows (hash-ref merged "rows" (list)))
+    (set! hero-now hero)
+    (if (binding-landed? "pals-form" (pals-body canon) canon)
+      (begin
+        (set! rule-rev (+ rule-rev 1))
+        (set! rules-dirty #t)
+        (mark-pals! #t changed?)
+        (note! "KEEP" "fair" arm
+               (if (and (string? say) (> (string-length say) 0))
+                 say
+                 (hash-ref merged "cue" "A new friend came along"))
+               (if changed?
+                 (if (hash? hero) (hash-ref hero "kind" "keeper") "keeper")
+                 (if (string=? arm "pals") "friend" ""))
+               "Who wants to run with us?"))
+      (begin
+        (set! pals-now prev-form)
+        (set! pals-rows prev-rows)
+        (set! hero-now prev-hero)
+        (mark-pals! #f #f)
+        (note! "ROLLBACK" "commit" arm "The friends stayed")))
+    (release-slot!)
+    (set! trial-open #f)
+    (set! pals-job #f)))
+
+; One phase. A fresh request starts at the check; a job already open
+; takes its next phase. The slot stays held from a kept trial until bind.
+(define (pals-step!)
+  (cond
+    ((not pals-job)
+     (if (null? pals-queue)
+       #f
+       (begin
+         (set! pals-job (hash-set (car pals-queue) "phase" "check"))
+         (set! pals-queue (cdr pals-queue))
+         (pals-check!))))
+    ((string=? (hash-ref pals-job "phase" "") "trial") (pals-trial!))
+    ((string=? (hash-ref pals-job "phase" "") "tell") (pals-tell!))
+    ((string=? (hash-ref pals-job "phase" "") "bind") (pals-bind!))
+    (else (pals-check!))))
 
 (define (consider-pals! text say)
   (let ((incoming (one-line (if (string? text) text ""))))
@@ -5065,26 +5330,61 @@
 
 ; Three children, one gate. The shortlist is this tune list. A spoken
 ; biome wish still waits on llm:chat; that delay is not this path.
-(define (tune-commit!)
-  (set! tune-due #f)
+; One evolve, one checked row, the prescreen, or the gate. The form
+; that lands is the same one tune-choose would pick from these three
+; children, because each step is that function split apart.
+(define tune-job #f)
+(define (tune-arm!)
   (load-tune-pick!)
-  (let* ((base (+ (floor seed) level-n))
-         (pace (if (and (number? speed-now) (> speed-now 0.1)) speed-now 8.0))
-         (forms (list (music-evolve tune-now base)
-                      (music-evolve tune-now (+ base 3))
-                      (music-evolve tune-now (+ base 7))))
-         (born (tune-choose forms pace))
-         (gate (music-gate born)))
-    (if (string=? (hash-ref gate "verdict" "") "KEEP")
-      (begin
-        (set! tune-prev tune-now)
-        (set! tune-now born)
-        (tune-send! "KEEP" "fair" born))
-      (tune-send! "ROLLBACK" (hash-ref gate "why" "bounds") tune-now))))
+  (set! tune-due #f)
+  (set! tune-job (list "e0" (list) (list)
+                       (+ (floor seed) level-n)
+                       (if (and (number? speed-now) (> speed-now 0.1)) speed-now 8.0)
+                       "")))
+(define (tune-step!)
+  (if (not tune-job)
+    #f
+    (let ((phase (list-ref tune-job 0))
+          (forms (list-ref tune-job 1))
+          (rows (list-ref tune-job 2))
+          (base (list-ref tune-job 3))
+          (pace (list-ref tune-job 4)))
+      (cond
+        ((string=? phase "e0")
+         (set! tune-job (list "e1" (list (music-evolve tune-now base)) (list) base pace "")))
+        ((string=? phase "e1")
+         (set! tune-job (list "e2" (append forms (list (music-evolve tune-now (+ base 3)))) (list) base pace "")))
+        ((string=? phase "e2")
+         (set! tune-job (list "r0" (append forms (list (music-evolve tune-now (+ base 7)))) (list) base pace "")))
+        ((string=? phase "r0")
+         (set! tune-job (list "r1" forms (list (tune-row (car forms) pace)) base pace "")))
+        ((string=? phase "r1")
+         (set! tune-job (list "r2" forms (append rows (list (tune-row (car (cdr forms)) pace))) base pace "")))
+        ((string=? phase "r2")
+         (set! tune-job (list "pre" forms (append rows (list (tune-row (car (cdr (cdr forms))) pace))) base pace "")))
+        ((string=? phase "pre")
+         (let* ((screen (tune-prescreen rows))
+                (keep (hash-ref screen "keep" (list)))
+                (form (if (pair? keep) (hash-ref (car keep) "form" "") "")))
+           (set! tune-job (list "gate" forms rows base pace
+                                (if (and (string? form) (> (string-length form) 0))
+                                  form
+                                  (if (pair? forms) (car forms) ""))))))
+        (else
+         (let ((born (list-ref tune-job 5))
+               (gate (music-gate born)))
+           (if (string=? (hash-ref gate "verdict" "") "KEEP")
+             (begin
+               (set! tune-prev tune-now)
+               (set! tune-now born)
+               (tune-send! "KEEP" "fair" born))
+             (tune-send! "ROLLBACK" (hash-ref gate "why" "bounds") tune-now))
+           (set! tune-job #f)))))))
 
 (define (maybe-tune!)
-  (if (and tune-due (not gate-tick) (not (llm-posting?)) (not trial-open))
-    (try (tune-commit!) (catch (e) (set! tune-due #f)))
+  (if (and tune-due (not tune-job) (not pals-job) (null? pals-queue)
+           (not gate-tick) (not (llm-posting?)) (not trial-open))
+    (try (tune-arm!) (catch (e) (set! tune-due #f)))
     #f))
 
 ; Drain one queued gate follow-up per tick (a friend's restyle). One
@@ -5093,7 +5393,8 @@
 ; maybe-tune! does. A thunk that raises is dropped, not retried. The
 ; gate already stepped the venue and kept the run.
 (define (maybe-gate-followup!)
-  (if (or gate-tick (null? gate-followups) (llm-posting?) (chat-open?) trial-open)
+  (if (or gate-tick (null? gate-followups) (llm-posting?) (chat-open?) trial-open
+          pals-job (pair? pals-queue))
       #f
       (let ((job (car gate-followups)))
         (set! gate-followups (cdr gate-followups))
@@ -5164,14 +5465,17 @@
       (begin (send c (rules-msg)) (set! rules-dirty #f) (set! state-full #t))
       #f)
     (send c (state-msg ev))
-    ; Dream and the guest trial run after the reply. A tick that just
-    ; advanced the road does neither, so they do not share that frame.
-    ; The next read waits out whatever is left, one of them at a time.
+    ; One slice after the reply: a tune child, a dream phase, one chase
+    ; shadow step, or the dream walk. A road tick does none of these.
     (if (or tick-built road-job)
       #f
-      (begin
-        (maybe-dream!)
-        (if (or tick-built road-job) #f (maybe-guests!))))))
+      (cond
+        ((or pals-job (pair? pals-queue)) (pals-step!))
+        (tune-job (tune-step!))
+        (dream-open (dream-open-step!))
+        ((= chase-phase 2) (chase-seal-step!))
+        ((maybe-dream!) #t)
+        (else (maybe-guests!))))))
 
 (define (on-cards c msg)
   (let ((act (hash-ref msg "action" "equip")))
