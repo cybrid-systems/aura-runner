@@ -804,9 +804,11 @@ export function createPost(gl, compiler) {
       aoLive = false;
       if (wantAo) {
         try {
-          if (!aoBuf || aoBuf.w !== qw || aoBuf.h !== qh) {
+          const aw = Math.max(1, Math.min(240, w >> 3));
+          const ah = Math.max(1, Math.min(135, h >> 3));
+          if (!aoBuf || aoBuf.w !== aw || aoBuf.h !== ah) {
             dropTarget(gl, aoBuf);
-            aoBuf = target(gl, qw, qh, false, false);
+            aoBuf = target(gl, aw, ah, false, false);
           }
           aoLive = !!(aoBuf && aoBuf.ok);
         } catch {

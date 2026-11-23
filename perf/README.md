@@ -603,7 +603,7 @@ is the `evo:trial` workspace machinery and the rebind. The walk runs wholly
 on the tree-walker (`closure:stats` ir-calls=0, ~7 ms/step), the same
 runtime-bound physics cost as the live tick.
 
-**Landed: the slice budget is 3, not 12.** Controlled back-to-back (same
+**Landed: the slice budget is 3, not 12.** The live tick later dropped this to 1 step, and the chase walk to 2, once the physics pump itself was most of the 50 ms budget. Controlled back-to-back (same
 machine, seed 42, 2500 ticks, instrumented `pump` + walk):
 
 | budget | walk p50 / max | pump p50 / p90 | >80 ms frames |

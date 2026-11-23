@@ -176,6 +176,12 @@
 (define seed 1)
 (define player (make-player 1.2))
 (define world (list))
+; Static road in a vector, movers in a short list. The tick steps this
+; instead of copying `world` every frame. `world` stays empty.
+(define live-st (live-blank))
+(define staged-chunk #f)
+(define tick-built #f)
+(define tick-rules #f)
 (define chunks (list))
 (define next-id 0)
 (define next-x 0.0)
@@ -982,7 +988,7 @@
 ; Centre of the rival nearest the runner, or #f when this level has none.
 (define (nearest-rival-x)
   (let ((px (player-x player)))
-    (let loop ((ps world) (best #f) (dist 1000000.0))
+    (let loop ((ps (live-movers live-st)) (best #f) (dist 1000000.0))
       (if (null? ps)
         best
         (let ((q (car ps)))
@@ -1290,45 +1296,62 @@
                        (if toss (list toss) (list))
                        (if rival (list rival) (list))))
          (installed (thing-boundary! id))
-         (thing (thing-for-chunk id)))
-    (set! chunks (append chunks (list (hash "id" id "x0" x0 "x1" x1
-                                            "band" b "origin" origin "hue" h
-                                            "margin" margin
-                                            "thing" thing
-                                            "pieces" with))))
-    (set! world (append world with))
-    (set! next-x x1)
-    (set! next-id (+ id 1))
-    (if (and (not slide-hinted) (any-gate? placed))
-      (begin
-        (set! slide-hinted #t)
-        (note! "KEEP" "tutorial" "gate" "Slide under the bar"))
-      #f)
-    id))
+          (thing (thing-for-chunk id)))
+      (set! chunks (append chunks (list (hash "id" id "x0" x0 "x1" x1
+                                              "band" b "origin" origin "hue" h
+                                              "margin" margin
+                                              "thing" thing
+                                              "pieces" with))))
+      (set! live-st (live-absorb live-st with))
+      (set! next-x x1)
+      (set! next-id (+ id 1))
+      (if (and (not slide-hinted) (any-gate? placed))
+        (begin
+          (set! slide-hinted #t)
+          (note! "KEEP" "tutorial" "gate" "Slide under the bar"))
+        #f)
+      installed
+      id))
 
-(define (spawn-chunk!)
+; Build the next chunk without installing it. The live tick either
+; builds or installs, never both, so layout does not stack on a step.
+(define (make-next-chunk)
   (let ((why (choose-band)))
     (apply-feel! why)
-    ; Every other stretch uses the latest kept phrase, so a mutation
-    ; shows up before the seeded road has repeated itself.
-    ; choose-band and apply-feel already ran, so speed-now is the pace
-    ; this stretch will be run at. Ground is laid in time at that pace.
     (if (and (pair? motif-pieces) (> motif-span 0.5) (= (modulo next-id 2) 1))
       (let ((laid (layout-form motif-now (rules-hash))))
         (if (and (hash? laid) (> (hash-ref laid "x1" 0.0) 0.5))
-          (add-chunk! "motif" (hash-ref laid "pieces") (hash-ref laid "x1")
-                      band hue-now (hash-ref laid "margin" 9.0))
-          (add-chunk! "motif" motif-pieces motif-span band hue-now 9.0)))
+          (hash "origin" "motif" "pieces" (hash-ref laid "pieces")
+                "x1" (hash-ref laid "x1") "margin" (hash-ref laid "margin" 9.0))
+          (hash "origin" "motif" "pieces" motif-pieces "x1" motif-span "margin" 9.0)))
       (let ((ch (chunk-or-fallback (pattern-chunk seed next-id band speed-now) speed-now)))
         (if ch
-          (add-chunk! (hash-ref ch "origin" "offline")
-                      (hash-ref ch "pieces") (hash-ref ch "x1") band hue-now
-                      (hash-ref ch "margin" 9.0))
-          ; Layout of the fallback itself failed. Still step the cursor so
-          ; ensure-ahead cannot spin in place and leave the road empty.
-          (add-chunk! "fallback"
-                      (list (piece 3.0 1.2 0.7 0.45 0.0))
-                      8.0 band hue-now 9.0))))))
+          ch
+          (hash "origin" "fallback"
+                "pieces" (list (piece 3.0 1.2 0.7 0.45 0.0))
+                "x1" 8.0 "margin" 9.0))))))
+
+(define (install-chunk! ch)
+  (add-chunk! (hash-ref ch "origin" "offline")
+              (hash-ref ch "pieces")
+              (hash-ref ch "x1")
+              band hue-now
+              (hash-ref ch "margin" 9.0)))
+
+(define (spawn-chunk!)
+  (install-chunk! (make-next-chunk)))
+
+(define (road-due? hint)
+  (let* ((px (player-x player))
+         (want (road-horizon))
+         (h (if (and (number? hint) (> hint 0.0)) hint 0.0))
+         (from (min (+ px 80.0) (max px h))))
+    (not (> next-x (+ from want)))))
+
+(define (road-one!)
+  (if staged-chunk
+    (begin (install-chunk! staged-chunk) (set! staged-chunk #f) (set! tick-built #t))
+    (begin (set! staged-chunk (make-next-chunk)) (set! tick-built #t))))
 
 ; Seconds of road in front of the runner. A fixed 42 m is only a few
 ; seconds once the pace is up, and a slow tick used to let the picture
@@ -1374,12 +1397,20 @@
         (px (player-x player))
         (want (road-horizon)))
     (let ((from (min (+ px 80.0) (max px hint))))
-      (let loop ((guard 0))
-        (if (or (>= guard budget) (> next-x (+ from want)))
+      (if (= budget 1)
+        (if (> next-x (+ from want))
           #t
-          (begin
-            (spawn-chunk!)
-            (loop (+ guard 1))))))))
+          (road-one!))
+        (begin
+          (if staged-chunk
+            (begin (install-chunk! staged-chunk) (set! staged-chunk #f))
+            #f)
+          (let loop ((guard 0))
+            (if (or (>= guard budget) (> next-x (+ from want)))
+              #t
+              (begin
+                (spawn-chunk!)
+                (loop (+ guard 1))))))))))
 
 (define (sync-rules!)
   (publish-named! "rule-gravity" g-now)
@@ -1432,6 +1463,8 @@
   (set! slide-hinted #f)
   (set! player (make-player 1.2))
   (set! world (list))
+  (set! live-st (live-blank))
+  (set! staged-chunk #f)
   (set! chunks (list))
   (set! next-id 0)
   (set! next-x 0.0)
@@ -1766,17 +1799,7 @@
 ; faster on a 120-piece road; verified equal over 19k seed/position/motion
 ; combinations.
 (define (obstacles-ahead)
-  (let* ((px (player-x player))
-         (x0 px)
-         (x1 (+ px 40.0)))
-    (let loop ((ps world) (n 0))
-      (if (null? ps)
-        n
-        (let* ((q (car ps)) (x (piece-x q)))
-          (loop (cdr ps)
-                (if (and (> x x0) (< x x1) (obstacle-kind? (piece-k q)))
-                  (+ n 1)
-                  n)))))))
+  (live-ahead live-st (player-x player)))
 
 (define (mark-cleared!)
   (let loop ((cs chunks))
@@ -1808,14 +1831,24 @@
     (if (null? ys) #f
       (if (= (car ys) id) #t (loop (cdr ys))))))
 
+(define (rules-now)
+  (if tick-rules
+    tick-rules
+    (begin (set! tick-rules (rules-hash)) tick-rules)))
+
+(define (prune-chunks-fast cs x)
+  (if (or (null? cs) (>= (hash-ref (car cs) "x1") (- x 24.0)))
+    cs
+    (prune-chunks cs x)))
+
 (define (one-step!)
   ; Score from before the step. pay-bump floors at zero, so adding the
   ; cost back would inflate a total under 15. Drag from that bump goes too.
   (let ((before (player-score player)))
-    (let ((r (step player world (rules-hash) PHYS-DT)))
+    (let ((r (step-live player live-st (rules-now) PHYS-DT)))
       (set! player (car r))
-      (set! world (prune-world (car (cdr r)) (player-x player)))
-      (set! chunks (prune-chunks chunks (player-x player)))
+      (set! live-st (car (cdr r)))
+      (set! chunks (prune-chunks-fast chunks (player-x player)))
       (if (> (length cleared) 32)
         (set! cleared (take-n cleared 32))
         #f)
@@ -2209,19 +2242,10 @@
         (set! dream-i 0)))))
 
 (define (step-dream!)
-  ; Three steps a slice, not twelve. The proving walk runs on the tree-walker
-  ; (~7ms/step), so twelve steps landed a ~116ms slice on the frame (p90 ~130,
-  ; max 157) — the recurring dream spike. Three cuts the slice to ~29ms (p90
-  ; ~35, max 49). Controlled back-to-back (same machine, seed 42, 2500 ticks):
-  ; dream walk p50 116 -> 29ms, pump unchanged (p50 47 -> 46), and >80ms frames
-  ; 534 -> 500. Three (not four) because walk + pump must stay under the frame
-  ; budget: 29 + 46 = 75ms < 80, where four's 38 + 46 = 84 crossed it on more
-  ; ticks (779). The same total walk spreads over more ticks, so the dream
-  ; finishes in ~6s instead of ~1.5s, still well inside the 22s next-dream gap.
-  ; Trade (accepted): the seal installs motif-now at run-ms = start+(K/budget)*dt,
-  ; so the cosmetic phrase lands later in simulated time and the seeded run's
-  ; road/bumps shift with it; the road stays autopilot-proven fair. See perf/README.
-  (let ((r (autopilot-slice dream-pieces (rules-hash) dream-body dream-sim dream-i 3)))
+  ; One proving step a tick. The live pump already uses most of the 50 ms
+  ; budget, so a three-step walk does not fit beside it. The phrase still
+  ; has to clear the autopilot before it is kept; the seal just lands later.
+  (let ((r (autopilot-slice dream-pieces (rules-hash) dream-body dream-sim dream-i 1)))
     (set! dream-i (lref r 1))
     (set! dream-body (lref r 2))
     (set! dream-sim (lref r 3))
@@ -2866,7 +2890,7 @@
 
 (define (step-chase!)
   (let ((rules (if (hash? chase-rules) chase-rules (rules-hash))))
-    (let ((r (autopilot-slice chase-road rules chase-body chase-sim chase-i 12)))
+    (let ((r (autopilot-slice chase-road rules chase-body chase-sim chase-i 2)))
       (set! chase-i (lref r 1))
       (set! chase-body (lref r 2))
       (set! chase-sim (lref r 3))
@@ -2882,7 +2906,7 @@
     (step-chase!)))
 
 (define (maybe-dream!)
-  (if (or (env-on? "LUMEN_SKIP_DREAM") (> hold-phase 0) (> card-phase 0) (> primer-phase 0) (llm-posting?) (chat-open?))
+  (if (or tick-built (env-on? "LUMEN_SKIP_DREAM") (> hold-phase 0) (> card-phase 0) (> primer-phase 0) (llm-posting?) (chat-open?))
     #f
     (cond
       ((= dream-phase 1) (step-dream!))
@@ -4504,6 +4528,8 @@
           #f
           (begin
             (set! world (list))
+            (set! live-st (live-blank))
+            (set! staged-chunk #f)
             (set! chunks (list))
             (set! next-id 0)
             (set! next-x 0.0)
@@ -4782,6 +4808,8 @@
     (set! rewind-quiet #t)
     (set! player (make-player 1.2))
     (set! world (list))
+    (set! live-st (live-blank))
+    (set! staged-chunk #f)
     (set! chunks (list))
     (set! next-id 0)
     (set! next-x 0.0)
@@ -4993,6 +5021,8 @@
 
 (define (on-tick c msg)
   (set! gate-tick #f)
+  (set! tick-built #f)
+  (set! tick-rules #f)
   (record-hold! (or (llm-posting?) (chat-open?)))
   (record-flush!)
   (note-hearts! msg)
@@ -5026,13 +5056,16 @@
     (advance-pace!)
     (maybe-hold!)
     (maybe-cards!)
-    (maybe-chase!)
+    ; A chunk install lays coins. That tick does not also walk a chase
+    ; or a dream, so the two costs do not share the frame.
+    (let ((hint (hash-ref msg "x" 0)))
+      (if (road-due? hint)
+        #f
+        (maybe-chase!))
+      (ensure-ahead! hint 1))
     (maybe-dream!)
     (maybe-primer!)
     (maybe-guests!)
-    ; One chunk a tick: a pace step that widens the horizon lays the rest
-    ; on later frames instead of stacking several ~40ms spawns here.
-    (ensure-ahead! (hash-ref msg "x" 0) 1)
     (poll-llm! c)
     (send-new-chunks c)
     (if rules-dirty
@@ -5041,11 +5074,11 @@
     ; Decisions go out before state. The rebind check stops at state, so a
     ; note sent after it can sit unread when the deadline lands on that tick.
     ; A level's tune trial waits until no chat is holding the slot.
-    (maybe-tune!)
+    (if tick-built #f (maybe-tune!))
     ; One queued gate follow-up (biome / roster evolve) per tick, after the
     ; tune so at most one cosmetic trial lands on a frame. Its KEEP/ROLLBACK
     ; note goes out with this tick's flush-notes below.
-    (maybe-gate-followup!)
+    (if tick-built #f (maybe-gate-followup!))
     (flush-notes! c)
     ; A trial that landed after the first rules send still has to reach
     ; the page on this tick, picture and all.

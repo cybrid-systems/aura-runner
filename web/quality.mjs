@@ -27,7 +27,7 @@ export const POLICY_TEXT = `(quality lumen
   (reduced-auto low)
   (dpr-medium 2)
   (dpr-high 2)
-  (shadow-medium 512)
+  (shadow-medium 256)
   (shadow-high 1024)
   (bloom-medium 0.18)
   (bloom-high 0.26)

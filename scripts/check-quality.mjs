@@ -81,7 +81,7 @@ assert(noGl.ceiling === "low" && noGl.webgl2 === false, "no webgl2");
 const lowProfile = tierProfile("low", DEFAULT_POLICY, gpuCaps);
 assert(lowProfile.shadow === false && lowProfile.bloom === false && lowProfile.chain === "none", "low has no extra passes");
 const med = tierProfile("medium", DEFAULT_POLICY, { ...gpuCaps, floatFb: false });
-assert(med.shadow && med.bloom && med.hdr === false && med.chain === "quarter" && med.shadowSize === 512 && med.pcf === 4, "medium profile");
+assert(med.shadow && med.bloom && med.hdr === false && med.chain === "quarter" && med.shadowSize === 256 && med.pcf === 4, "medium profile");
 const high = tierProfile("high", DEFAULT_POLICY, gpuCaps);
 assert(high.chain === "quarter" && high.shadowSize === 1024 && high.pcf === 4 && high.hdr === true, "high profile");
 assert(tierProfile("high", DEFAULT_POLICY, noFbo).tier === "low", "profile follows fbo failure");
