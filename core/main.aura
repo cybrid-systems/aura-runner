@@ -1282,11 +1282,15 @@
   (let* ((margin (if (and (pair? rest) (number? (car rest)))
                    (exact->inexact (car rest))
                    9.0))
+         (ready? (and (pair? rest) (pair? (cdr rest)) (eq? (car (cdr rest)) #t)))
          (placed (begin
                    (coin-set-origin! next-x)
                    (coin-span! level-x1)
-                   (shift-onto (string-pickups pieces b span pressure-now (loot-worth loot-now)
-                                               (coin-chunk-seed seed next-id b) coin-params) next-x)))
+                   (shift-onto (if ready?
+                                 pieces
+                                 (string-pickups pieces b span pressure-now (loot-worth loot-now)
+                                                 (coin-chunk-seed seed next-id b) coin-params))
+                               next-x)))
          (id next-id)
          (x0 next-x)
          (x1 (+ next-x span))
@@ -1348,10 +1352,46 @@
          (from (min (+ px 80.0) (max px h))))
     (not (> next-x (+ from want)))))
 
+(define road-job #f)
+
+; Pattern one tick, then a dozen rows of the coin table, then the
+; placement. A live tick never does the whole chunk.
+(define (install-ready! ch pieces b h)
+  (add-chunk! (hash-ref ch "origin" "offline")
+              pieces
+              (hash-ref ch "x1")
+              b h
+              (hash-ref ch "margin" 9.0)
+              #t))
+
+(define (road-slice!)
+  (cond
+    ((not road-job)
+     (let ((ch (make-next-chunk)))
+       (set! road-job (hash "chunk" ch "band" band "hue" hue-now "pick" #f))
+       (set! tick-built #t)))
+    (else
+     (let* ((ch (hash-ref road-job "chunk"))
+            (b (hash-ref road-job "band"))
+            (step (pickup-slice (hash-ref ch "pieces")
+                                b
+                                (hash-ref ch "x1")
+                                pressure-now
+                                (loot-worth loot-now)
+                                (coin-chunk-seed seed next-id b)
+                                coin-params
+                                (hash-ref road-job "pick" #f))))
+       (set! tick-built #t)
+       (if (car step)
+         (begin
+           (install-ready! ch (car (cdr step)) b (hash-ref road-job "hue"))
+           (set! road-job #f))
+         (set! road-job (hash-set road-job "pick" (car (cdr (cdr step))))))))))
+
 (define (road-one!)
   (if staged-chunk
     (begin (install-chunk! staged-chunk) (set! staged-chunk #f) (set! tick-built #t))
-    (begin (set! staged-chunk (make-next-chunk)) (set! tick-built #t))))
+    (road-slice!)))
 
 ; Seconds of road in front of the runner. A fixed 42 m is only a few
 ; seconds once the pace is up, and a slow tick used to let the picture
@@ -1375,6 +1415,24 @@
 ; is already on the wire before that fill starts.
 ; Load voice for a resumed level, then lay the road. A failure here must
 ; not drop the welcome.
+; The welcome only needs a gate on the wire. The rest of the horizon
+; fills one chunk at a time on later ticks.
+(define (chunks-have-gate?)
+  (let loop ((cs chunks))
+    (if (null? cs)
+      #f
+      (if (any-gate? (hash-ref (car cs) "pieces" (list)))
+        #t
+        (loop (cdr cs))))))
+
+(define (open-hello!)
+  (let loop ((n 0))
+    (if (or (>= n 2) (and (> n 0) (chunks-have-gate?)))
+      #t
+      (begin
+        (spawn-chunk!)
+        (loop (+ n 1))))))
+
 (define (open-road!)
   (if (and (> level-n 1) (not slow-mods))
     (try (load-slow!) (catch (e) #f))
@@ -1398,9 +1456,9 @@
         (want (road-horizon)))
     (let ((from (min (+ px 80.0) (max px hint))))
       (if (= budget 1)
-        (if (> next-x (+ from want))
-          #t
-          (road-one!))
+        (if (or road-job (not (> next-x (+ from want))))
+          (road-one!)
+          #t)
         (begin
           (if staged-chunk
             (begin (install-chunk! staged-chunk) (set! staged-chunk #f))
@@ -1987,10 +2045,10 @@
     ((string=? name "pals-form") (live-pals))
     (else (live-motif))))
 
+; The search only needs a yes. Publishing inside every sample rebinds the
+; live rules once per budget step. The one real publish is binding-landed!.
 (define (phrase-apply target)
-  (lambda (s c)
-    (let ((genome (evo:candidate-genome c)))
-      (not (string=? (publish-rule! target (body-for target genome) (full-src)) "fail")))))
+  (lambda (s c) #t))
 
 (define (phrase-search target)
   (evo:search
@@ -2154,7 +2212,7 @@
   (let ((form dream-form)
         (pieces dream-pieces)
         (span dream-span))
-    (let ((found #f))
+    (let ((found (layout-form form (rules-hash))))
       (let* ((cand (evo:candidate form (hash "id" (string-append "d" (int-str next-id))
                                             "target" "motif-form")))
              (trial (open-trial cand
@@ -2162,7 +2220,6 @@
                                      "apply" (lambda (c) #t)
                                      "evaluate"
                                      (lambda (c)
-                                       (set! found (layout-form form (rules-hash)))
                                        (hash "status" "ok"
                                              "objectives"
                                              (hash "fair" (if (and cleared? found
@@ -2690,6 +2747,72 @@
                           "engage" (hash-ref audit "engage" 0.0))
                     acc))))))
 
+(define (coin-apply-choice! rows)
+  (let* ((best (fork-choose rows))
+         (winner (if (hash? best) best (car rows)))
+         (fair (hash-ref winner "fair" #f))
+         (why (hash-ref winner "why" "trial"))
+         (params (hash-ref winner "params" coin-params))
+         (token (coin-blob params))
+         (cand (evo:candidate (hash-ref winner "label" "lanes")
+                              (hash "id" (string-append "c" (int-str level-n))
+                                    "target" "rule-coins")))
+         (trial (fork-wrap
+                  (lambda ()
+                    (open-trial cand
+                      (fork-spec token
+                        (lambda (seen)
+                          (hash "status" "ok"
+                                "objectives"
+                                (hash "fair" (fork-fair seen token fair)
+                                      "engage" (hash-ref winner "engage" 0.0))
+                                "constraints"
+                                (hash "budget" 0.0
+                                      "geometry" (if (string=? why "overlap") 1.0 0.0)
+                                      "reachable" (if (or (string=? why "reachable")
+                                                          (string=? why "engage"))
+                                                    1.0 0.0)
+                                      "safe" (if (or (string=? why "entropy")
+                                                     (string=? why "floor")
+                                                     (string=? why "bounds")
+                                                     (string=? why "step"))
+                                               1.0 0.0))
+                                "behavior"
+                                (hash "band" (exact->inexact band)
+                                      "engage" (hash-ref winner "engage" 0.0))))))))))
+    (if (trial-busy? trial)
+      #f
+      (begin
+        (if (or (not fair)
+                (not trial)
+                (not (evo:trial-ok? trial))
+                (not (evo:feasible? trial)))
+          (note! "ROLLBACK" (if (string=? why "") "trial" why) "spread"
+                 "Coins stay spread" "lanes")
+          (begin
+            (set! coin-params
+                  (coin-keep coin-params
+                             (hash "moved" #t
+                                   "why" (hash-ref winner "label" "fair")
+                                   "knob" (hash-ref winner "knob" 0)
+                                   "params" params)))
+            (note-fork! (note! "KEEP" (hash-ref winner "label" "fair") "spread"
+                              "Coins found a new path" "lanes")
+                        (> (length rows) 1))))
+        (release-slot!)
+        #t))))
+
+; One fork a tick. The same order coin-score-rows used, so the winner
+; does not change; the gate just does not score every fork on one frame.
+(define (coin-score-rest! cands acc pace engage)
+  (if (null? cands)
+    (coin-apply-choice! (reverse acc))
+    (let ((row (car (coin-score-rows (list (car cands)) pace engage))))
+      (set! gate-followups
+        (cons (lambda () (coin-score-rest! (cdr cands) (cons row acc) pace engage))
+              gate-followups))
+      #t)))
+
 (define (consider-coins! played bumps coins swaps near . rest)
   (load-coins!)
   ; The gate queues this a tick later; capture the pace it crossed at so
@@ -2703,67 +2826,21 @@
              (engage (coin-engage coins swaps near))
              (mood (hash-ref step "mood" "hold"))
              (knob (coin-get coin-params "knob" 0))
-             (cands (coin-forks coin-params mood knob))
-             (rows (coin-score-rows
-                     (if (pair? cands)
-                       cands
-                       (list (hash "params" (hash-ref step "params" coin-params)
-                                   "why" (hash-ref step "why" "lanes")
-                                   "knob" (hash-ref step "knob" 0))))
-                     pace engage))
-             (best (fork-choose rows))
-             (winner (if (hash? best) best (car rows)))
-             (fair (hash-ref winner "fair" #f))
-             (why (hash-ref winner "why" "trial"))
-             (params (hash-ref winner "params" coin-params))
-             (token (coin-blob params))
-             (cand (evo:candidate (hash-ref winner "label" "lanes")
-                                  (hash "id" (string-append "c" (int-str level-n))
-                                        "target" "rule-coins")))
-             (trial (fork-wrap
-                      (lambda ()
-                        (open-trial cand
-                          (fork-spec token
-                            (lambda (seen)
-                              (hash "status" "ok"
-                                    "objectives"
-                                    (hash "fair" (fork-fair seen token fair)
-                                          "engage" (hash-ref winner "engage" 0.0))
-                                    "constraints"
-                                    (hash "budget" 0.0
-                                          "geometry" (if (string=? why "overlap") 1.0 0.0)
-                                          "reachable" (if (or (string=? why "reachable")
-                                                              (string=? why "engage"))
-                                                        1.0 0.0)
-                                          "safe" (if (or (string=? why "entropy")
-                                                         (string=? why "floor")
-                                                         (string=? why "bounds")
-                                                         (string=? why "step"))
-                                                   1.0 0.0))
-                                    "behavior"
-                                    (hash "band" (exact->inexact band)
-                                          "engage" (hash-ref winner "engage" 0.0))))))))))
-        (if (trial-busy? trial)
-          #f
+             (cands (let ((forks (coin-forks coin-params mood knob)))
+                      (if (pair? forks)
+                        forks
+                        (list (hash "params" (hash-ref step "params" coin-params)
+                                    "why" (hash-ref step "why" "lanes")
+                                    "knob" (hash-ref step "knob" 0))))))
+             (rows (if (null? (cdr cands))
+                     (coin-score-rows cands pace engage)
+                     #f)))
+        (if rows
+          (coin-apply-choice! rows)
           (begin
-            (if (or (not fair)
-                    (not trial)
-                    (not (evo:trial-ok? trial))
-                    (not (evo:feasible? trial)))
-              (note! "ROLLBACK" (if (string=? why "") "trial" why) "spread"
-                     "Coins stay spread" "lanes")
-              (begin
-                ; The snapshot is already back. Losers never wrote this.
-                (set! coin-params
-                      (coin-keep coin-params
-                                 (hash "moved" #t
-                                       "why" (hash-ref winner "label" "fair")
-                                       "knob" (hash-ref winner "knob" 0)
-                                       "params" params)))
-                (note-fork! (note! "KEEP" (hash-ref winner "label" "fair") "spread"
-                                  "Coins found a new path" "lanes")
-                            (> (length rows) 1))))
-            (release-slot!)
+            (set! gate-followups
+              (cons (lambda () (coin-score-rest! cands (list) pace engage))
+                    gate-followups))
             #t)))))))
 
 ; A step that the numbers already forbid does not take a slice. A legal
@@ -2982,7 +3059,7 @@
 ; rest is an optional note arm. Guest cars pass "guest" so a rolled-in
 ; car is not read as a model phrase that restyled the runner.
 (define (keep-pals! canon merged say hero changed? . rest)
-  (let ((found #f)
+  (let ((found (check-roster canon))
         (arm (if (and (pair? rest) (string? (car rest)) (> (string-length (car rest)) 0))
                (car rest)
                "pals")))
@@ -2993,7 +3070,6 @@
                                     "apply" (lambda (c) #t)
                                     "evaluate"
                                     (lambda (c)
-                                      (set! found (check-roster canon))
                                       (hash "status" "ok"
                                             "objectives"
                                             (hash "fair" (if (and found (hash-ref found "ok")) 1.0 0.0))
@@ -4901,7 +4977,7 @@
     (try (begin (reset-run!) (resume-run! msg) (take-hello-venue! msg))
          (catch (e) #f))
     (send-welcome! c)
-    (try (open-road!) (catch (e) #f))
+    (try (open-hello!) (catch (e) #f))
     (send-all-chunks c)
     (set! state-full #t)
     (send c (state-msg "ok"))
@@ -4914,7 +4990,7 @@
     (try (begin (reset-run!) (take-hello-venue! msg))
          (catch (e) #f))
     (send-welcome! c)
-    (try (open-road!) (catch (e) #f))
+    (try (open-hello!) (catch (e) #f))
     (send-all-chunks c)
     (set! state-full #t)
     (send c (state-msg "ok"))
@@ -5063,13 +5139,11 @@
     ; A chunk install lays coins. That tick does not also walk a chase
     ; or a dream, so the two costs do not share the frame.
     (let ((hint (hash-ref msg "x" 0)))
-      (if (road-due? hint)
+      (if (or road-job (road-due? hint))
         #f
         (maybe-chase!))
       (ensure-ahead! hint 1))
-    (maybe-dream!)
     (maybe-primer!)
-    (maybe-guests!)
     (poll-llm! c)
     (send-new-chunks c)
     (if rules-dirty
@@ -5089,7 +5163,15 @@
     (if rules-dirty
       (begin (send c (rules-msg)) (set! rules-dirty #f) (set! state-full #t))
       #f)
-    (send c (state-msg ev))))
+    (send c (state-msg ev))
+    ; Dream and the guest trial run after the reply. A tick that just
+    ; advanced the road does neither, so they do not share that frame.
+    ; The next read waits out whatever is left, one of them at a time.
+    (if (or tick-built road-job)
+      #f
+      (begin
+        (maybe-dream!)
+        (if (or tick-built road-job) #f (maybe-guests!))))))
 
 (define (on-cards c msg)
   (let ((act (hash-ref msg "action" "equip")))
@@ -5606,6 +5688,17 @@
   ; the port opens so a tick never pays that compile.
   (boot-note! 93 "正在读余下的规则")
   (load-slow!)
+  ; First calls of reset, a chunk, and a roster check compile on the
+  ; hello and the first guest. Do them before the port opens.
+  (try (begin
+         (reset-run!)
+         (let ((ch (chunk-or-fallback (pattern-chunk 1 0 0 8.0) 8.0)))
+           (string-pickups (hash-ref ch "pieces") 0 (hash-ref ch "x1")
+                           1 25.0 1 (coin-blank)))
+         (layout-form "(seq (ground 4.0) (gap 1.0) (ground 4.0))" (rules-hash))
+         (check-roster "(pals (pal kitten mochi 0.95 0.62 0.35 hop))")
+         (phrase-search "pals-form"))
+       (catch (e) #f))
   (boot-note! 95 "规则好了")
   ; Bind before the model fibers. A taken port used to exit while those
   ; three receivers were still blocked, and the runtime warned about them.

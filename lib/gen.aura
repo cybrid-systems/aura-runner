@@ -1244,19 +1244,15 @@
         (loop (cdr ps)
               (cons (if (coin-piece? q) (stamp-coin q pieces base pressure) q) acc))))))
 
-(define (string-pickups pieces band span . rest)
-  (if (or (not (pair? pieces)) (not (number? span)) (<= span 1.0))
-    pieces
-    (begin
-      (load-coins!)
+; One slice of the coin walk. `more` is #f to start. Returns
+; (list done? pieces more). done? pieces are stamped and ready to shift.
+(define (pickup-slice pieces band span pressure worth seed-v params-v more)
+  (load-coins!)
+  (if (and (pair? more) (eq? (car more) "done"))
+    more
     (let* ((b (if (and (number? band) (>= band 0) (<= band 4)) band 0))
-           (pressure (if (and (pair? rest) (number? (car rest))) (pressure-band (car rest)) 1))
-           (base (if (and (pair? rest) (pair? (cdr rest)) (number? (car (cdr rest)))
-                          (> (car (cdr rest)) 0.0))
-                   (exact->inexact (car (cdr rest)))
-                   25.0))
-           (seed-v (list-ref-or rest 2 #f))
-           (params-v (list-ref-or rest 3 #f))
+           (pressure (if (number? pressure) (pressure-band pressure) 1))
+           (base (if (and (number? worth) (> worth 0.0)) (exact->inexact worth) 25.0))
            (params (if (hash? params-v) params-v (coin-blank)))
            (pace (feel-speed (feel-for b)))
            (step (* (chain-step pace pressure)
@@ -1266,9 +1262,32 @@
                    (coin-chunk-seed seed-v 0 b)
                    (coin-fallback-seed pieces b))))
       (if (null? (take-coins pieces))
-        pieces
-        (stamp-coins (coin-lay pieces pace span step cap params seed)
-                     base pressure))))))
+        (list #t pieces #f)
+        (if (not (pair? more))
+          (list #f pieces (coin-reach-blank (coin-drop pieces) pace span))
+          (if (vector? (list-ref more 10))
+            (list #t
+                  (stamp-coins
+                    (coin-place pieces (list-ref more 0) pace span step cap params seed
+                                (list-ref more 10))
+                    base pressure)
+                  #f)
+            (list #f pieces (coin-reach-more more 12))))))))
+
+(define (string-pickups pieces band span . rest)
+  (if (or (not (pair? pieces)) (not (number? span)) (<= span 1.0))
+    pieces
+    (let ((pressure (if (and (pair? rest) (number? (car rest))) (car rest) 1))
+          (worth (if (and (pair? rest) (pair? (cdr rest)) (number? (car (cdr rest))))
+                   (car (cdr rest))
+                   25.0))
+          (seed-v (list-ref-or rest 2 #f))
+          (params-v (list-ref-or rest 3 #f)))
+      (let loop ((more #f))
+        (let ((step (pickup-slice pieces band span pressure worth seed-v params-v more)))
+          (if (car step)
+            (car (cdr step))
+            (loop (car (cdr (cdr step))))))))))
 
 ; A few seeded stretches, the same way a level lays its coins. The
 ; trial reads this road; it does not run the live player.
