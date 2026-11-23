@@ -1457,8 +1457,18 @@
         (want (road-horizon)))
     (let ((from (min (+ px 80.0) (max px hint))))
       (if (= budget 1)
+        ; A live frame moves a fraction of a metre, so one slice keeps
+        ; the six-second buffer full. A fast-forwarded second (the play
+        ; check) eats that buffer unless this tick finishes about a chunk.
         (if (or road-job (not (> next-x (+ from want))))
-          (road-one!)
+          (let ((steps (if (> (tick-force-ms) 200.0) 8 1)))
+            (let loop ((n 0))
+              (if (or (>= n steps)
+                      (and (not road-job) (> next-x (+ from want))))
+                #t
+                (begin
+                  (road-one!)
+                  (loop (+ n 1))))))
           #t)
         (begin
           (if staged-chunk
