@@ -617,6 +617,8 @@ export function createPost(gl, compiler) {
       const ready = compiler.program(name);
       if (ready) return ready;
       if (compiler.ext && compiler.patient) return null;
+      if (compiler.linkedThisFrame) return null;
+      compiler.linkedThisFrame = true;
       const linked = compiler.linkNow(name);
       if (linked) return linked;
     }

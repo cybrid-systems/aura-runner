@@ -1678,8 +1678,9 @@ export function createRenderer(canvas, hooks) {
     }
   }
 
+  let linkBudget = 1;
   function kickWarm() {
-    if (software || quality.mode === "low" || meshWarm) return;
+    if (quality.mode === "low" || meshWarm) return;
     meshWarm = shaderCompiler(gl);
     const jobs = [
       ["litSky", SKY_VS, litSky(SKY_FS)],
@@ -1705,8 +1706,10 @@ export function createRenderer(canvas, hooks) {
 
   function pumpWarm() {
     warmFrames++;
+    linkBudget = 1;
     if (meshWarm) meshWarm.poll();
     if (postWarm) {
+      postWarm.linkedThisFrame = false;
       postWarm.patient = !!(postWarm.ext && warmFrames < 24);
       postWarm.poll();
     }
@@ -1718,6 +1721,13 @@ export function createRenderer(canvas, hooks) {
       const ready = meshWarm.program(name);
       if (ready) return ready;
       if (meshWarm.ext && warmFrames < 24) return null;
+      // Without the parallel extension, linking every variant in one
+      // frame is a multi-second stall on a scene change. One program
+      // a frame, then the high path adopts them as they land.
+      if (!meshWarm.ext) {
+        if (linkBudget <= 0) return null;
+        linkBudget -= 1;
+      }
       const linked = meshWarm.linkNow(name);
       if (linked) return linked;
     }
@@ -2359,7 +2369,7 @@ export function createRenderer(canvas, hooks) {
     pollSpans();
     const splitPass = typeof window !== "undefined" && !!window.__lumenPassTimers && quality.tier === "high" && !!timerExt;
     if (!splitPass) beginGpu();
-    if (!software && quality.mode !== "low") kickWarm();
+    if (quality.mode !== "low") kickWarm();
     pumpWarm();
     const pace = typeof window !== "undefined" ? Number(window.__lumenPace) : 0;
     const arrived = dressPalette(palette(st.hue || 0, st.scene), st.biome, st.mood, st.spec);

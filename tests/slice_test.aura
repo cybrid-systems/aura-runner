@@ -1,0 +1,51 @@
+; A sliced coin sample lays the same pieces as the one-shot sample.
+; Twelve single autopilot steps match one slice of twelve.
+(require "lib/gen")
+(require "lib/coins")
+
+(define (expect name ok)
+  (display name)
+  (display " ")
+  (display (if ok 1 0))
+  (newline)
+  (if ok #t (error (string-append "slice: " name))))
+
+(define (same-piece? a b)
+  (and (= (piece-k a) (piece-k b))
+       (= (piece-x a) (piece-x b))
+       (= (piece-w a) (piece-w b))
+       (= (piece-y a) (piece-y b))
+       (= (piece-lane a) (piece-lane b))))
+
+(define (same-road? a b)
+  (if (and (null? a) (null? b))
+    #t
+    (if (or (null? a) (null? b))
+      #f
+      (and (same-piece? (car a) (car b))
+           (same-road? (cdr a) (cdr b))))))
+
+(define params (coin-blank))
+(expect "coins-42" (same-road? (coin-sample 42 params 8.0) (coin-sample-whole 42 params 8.0)))
+(expect "coins-7" (same-road? (coin-sample 7 params 6.5) (coin-sample-whole 7 params 6.5)))
+(expect "coins-1" (same-road? (coin-sample 1 params 11.0) (coin-sample-whole 1 params 11.0)))
+
+(define (nth xs i)
+  (if (<= i 0) (car xs) (nth (cdr xs) (- i 1))))
+(define (adiff a b)
+  (let ((d (- a b)))
+    (if (< d 0.0) (- 0.0 d) d)))
+(define rules (rules-of 32.0 11.2 8.0 0.48 0.12 0.12))
+(define pieces (list (piece 1.0 0.0 40.0 0.2 0.0)
+                     (piece 3.0 8.0 0.6 0.4 0.2 1.0)
+                     (piece 4.0 14.0 0.8 0.7 0.7 -1.0)
+                     (piece 1.0 20.0 30.0 0.2 0.0)))
+(define once (autopilot-slice pieces rules (make-player 0.4) pieces 0 12))
+(define (twelves p sim i n)
+  (if (or (<= n 0) (not (player-alive? p)))
+    (list p sim i)
+    (let ((r (autopilot-slice pieces rules p sim i 1)))
+      (twelves (nth r 2) (nth r 3) (nth r 1) (- n 1)))))
+(define stepped (twelves (make-player 0.4) pieces 0 12))
+(expect "walk-x" (< (adiff (player-x (nth once 2)) (player-x (car stepped))) 0.000001))
+(expect "walk-i" (= (nth once 1) (nth stepped 2)))
