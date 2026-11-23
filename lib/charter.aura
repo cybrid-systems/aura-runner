@@ -7,8 +7,9 @@
 (require "std/string" all:)
 
 (define charter-names
-  (list "step" "collide" "finish-step" "road-at" "road-height" "road-grade"
-        "grade-for-pace" "pace-on-grade" "launch-jump"))
+  (list "step" "collide" "finish-step" "road-at" "road-lookup" "road-index!"
+        "road-same-ground?" "road-height" "road-grade" "grade-for-pace"
+        "pace-on-grade" "launch-jump"))
 
 (define (charter-set)
   (let loop ((ns charter-names) (s (contract:set)))
