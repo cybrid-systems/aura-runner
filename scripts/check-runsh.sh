@@ -114,6 +114,26 @@ fi
 kill "$pid" 2>/dev/null || true
 wait "$pid" 2>/dev/null || true
 pid=""
+# The core can outlive the shell for a moment. The offline run binds
+# the same explicit port and fails if that listener is still there.
+port_deadline=$((SECONDS + 5))
+while (( SECONDS < port_deadline )); do
+  if python3 - "$AURA_RUNNER_PORT" "$AURA_RUNNER_WEB" << 'PY'
+import socket, sys
+for arg in sys.argv[1:]:
+    s = socket.socket()
+    try:
+        s.bind(("127.0.0.1", int(arg)))
+    except OSError:
+        sys.exit(1)
+    finally:
+        s.close()
+PY
+  then
+    break
+  fi
+  sleep 0.05
+done
 
 echo "offline ./run.sh uses the cache" >&2
 start=$(date +%s.%N)

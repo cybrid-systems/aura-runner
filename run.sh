@@ -148,8 +148,31 @@ node bridge/server.mjs > out/web.log 2>&1 &
 WEB_PID=$!
 
 cleanup() {
-  if [[ -n "${AURA_PID:-}" ]]; then kill "$AURA_PID" 2>/dev/null || true; fi
-  if [[ -n "${WEB_PID:-}" ]]; then kill "$WEB_PID" 2>/dev/null || true; fi
+  local pid live i
+  for pid in "${AURA_PID:-}" "${WEB_PID:-}"; do
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true
+    fi
+  done
+  # The next ./run.sh binds the same port. Wait until the listener is
+  # gone; a core that is still inside a fiber gets SIGKILL after a second.
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    live=0
+    for pid in "${AURA_PID:-}" "${WEB_PID:-}"; do
+      if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+        live=1
+      fi
+    done
+    if [[ "$live" -eq 0 ]]; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  for pid in "${AURA_PID:-}" "${WEB_PID:-}"; do
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+      kill -9 "$pid" 2>/dev/null || true
+    fi
+  done
 }
 trap cleanup EXIT
 trap 'cleanup; exit 130' INT TERM
