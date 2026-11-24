@@ -380,10 +380,9 @@
 (define road-ix-qs #f)
 (define road-ix-n 0)
 (define road-ix-sorted #f)
-(define road-memo #f)
-(define road-memo-ps #f)
-(define road-memo-x 0.0)
-(define road-memo-on #f)
+; [on pieces x hit] — one vector keeps the hot set! path to primitive
+; vector-set! calls instead of four global cell lookups per miss.
+(define road-memo-v (vector #f #f 0.0 #f))
 
 ; Ground cons cells survive a flyer, a popper, or a picked-up coin: those
 ; rebuild the list around the same slabs. Matching the cells reuses the
@@ -408,7 +407,7 @@
     (if (road-same-ground? pieces)
       (begin
         (set! road-ix-ps pieces)
-        (if road-memo-on (set! road-memo-ps pieces) #f)
+        (if (vector-ref road-memo-v 0) (vector-set! road-memo-v 1 pieces) #f)
         road-ix-n)
       (let loop ((ys pieces) (acc (list)) (qs (list)) (prev -1.0) (sorted #t) (n 0))
         (if (null? ys)
@@ -456,13 +455,15 @@
                   (loop (+ i 1) hit lip best))))))))))
 
 (define (road-at x pieces)
-  (if (and road-memo-on (eq? pieces road-memo-ps) (= x road-memo-x))
-    road-memo
+  (if (and (vector-ref road-memo-v 0)
+           (eq? pieces (vector-ref road-memo-v 1))
+           (= x (vector-ref road-memo-v 2)))
+    (vector-ref road-memo-v 3)
     (let ((hit (road-lookup x pieces)))
-      (set! road-memo-on #t)
-      (set! road-memo-ps pieces)
-      (set! road-memo-x x)
-      (set! road-memo hit)
+      (vector-set! road-memo-v 0 #t)
+      (vector-set! road-memo-v 1 pieces)
+      (vector-set! road-memo-v 2 x)
+      (vector-set! road-memo-v 3 hit)
       hit)))
 
 (define (road-height x pieces)
