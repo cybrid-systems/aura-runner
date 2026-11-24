@@ -4004,8 +4004,12 @@
 (define thing-role "")
 (define thing-asked 0)
 (define thing-late 0)
-; Fibers spawned and not yet heard from, across rounds.
+; Fibers spawned and not yet heard from in the current round.
 (define thing-out 0)
+; The current round's chat fibers. A new wish cancels them: a canceled
+; HTTP call cannot come back to corrupt the next round's rows, and a
+; long run does not accumulate live capture frames.
+(define thing-fids (list))
 (define thing-staged #f)
 (define thing-live #f)
 (define thing-prev #f)
@@ -4062,7 +4066,10 @@
 (define (thing-chat sys user temp timeout-s ep)
   (let ((body (json-encode
                 (hash "model" (list-ref ep 2)
-                      "max_tokens" 900
+                      ; DeepSeek V4.1 Flash spends reasoning tokens out of
+                      ; this budget. 900 truncated the (thing ...) form on
+                      ; the larger wishes; 2400 leaves room for the form.
+                      "max_tokens" 2400
                       "temperature" temp
                       "reasoning_effort" "minimal"
                       "messages"
@@ -4073,22 +4080,33 @@
       (let ((ans (try (parse-chat (if (string? raw) raw "")) (catch (e) #f))))
         (if (hash? ans) ans (hash "ok" #f "error" "llm" "content" ""))))))
 
+; A live worker's captured t0 can read back as 0 after the runtime
+; reuses its capture frame. Fall back to the round's own start so a
+; reply is not dropped as 172 million ms late on uptime.
+(define (thing-elapsed t0)
+  (let ((base (if (and (number? t0) (> t0 0.0)) t0 thing-t0)))
+    (- (now-ms) base)))
+
 ; One candidate. Everything the tick needs comes back as a list of
 ; atoms: gen, variant, reply ms, scored ms, checked, fair, score, form,
 ; why, the model's sentence, margin, geometry, budget.
 (define (thing-worker res gen i text role rules band t0 timeout-s ep)
   (lambda ()
     (let ((sent (try (thing-work res gen i text role rules band t0 timeout-s ep)
-                     (catch (e) #f))))
-      (if sent
+                     (catch (e) e))))
+      (if (eq? sent #t)
         #t
-        (channel:send res
-          (list gen i (- (now-ms) t0) (- (now-ms) t0) 0 0 0.0 "" "error" "" 0.0 1.0 1.0))))))
+        (begin
+          (thing-log "gen" gen "variant" i "error"
+                     (if (string? sent) sent "?"))
+          (channel:send res
+            (list gen i (thing-elapsed t0) (thing-elapsed t0)
+                  0 0 0.0 "" "error" "" 0.0 1.0 1.0)))))))
 
 (define (thing-work res gen i text role rules band t0 timeout-s ep)
   (begin
     (let* ((ans (thing-chat THING-SYS (thing-user text role i) (thing-variant-temp i) timeout-s ep))
-           (got (- (now-ms) t0))
+           (got (thing-elapsed t0))
            (llm-ok (and (hash? ans) (hash-ref ans "ok" #f)))
            (content (if llm-ok (hash-ref ans "content" "") ""))
            (checked (if llm-ok (check-thing content) (thing-refuse "llm")))
@@ -4099,7 +4117,7 @@
                          "margin" 0.0 "geometry" 1.0 "budget" 1.0)))
            (score (thing-score checked fair text band)))
       (channel:send res
-        (list gen i got (- (now-ms) t0)
+        (list gen i got (thing-elapsed t0)
               (if ok 1 0) (if (hash-ref fair "fair" #f) 1 0) score
               (if ok (hash-ref checked "form" "") "")
               (if llm-ok (hash-ref fair "why" "") (string-append "llm " (hash-ref ans "error" "")))
@@ -4116,7 +4134,16 @@
           (t0 (now-ms))
           (timeout-s (+ 2.0 (/ (thing-deadline-ms) 1000.0)))
           (ep (thing-endpoint)))
-      ; A new wish closes the round before it. Its late replies are dropped.
+      ; A new wish closes the round before it. Cancel the previous
+      ; round's fibers so their suspended captures cannot pile up or
+      ; report into this one.
+      (let loop ((fs thing-fids))
+        (if (null? fs)
+          #f
+          (begin
+            (try (fiber:cancel (car fs)) (catch (e) #f))
+            (loop (cdr fs)))))
+      (set! thing-fids (list))
       (set! thing-gen (+ thing-gen 1))
       (set! thing-open #t)
       (set! thing-t0 t0)
@@ -4124,12 +4151,14 @@
       (set! thing-text text)
       (set! thing-role (wish-role-of text))
       (set! thing-asked n)
-      (set! thing-out (+ thing-out n))
+      (set! thing-out n)
       (let ((gen thing-gen) (role thing-role))
         (let loop ((i 0))
           (if (< i n)
             (begin
-              (fiber:spawn (thing-worker thing-res gen i text role rules b t0 timeout-s ep))
+              (set! thing-fids
+                    (cons (fiber:spawn (thing-worker thing-res gen i text role rules b t0 timeout-s ep))
+                          thing-fids))
               (loop (+ i 1)))
             #f)))
       (thing-log "gen" thing-gen "start" "fibers" n "role" (if (string=? thing-role "") "any" thing-role))
@@ -4161,16 +4190,12 @@
     (if (null? rs) n (loop (cdr rs) (if (= (list-ref (car rs) 5) 1) (+ n 1) n)))))
 
 ; The workers' own Aura code (prompt checks, check-thing, the autopilot)
-; only runs while this fiber yields. Give them a short slice each tick
-; while any is out; the browser predicts motion, so the tick can wait.
-(define (thing-slice-ms) (exact->inexact (env-num "LUMEN_THING_SLICE_MS" 8)))
+; only runs while this fiber yields. One yield a tick is enough for the
+; HTTP and the checks to progress. A timed spin of up to 4000 yields
+; retained a capture frame per yield while a worker was live; a long run
+; then exhausted the arena and wedged the server.
 (define (thing-share!)
-  (let ((until (+ (now-ms) (thing-slice-ms))))
-    (let loop ((k 0))
-      (try (fiber:yield) (catch (e) #f))
-      (if (and (< k 4000) (< (now-ms) until))
-        (loop (+ k 1))
-        k))))
+  (try (fiber:yield) (catch (e) #f)))
 
 (define (thing-poll! c)
   (if (not thing-res)
