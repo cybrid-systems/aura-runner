@@ -334,7 +334,16 @@
              (margin (hash-ref laid "margin" 0.0))
              (gate-ok (and (<= geom 0.0) (<= budget 0.0) (>= margin SPARE-S)
                            (> (hash-ref laid "x1" 0.0) 0.0)))
-             (clear (if gate-ok (autopilot-clear? (hash-ref laid "pieces") rules) #f)))
+             ; Only a jump or a slide is a hazard the autopilot must
+             ; clear. A pickup, decor or friend still has to pass the
+             ; layout's geometry and margin; walking the hazard
+             ; autopilot over a coin-only stretch indexed past its road
+             ; vector and killed the core on the model path.
+             (clear (if gate-ok
+                      (if (or (string=? role "jump") (string=? role "slide"))
+                        (autopilot-clear? (hash-ref laid "pieces") rules)
+                        #t)
+                      #f)))
         (hash "fair" (and gate-ok clear)
               "why" (cond ((> geom 0.0) "geometry")
                           ((> budget 0.0) "budget")

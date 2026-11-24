@@ -4112,7 +4112,13 @@
            (checked (if llm-ok (check-thing content) (thing-refuse "llm")))
            (ok (hash-ref checked "ok" #f))
            (fair (if ok
-                   (thing-fair (hash-ref checked "role" "") (hash-ref checked "size" 0.0) rules)
+                   (try (thing-fair (hash-ref checked "role" "")
+                                    (hash-ref checked "size" 0.0) rules)
+                        (catch (e)
+                          (thing-log "gen" gen "variant" i "gate-error"
+                                     (if (string? e) e "?"))
+                          (hash "fair" #f "why" "gate"
+                                "margin" 0.0 "geometry" 1.0 "budget" 1.0)))
                    (hash "fair" #f "why" (hash-ref checked "why" "shape")
                          "margin" 0.0 "geometry" 1.0 "budget" 1.0)))
            (score (thing-score checked fair text band)))
