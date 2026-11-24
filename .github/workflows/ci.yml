@@ -14,7 +14,11 @@ jobs:
       - name: Orchestra baseline drift (#13)
         run: python3 scripts/check-baseline.py
       - name: Install the pinned Aura nightly
-        run: echo "$(bash scripts/install-aura.sh)" >> "$GITHUB_PATH"
+        run: |
+          set -euo pipefail
+          bin="$(bash scripts/install-aura.sh)"
+          echo "$bin" >> "$GITHUB_PATH"
+          "$bin/aura" --version
       - name: Aura core tests
         env:
           AURA_SANDBOX: "off"

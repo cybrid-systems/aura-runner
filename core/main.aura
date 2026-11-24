@@ -1701,10 +1701,14 @@
         "props" props "sun-hide" sun-hide "shown" shown))
 
 (define (send-rules! c)
-  (send c (if rules-thin (rules-thin-msg) (rules-msg)))
-  (set! rules-dirty #f)
-  (set! rules-thin #f)
-  (set! state-full #f))
+  (let ((thin rules-thin))
+    (send c (if thin (rules-thin-msg) (rules-msg)))
+    (set! rules-dirty #f)
+    (set! rules-thin #f)
+    ; A full rules send is followed by a full state: the page keys its
+    ; look off that state. A thin thing update keeps the slim state, so
+    ; props/spec are not repeated on every wish.
+    (set! state-full (or state-full (not thin)))))
 
 (define (welcome-msg)
   (hash "op" "welcome" "seed" seed
