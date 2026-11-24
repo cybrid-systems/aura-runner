@@ -296,6 +296,8 @@
     how))
 
 (define rules-dirty #f)
+; A thing-only change needs the shown list, not the full props/spec.
+(define rules-thin #f)
 (define next-dream 1500.0)
 (define dream-phase 0)
 (define dream-pieces (list))
@@ -813,6 +815,7 @@
         (set! edsl-theme-now "")
         (set! edsl-hint "")
         (set! rules-dirty #t)
+        (set! rules-thin #f)
         #t))))
 
 ; The same install, without pinning the venue. The next clear still
@@ -833,6 +836,7 @@
         (set! edsl-theme-now "")
         (set! edsl-hint "")
         (set! rules-dirty #t)
+        (set! rules-thin #f)
         #t))))
 
 (define (archive-load!)
@@ -1688,6 +1692,20 @@
         "banner" banner-text "banner-gain" banner-gain
         "tune" (tune-public)))
 
+; A thing install changes the shown row and the live payload, not the
+; sky, props, spec, pals or level. The page's applyRules keeps every
+; absent field, so this is the whole update.
+(define (rules-thin-msg)
+  (hash "op" "rules" "rev" rule-rev
+        "via" publish-via
+        "props" props "sun-hide" sun-hide "shown" shown))
+
+(define (send-rules! c)
+  (send c (if rules-thin (rules-thin-msg) (rules-msg)))
+  (set! rules-dirty #f)
+  (set! rules-thin #f)
+  (set! state-full #f))
+
 (define (welcome-msg)
   (hash "op" "welcome" "seed" seed
         "replay" (string-append "LUMEN-" (int-str seed))
@@ -2294,6 +2312,7 @@
                   (set! motif-pieces pieces)
                   (set! motif-span span)
                   (set! rules-dirty #t)
+                  (set! rules-thin #f)
                   (set! rule-rev (+ rule-rev 1))
                   (note! "KEEP" "fair" "motif" "A new shape bloomed" "shape"
                          (hash-ref found "margin" 9.0)))
@@ -2438,6 +2457,7 @@
                     (set! motif-pieces pieces)
                     (set! motif-span span)
                     (set! rules-dirty #t)
+                    (set! rules-thin #f)
                     (set! rule-rev (+ rule-rev 1))
                     (note! "KEEP" "fair" "motif" line mark "What should come down the path?"
                            margin))
@@ -3303,6 +3323,7 @@
                   (apply-scene! found form)
                   (set! rule-rev (+ rule-rev 1))
                   (set! rules-dirty #t)
+                  (set! rules-thin #f)
                   (note! "KEEP" "fair" "scene"
                         (if (and (string? say) (> (string-length say) 0))
                           say
@@ -3404,6 +3425,7 @@
       (begin
         (set! rule-rev (+ rule-rev 1))
         (set! rules-dirty #t)
+        (set! rules-thin #f)
         (mark-pals! #t changed?)
         (note! "KEEP" "fair" arm
                (if (and (string? say) (> (string-length say) 0))
@@ -4020,6 +4042,12 @@
 ; HTTP call cannot come back to corrupt the next round's rows, and a
 ; long run does not accumulate live capture frames.
 (define thing-fids (list))
+; The bridge can proxy the chat POST off this process. A direct core
+; (tests, no page) leaves it off and uses http-post.
+(define llm-proxy-on #f)
+(define llm-replies (hash))
+(define llm-ask-id 0)
+(define conn #f)
 (define thing-staged #f)
 (define thing-live #f)
 (define thing-prev #f)
@@ -4066,7 +4094,7 @@
           (let ((b (env-str "LLM_BASE_URL"))) (if (string=? b "") "https://api.deepseek.com/v1" b))
           (let ((m (env-str "LLM_MODEL"))) (if (string=? m "") "deepseek-flash" m)))))
 
-(define (thing-chat sys user temp timeout-s ep)
+(define (thing-chat-http sys user temp timeout-s ep)
   (let ((body (json-encode
                 (hash "model" (list-ref ep 2)
                       ; DeepSeek V4.1 Flash spends reasoning tokens out of
@@ -4083,6 +4111,38 @@
       (let ((ans (try (parse-chat (if (string? raw) raw "")) (catch (e) #f))))
         (if (hash? ans) ans (hash "ok" #f "error" "llm" "content" ""))))))
 
+; The socket POST is synchronous in the script runtime, so a wish's
+; first TLS handshake froze the tick. The bridge runs the POST in Node
+; and replies on the same line socket; this worker only yields.
+(define (thing-chat-proxy sys user temp timeout-s ep)
+  (let ((id (number->string (+ llm-ask-id 1))))
+    (set! llm-ask-id (+ llm-ask-id 1))
+    (send conn (hash "op" "llm-ask" "id" id "model" (list-ref ep 2)
+                     "max_tokens" 2400
+                     "temperature" temp
+                     "reasoning_effort" "minimal"
+                     "timeout" timeout-s
+                     "messages"
+                     (list (hash "role" "system" "content" sys)
+                           (hash "role" "user" "content" user))))
+    (let loop ((deadline (+ (now-ms) (* timeout-s 1000.0))))
+      (let ((r (hash-ref llm-replies id #f)))
+        (cond
+          (r (hash-set! llm-replies id #f)
+             (hash "ok" (eq? (hash-ref r "ok" #f) #t)
+                   "error" (hash-ref r "error" "")
+                   "content" (hash-ref r "content" "")))
+          ((> (now-ms) deadline)
+           (hash "ok" #f "error" "timeout" "content" ""))
+          (else
+           (try (fiber:yield) (catch (e) #f))
+           (loop deadline)))))))
+
+(define (thing-chat sys user temp timeout-s ep)
+  (if (and llm-proxy-on conn)
+    (thing-chat-proxy sys user temp timeout-s ep)
+    (thing-chat-http sys user temp timeout-s ep)))
+
 ; A live worker's captured t0 can read back as 0 after the runtime
 ; reuses its capture frame. Fall back to the round's own start so a
 ; reply is not dropped as 172 million ms late on uptime.
@@ -4095,6 +4155,9 @@
 ; why, the model's sentence, margin, geometry, budget.
 (define (thing-worker res gen i text role rules band t0 timeout-s ep)
   (lambda ()
+    ; fiber:spawn runs the new worker until its first yield; let the
+    ; four prompts spread over later ticks instead of this one.
+    (try (fiber:yield) (catch (e) #f))
     (let ((sent (try (thing-work res gen i text role rules band t0 timeout-s ep)
                      (catch (e) e))))
       (if (eq? sent #t)
@@ -4400,6 +4463,7 @@
             #f)
           (set! thing-quiet #f)
           (set! rules-dirty #t)
+          (set! rules-thin #t)
           (thing-log "gen" (hash-ref st "gen" 0) "installed" "via" how "chunk" id
                      "ms" (floor (- (now-ms) thing-t0))
                      "wait" (floor (- (now-ms) thing-chosen-at)))
@@ -4434,6 +4498,7 @@
       (set! thing-prev #f)
       (set! thing-bumps 0)
       (set! rules-dirty #t)
+      (set! rules-thin #t)
       (note! "ROLLBACK" why "thing"
              (if (string=? wish-locale "zh") "换回了上一个样子" "The previous look came back")
              "thing")
@@ -4502,6 +4567,7 @@
              (set! props cur)
              (if (and saw-sun ok) (set! sun-hide #f) #f)
              (set! rules-dirty #t)
+             (set! rules-thin #f)
              (note! (if ok "KEEP" "ROLLBACK") why "voice"
                     (voice-line act name why wish-locale)))
            (let ((got (voice-put cur (car xs))))
@@ -4518,6 +4584,7 @@
                (set! props cur)
                (if hid (set! sun-hide #t) #f)
                (set! rules-dirty #t)
+               (set! rules-thin #f)
                (note! "KEEP" "fair" "voice" (voice-line act name "fair" wish-locale)))
              (note! "ROLLBACK" "missing" "voice"
                     (voice-line act name "missing" wish-locale)))
@@ -4554,6 +4621,7 @@
            (set! pals-now (roster-text (list) hero-now))
            (set! guest-at 4)
            (set! rules-dirty #t)
+           (set! rules-thin #f)
            (note! "KEEP" "fair" "pals"
                   (voice-line act name "fair" wish-locale)
                   "friend"))))
@@ -4578,6 +4646,7 @@
        (set! level-x1 (voice-goal (player-x player) level-x0 level-x1 dir))
        (set! goal-lock #t)
        (set! rules-dirty #t)
+       (set! rules-thin #f)
        (note! "KEEP" "fair" "voice" (voice-hear intent)))
       ((string=? act "hero")
        (let ((kind (if (string? name) name "")))
@@ -4630,6 +4699,7 @@
                  (set! thing-live #f)
                  #f))
              (set! rules-dirty #t)
+             (set! rules-thin #t)
              (note! "KEEP" "fair" "voice" (voice-line act name "fair" wish-locale))))))
       (else #f))))
 
@@ -4654,6 +4724,7 @@
               (set! thing-quiet (if (and llm-on thing-res) #t #f))
               (set! thing-bumps 0)
               (set! rules-dirty #t)
+              (set! rules-thin #t)
               (if (not (or (llm-posting?) (chat-open?)))
                 (thing-rebind! form)
                 #f)
@@ -4690,7 +4761,10 @@
           (if (wish-waiting? (hash-ref row "arm" "scene"))
             (wish-note! "SAY" "soon")
             #f)))))
-  (if (compose-wanted? text) (thing-show! text) #f)
+  ; The local cake used to be composed on this tick for a placeholder.
+  ; That compose is a tree-walker pass and cost 0.5-1.4 s; with a model
+  ; up the round's own reply is the cake, so let it land instead.
+  (if (and (compose-wanted? text) (not llm-on)) (thing-show! text) #f)
   (thing-start! text))
 
 ; The line a child reads when a place does not change.
@@ -4731,6 +4805,7 @@
                           (edsl-pub found)
                           #f))
         (set! rules-dirty #t)
+        (set! rules-thin #f)
         #t))))
 
 (define (preview-drop!)
@@ -4746,6 +4821,7 @@
       (set! biome-pin (car (cdr (cdr (cdr held)))))
       (set! wish-hold #f)
       (set! rules-dirty #t)
+      (set! rules-thin #f)
       #t)))
 
 (define (wish-commit! text)
@@ -4821,7 +4897,7 @@
                        (wish-world! c text))))))))))))
   (flush-notes! c)
   (if rules-dirty
-    (begin (send c (rules-msg)) (set! rules-dirty #f) (set! state-full #t))
+    (send-rules! c)
     #f))
 
 (define (poll-llm! c)
@@ -5158,6 +5234,7 @@
     (set! publish-via how)
     (set! rule-rev (+ rule-rev 1))
     (set! rules-dirty #t)
+    (set! rules-thin #f)
     how))
 
 (define (publish-world!)
@@ -5565,7 +5642,7 @@
     (poll-llm! c)
     (send-new-chunks c)
     (if rules-dirty
-      (begin (send c (rules-msg)) (set! rules-dirty #f) (set! state-full #t))
+      (send-rules! c)
       #f)
     ; Decisions go out before state. The rebind check stops at state, so a
     ; note sent after it can sit unread when the deadline lands on that tick.
@@ -5579,7 +5656,7 @@
     ; A trial that landed after the first rules send still has to reach
     ; the page on this tick, picture and all.
     (if rules-dirty
-      (begin (send c (rules-msg)) (set! rules-dirty #f) (set! state-full #t))
+      (send-rules! c)
       #f)
     (send c (state-msg ev))
     ; One slice after the reply: a tune child, a dream phase, one chase
@@ -5782,6 +5859,7 @@
       (parse-chat (post-chat (chat-url base) body key)))))
 
 (define (dispatch c msg)
+  (set! conn c)
   (let ((op (hash-ref msg "op" "")))
     ; Ticks stay on the road modules until the runner has moved, then
     ; one deferred module loads per tick. Anything else loads the rest.
@@ -5790,12 +5868,18 @@
       (if (or (string=? op "hello")
               (string=? op "bye")
               (string=? op "tick")
-              (string=? op "resync"))
+              (string=? op "resync")
+              (string=? op "llm-proxy")
+              (string=? op "llm-reply"))
         (if (and (string=? op "tick") (> (player-x player) 3.0))
           (load-slow-one!)
           #f)
         (load-slow!)))
     (cond
+      ((string=? op "llm-proxy")
+       (set! llm-proxy-on (eq? (hash-ref msg "ready" #f) #t)))
+      ((string=? op "llm-reply")
+       (hash-set! llm-replies (hash-ref msg "id" "") msg))
       ((string=? op "hello") (on-hello c msg))
       ((string=? op "restart") (on-restart c msg))
       ((string=? op "resync") (on-resync c msg))

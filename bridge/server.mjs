@@ -149,6 +149,45 @@ function coalesceTick(prev, next) {
   });
 }
 
+
+// The core's script runtime performs http-post synchronously; a wish's
+// TLS handshake stalled its tick. The core sends the chat body here and
+// yields; Node does the network wait and answers on the same line socket.
+async function llmAsk(msg, writeLine) {
+  const reply = (ok, content, error) => writeLine(JSON.stringify({
+    op: "llm-reply", id: msg.id, ok: !!ok, content: content || "", error: error || "",
+  }));
+  const key = process.env.LLM_API_KEY || process.env.LUMEN_DEEPSEEK_KEY || "";
+  if (!key) return reply(false, "", "no-key");
+  const base = (process.env.LLM_BASE_URL || process.env.LUMEN_DEEPSEEK_URL
+    || "https://api.deepseek.com/v1").replace(/\/+$/, "");
+  const model = msg.model || process.env.LLM_MODEL || process.env.LUMEN_DEEPSEEK_MODEL || "deepseek-flash";
+  const timeout = Number(msg.timeout) > 0 ? Number(msg.timeout) : Number(process.env.LLM_TIMEOUT || 60);
+  const body = {
+    model,
+    messages: msg.messages || [],
+    max_tokens: Number(msg.max_tokens) || 2400,
+    temperature: Number.isFinite(Number(msg.temperature)) ? Number(msg.temperature) : 0.7,
+    reasoning_effort: msg.reasoning_effort || "minimal",
+  };
+  try {
+    const res = await fetch(`${base}/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeout * 1000),
+    });
+    const text = await res.text();
+    let data = null;
+    try { data = JSON.parse(text); } catch { data = null; }
+    const content = data?.choices?.[0]?.message?.content || "";
+    if (content) reply(true, content, "");
+    else reply(false, "", data?.error?.message || `http ${res.status}`);
+  } catch (err) {
+    reply(false, "", String(err?.message || err));
+  }
+}
+
 function attachSocket(ws) {
   const aura = net.connect({ host: "127.0.0.1", port: auraPort });
   aura.setNoDelay(true);
@@ -161,6 +200,9 @@ function attachSocket(ws) {
   function writeLine(text) {
     aura.write(text.endsWith("\n") ? text : text + "\n");
   }
+  const llmReady = !!(process.env.LLM_API_KEY
+    && (process.env.LLM_BASE_URL || process.env.LUMEN_DEEPSEEK_URL));
+  aura.on("connect", () => writeLine(JSON.stringify({ op: "llm-proxy", ready: llmReady })));
   function releaseTick() {
     tickFlight = false;
     if (!pendingTick) return;
@@ -190,9 +232,14 @@ function attachSocket(ws) {
       const line = buf.subarray(0, nl).toString("utf8");
       buf = buf.subarray(nl + 1);
       if (!line.length) continue;
+      let msg = null;
+      try { msg = JSON.parse(line); } catch { msg = null; }
+      if (msg && msg.op === "llm-ask") {
+        llmAsk(msg, writeLine);
+        continue;
+      }
       ws.write(encodeFrame(line));
-      let op = "";
-      try { op = JSON.parse(line).op || ""; } catch { op = ""; }
+      const op = msg ? (msg.op || "") : "";
       if (op === "state" || op === "err") releaseTick();
     }
   });
