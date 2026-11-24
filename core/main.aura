@@ -276,9 +276,14 @@
             (loot-worth loot-now) air-now magnet-now))
 
 (define thing-src-now "")
+; The thing is a cosmetic string. Read the live cell instead of
+; rebinding the define: a mutate:rebind recompiles the module for 1-2 s
+; on the install tick. The full source below carries the same reader so
+; a later rule publish keeps it.
+(define (thing-form) thing-src-now)
 (define (full-src)
   (string-append
-    "(define (thing-form) \"" thing-src-now "\")\n"
+    "(define (thing-form) thing-src-now)\n"
     (hot-source g-now jump-now slide-now speed-now coyote-now forgive-now hue-now motif-now scene-now pals-now air-now magnet-now)))
 
 (define (rule-body n)
@@ -4034,13 +4039,6 @@
 
 (define (now-ms) (exact->inexact (monotonic-ms)))
 
-(define (live-thing)
-  (let ((got (try (thing-form) (catch (e) ""))))
-    (if (string? got) got "")))
-
-(define (thing-body text)
-  (string-append "(lambda () \"" (if (string? text) text "") "\")"))
-
 (define (thing-log . xs)
   (display "THING")
   (let loop ((ys xs))
@@ -4353,14 +4351,12 @@
                 (thing-hud! "none" (hash "got" (length rows2) "passed" passed "ms" ms
                                          "why" "trial"))))))))))
 
-; Rebind thing-form. Returns "rebind", "set-code" or "fail".
+; Update the live thing cell. Returns "set-code" for the caller's log;
+; there is no mutate:rebind and no module recompile.
 (define (thing-rebind! form)
-  (let ((prev thing-src-now))
-    (set! thing-src-now form)
-    (let ((how (publish-rule! "thing-form" (thing-body form) (full-src))))
-      (if (and (not (string=? how "fail")) (string=? (live-thing) form))
-        (begin (set! rule-rev (+ rule-rev 1)) how)
-        (begin (set! thing-src-now prev) "fail")))))
+  (set! thing-src-now form)
+  (set! rule-rev (+ rule-rev 1))
+  "set-code")
 
 (define (thing-cue-zh role name)
   (cond
