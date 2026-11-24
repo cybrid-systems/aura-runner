@@ -3999,6 +3999,11 @@
 (define thing-gen 0)
 (define thing-open #f)
 (define thing-t0 0.0)
+; The round's gate inputs. The worker rows can lose their score and
+; constraint fields to a runtime collection; the close re-judges each
+; candidate from its form with these.
+(define thing-rules #f)
+(define thing-band 0)
 (define thing-rows (list))
 (define thing-text "")
 (define thing-role "")
@@ -4156,6 +4161,8 @@
       (set! thing-rows (list))
       (set! thing-text text)
       (set! thing-role (wish-role-of text))
+      (set! thing-rules (rules-hash))
+      (set! thing-band b)
       (set! thing-asked n)
       (set! thing-out n)
       (let ((gen thing-gen) (role thing-role))
@@ -4191,10 +4198,6 @@
           (loop))
         #f))))
 
-(define (thing-count-fair rows)
-  (let loop ((rs rows) (n 0))
-    (if (null? rs) n (loop (cdr rs) (if (= (list-ref (car rs) 5) 1) (+ n 1) n)))))
-
 ; The workers' own Aura code (prompt checks, check-thing, the autopilot)
 ; only runs while this fiber yields. One yield a tick is enough for the
 ; HTTP and the checks to progress. A timed spin of up to 4000 yields
@@ -4217,10 +4220,14 @@
         (thing-close!)
         #f))))
 
-(define (thing-row-info r)
-  (hash "variant" (list-ref r 1) "ms" (floor (list-ref r 2))
-        "checked" (list-ref r 4) "fair" (list-ref r 5)
-        "score" (list-ref r 6) "why" (list-ref r 8)))
+(define (thing-judged-info j)
+  (let ((r (list-ref j 2))
+        (checked (list-ref j 3))
+        (fair (list-ref j 4)))
+    (hash "variant" (car j) "ms" (floor (list-ref r 2))
+          "checked" (if (hash-ref checked "ok" #f) 1 0)
+          "fair" (if (hash-ref fair "fair" #f) 1 0)
+          "score" (car (cdr j)) "why" (hash-ref fair "why" ""))))
 
 ; The picture is already beside the runner. Do not say the model failed.
 (define (thing-kept!)
@@ -4230,24 +4237,56 @@
 ; The round is over. A small novelty bonus breaks an equal score toward
 ; a form this run has not kept. Record the winner through one evo:trial,
 ; check it once more on this fiber, and stage it for the next stretch.
+; Re-score one worker row on the tick from its checked form. A row's
+; later atoms can come back from the runtime mixed with another
+; candidate's (a score in the thousands, a constraint that fails the
+; trial), so the close reads only the form and asks the same gate again.
+(define (thing-rejudge r)
+  (let* ((form (list-ref r 7))
+         (checked (if (and (string? form) (> (string-length form) 0))
+                    (check-thing form)
+                    (thing-refuse "shape")))
+         (ok (hash-ref checked "ok" #f))
+         (fair (if ok
+                 (try (thing-fair (hash-ref checked "role" "")
+                                  (hash-ref checked "size" 0.0) thing-rules)
+                      (catch (e)
+                        (thing-log "gen" thing-gen "gate-error"
+                                   (if (string? e) e "?"))
+                        (hash "fair" #f "why" "gate"
+                              "margin" 0.0 "geometry" 1.0 "budget" 1.0)))
+                 (hash "fair" #f "why" (hash-ref checked "why" "shape")
+                       "margin" 0.0 "geometry" 1.0 "budget" 1.0)))
+         (score (thing-score checked fair thing-text thing-band)))
+    (list (list-ref r 1) score r checked fair)))
+
+(define (thing-count-judged judged)
+  (let loop ((js judged) (n 0))
+    (if (null? js)
+      n
+      (loop (cdr js)
+            (if (hash-ref (list-ref (car js) 4) "fair" #f) (+ n 1) n)))))
+
 (define (thing-close!)
   (require "lib/evolve")
   (set! thing-open #f)
   (let* ((rows (thing-in-time thing-rows thing-t0 (+ thing-t0 (thing-deadline-ms))))
          (rows2 (if (null? rows) thing-rows rows))
-         (passed (thing-count-fair rows2))
+         (judged (map thing-rejudge rows2))
+         (passed (thing-count-judged judged))
          (best (thing-pick (evolve-thing-rows
-                             (map (lambda (r) (list (list-ref r 1) (list-ref r 6) r)) rows2)
+                             (map (lambda (j) (list (car j) (car (cdr j)) j)) judged)
                              (evolve-thing-memory))))
          (ms (floor (- (now-ms) thing-t0))))
-    (let loop ((rs rows2))
-      (if (null? rs)
+    (let loop ((js judged))
+      (if (null? js)
         #f
-        (let ((r (car rs)))
-          (thing-log "gen" thing-gen "cand" (list-ref r 1) "ms" (floor (list-ref r 2))
-                     "checked" (list-ref r 4) "fair" (list-ref r 5) "score" (list-ref r 6)
-                     "why" (list-ref r 8))
-          (loop (cdr rs)))))
+        (let ((j (car js)))
+          (thing-log "gen" thing-gen "cand" (car j) "ms" (floor (list-ref (list-ref j 2) 2))
+                     "checked" (if (hash-ref (list-ref j 3) "ok" #f) 1 0)
+                     "fair" (if (hash-ref (list-ref j 4) "fair" #f) 1 0)
+                     "score" (car (cdr j)) "why" (hash-ref (list-ref j 4) "why" ""))
+          (loop (cdr js)))))
     (if (not best)
       (begin
         (thing-log "gen" thing-gen "none" "got" (length rows2) "passed" 0 "ms" ms)
@@ -4257,11 +4296,15 @@
             (note! "ROLLBACK" (if (null? rows2) "timeout" "unfair") "thing"
                    (wish-line wish-locale (if (null? rows2) "timeout" "shape")) "thing")
             (thing-hud! "none" (hash "got" (length rows2) "passed" 0 "ms" ms
-                                     "rows" (map thing-row-info rows2))))))
-      (let* ((r (car (cdr (cdr best))))
-             (form (list-ref r 7))
-             (score (list-ref r 6))
-             (cand (evo:candidate form (hash "id" (string-append "t" (int-str thing-gen) "-" (int-str (list-ref r 1)))
+                                     "rows" (map thing-judged-info judged))))))
+      (let* ((j (car (cdr (cdr best))))
+             (variant (car j))
+             (score (car (cdr j)))
+             (r (list-ref j 2))
+             (checked (list-ref j 3))
+             (fair (list-ref j 4))
+             (form (hash-ref checked "form" ""))
+             (cand (evo:candidate form (hash "id" (string-append "t" (int-str thing-gen) "-" (int-str variant))
                                              "target" "thing-form")))
              (trial (begin
                       (set! trial-open #t)
@@ -4273,14 +4316,14 @@
                                                        (hash "status" "ok"
                                                              "objectives" (hash "fair" 1.0 "score" score)
                                                              "constraints"
-                                                             (hash "budget" (list-ref r 12)
-                                                                   "geometry" (list-ref r 11)
+                                                             (hash "budget" (hash-ref fair "budget" 1.0)
+                                                                   "geometry" (hash-ref fair "geometry" 1.0)
                                                                    "reachable" 0.0 "safe" 0.0)
                                                              "behavior" (hash "band" (exact->inexact band))))))
                                     (catch (e) #f))))
                         (set! trial-open #f)
                         t)))
-             (again (check-thing form)))
+             (again checked))
         (if (and trial (evo:trial-ok? trial) (evo:feasible? trial) (hash-ref again "ok" #f))
           (begin
             (set! thing-staged
@@ -4288,21 +4331,21 @@
                         "checked" again
                         "say" (list-ref r 9)
                         "score" score
-                        "variant" (list-ref r 1)
+                        "variant" variant
                         "passed" passed
                         "got" (length rows2)
                         "gen" thing-gen))
             (evolve-note-thing! (hash-ref again "form" form))
             (set! thing-chosen-at (now-ms))
-            (thing-log "gen" thing-gen "chosen" "variant" (list-ref r 1) "score" score
+            (thing-log "gen" thing-gen "chosen" "variant" variant "score" score
                        "passed" passed "got" (length rows2) "ms" ms)
-            (thing-hud! "chosen" (hash "variant" (list-ref r 1) "score" score
+            (thing-hud! "chosen" (hash "variant" variant "score" score
                                        "passed" passed "got" (length rows2) "ms" ms
                                        "name" (hash-ref again "name" "")
                                        "role" (hash-ref again "role" "")
-                                       "rows" (map thing-row-info rows2))))
+                                       "rows" (map thing-judged-info judged))))
           (begin
-            (thing-log "gen" thing-gen "trial-refused" "variant" (list-ref r 1))
+            (thing-log "gen" thing-gen "trial-refused" "variant" variant)
             (if thing-quiet
               (thing-kept!)
               (begin
