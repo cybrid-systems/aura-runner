@@ -1,0 +1,30 @@
+; grade-for-pace grades three positions (x, x-2, x+2). The old body
+; called road-grade three times, and each road-grade walked the whole
+; piece list looking for the ground slab under its x. The pace is read
+; every frame, so the walk happened three times per frame over a list
+; that is the whole stretch.
+;
+; This walks the list once and grades all three positions from the same
+; pass. The rule is road-at's: the LAST kind-1 piece whose span holds
+; the x wins, and a position no piece holds grades 0.
+;
+; Same grade for the same x, so the pace, the golden trace and the
+; physics are unchanged. Fewer walks of the piece list per frame.
+(define (grade-for-pace x pieces)
+  (let loop ((ps pieces) (g 0.0) (a 0.0) (b 0.0))
+    (if (null? ps)
+        (if (and (= g 0.0) (= a 0.0) (= b 0.0))
+            0.0
+            (+ (* g 0.5) (* a 0.25) (* b 0.25)))
+        (let* ((q (car ps)))
+          (if (not (= (piece-k q) 1.0))
+              (loop (cdr ps) g a b)
+              (let* ((x0 (piece-x q))
+                     (w (piece-w q))
+                     (x1 (+ x0 w))
+                     (rise (piece-nth q 6 0.0))
+                     (grade (if (> w 0.0001) (/ rise w) 0.0)))
+                (loop (cdr ps)
+                      (if (and (>= x x0) (< x x1)) grade g)
+                      (if (and (>= (- x 2.0) x0) (< (- x 2.0) x1)) grade a)
+                      (if (and (>= (+ x 2.0) x0) (< (+ x 2.0) x1)) grade b))))))))

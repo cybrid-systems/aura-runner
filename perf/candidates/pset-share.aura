@@ -1,0 +1,23 @@
+; pset allocated a scratch vector for EVERY field write: list->vector
+; walked the spine, vector-set! wrote the slot, vector->list consed a
+; fresh 16-cell list back. A step writes ~13 fields, and most writes
+; store the value the field already holds (a timer already at 0, a
+; coyote already at max, a lane already on its target).
+;
+; This walks to slot i once, keeping the spine behind it. When the new
+; value equals the old, the SAME player list comes back: no vector, no
+; rebuild. When it differs, only the tail from slot i is consed; the
+; cells in front are shared. Nothing mutates a player list (the values
+; are a choice of the gate), so sharing the prefix is invisible.
+;
+; Same values, same order: the golden trace is unchanged.
+(define (pset p i v)
+  (let loop ((xs p) (n 0) (front (list)))
+    (if (or (null? xs) (= n i))
+      (if (and (pair? xs) (equal? (car xs) v))
+        p
+        (let rebuild ((ys front) (acc (cons v (if (pair? xs) (cdr xs) (list)))))
+          (if (null? ys)
+            acc
+            (rebuild (cdr ys) (cons (car ys) acc)))))
+      (loop (cdr xs) (+ n 1) (cons (car xs) front)))))

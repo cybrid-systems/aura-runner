@@ -90,10 +90,14 @@
          (saved-pxs pxs)
          (saved-nudge-flyers nudge-flyers)
          (saved-step-poppers step-poppers)
+         (saved-road-at road-at)
+         (saved-grade-for-pace grade-for-pace)
          (box (hash "collide" 0 "pset" 0 "pxs" 0
                     "nudge-flyers" 0 "step-poppers" 0
+                    "road-at" 0 "grade-for-pace" 0
                     "collide-ms" 0 "pset-ms" 0 "pxs-ms" 0
-                    "nudge-flyers-ms" 0 "step-poppers-ms" 0)))
+                    "nudge-flyers-ms" 0 "step-poppers-ms" 0
+                    "road-at-ms" 0 "grade-for-pace-ms" 0)))
     (set! collide
       (lambda (p pieces rules)
         (let ((t0 (monotonic-ms)))
@@ -134,12 +138,30 @@
             (hash-set! box "step-poppers-ms"
                        (+ (hash-ref box "step-poppers-ms" 0) (- (monotonic-ms) t0)))
             v))))
+    (set! road-at
+      (lambda (x pieces)
+        (let ((t0 (monotonic-ms)))
+          (let ((v (saved-road-at x pieces)))
+            (hash-set! box "road-at" (+ (hash-ref box "road-at" 0) 1))
+            (hash-set! box "road-at-ms"
+                       (+ (hash-ref box "road-at-ms" 0) (- (monotonic-ms) t0)))
+            v))))
+    (set! grade-for-pace
+      (lambda (x pieces)
+        (let ((t0 (monotonic-ms)))
+          (let ((v (saved-grade-for-pace x pieces)))
+            (hash-set! box "grade-for-pace" (+ (hash-ref box "grade-for-pace" 0) 1))
+            (hash-set! box "grade-for-pace-ms"
+                       (+ (hash-ref box "grade-for-pace-ms" 0) (- (monotonic-ms) t0)))
+            v))))
     (try (kernel xs) (catch (e) #f))
     (set! collide saved-collide)
     (set! pset saved-pset)
     (set! pxs saved-pxs)
     (set! nudge-flyers saved-nudge-flyers)
     (set! step-poppers saved-step-poppers)
+    (set! road-at saved-road-at)
+    (set! grade-for-pace saved-grade-for-pace)
     (list (hash "name" "collide"
                 "calls" (hash-ref box "collide" 0)
                 "task-clock" (hash-ref box "collide-ms" 0)
@@ -159,4 +181,12 @@
           (hash "name" "step-poppers"
                 "calls" (hash-ref box "step-poppers" 0)
                 "task-clock" (hash-ref box "step-poppers-ms" 0)
-                "stack" (list "bench-kernel" "step-poppers")))))
+                "stack" (list "bench-kernel" "step-poppers"))
+          (hash "name" "road-at"
+                "calls" (hash-ref box "road-at" 0)
+                "task-clock" (hash-ref box "road-at-ms" 0)
+                "stack" (list "bench-kernel" "road-at"))
+          (hash "name" "grade-for-pace"
+                "calls" (hash-ref box "grade-for-pace" 0)
+                "task-clock" (hash-ref box "grade-for-pace-ms" 0)
+                "stack" (list "bench-kernel" "grade-for-pace")))))

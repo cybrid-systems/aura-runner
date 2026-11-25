@@ -1,0 +1,49 @@
+; road-at walked the WHOLE piece list for every height and grade read:
+; a step reads the floor twice, the grade three times for the pace, the
+; climb once, and collide reads a deck per near piece. Most of the road
+; is far outside the few metres around the reader.
+;
+; The rule of road-at only needs ground that could win:
+;   - a slab holds x only when x0 <= x < x1, and
+;   - the lip is the greatest x1 <= x among kind-1 pieces.
+; A ground piece that starts past x can neither hold x nor be the lip,
+; so it is dropped after one comparison. A piece whose far edge is more
+; than a metre behind x cannot hold x; it can still be the lip when no
+; closer ground exists (a wide gap), so the filter carries the best lip
+; among those pieces instead of dropping the answer. The kept pieces
+; then run road-at's own walk, last-wins and max-lip rules untouched.
+; Same height, same grade, same lip: the golden trace is unchanged.
+(define (road-at x pieces)
+  (let ((lo (- x 1.0)))
+    (let filter ((ps pieces) (acc (list)) (lip 0.0) (best -1.0))
+      (if (null? ps)
+        (let loop ((ps (reverse acc)) (hit #f) (lip lip) (best best))
+          (if (null? ps)
+            (if hit hit (list lip 0.0))
+            (let ((q (car ps)))
+              (if (not (= (piece-k q) 1.0))
+                (loop (cdr ps) hit lip best)
+                (let* ((x0 (piece-x q))
+                       (w (piece-w q))
+                       (x1 (+ x0 w))
+                       (y0 (piece-y q))
+                       (rise (piece-nth q 6 0.0)))
+                  (if (and (>= x x0) (< x x1))
+                    (let* ((t (if (> w (/ 1.0 10000.0)) (/ (- x x0) w) 0.0))
+                           (grade (if (> w (/ 1.0 10000.0)) (/ rise w) 0.0)))
+                      (loop (cdr ps) (list (+ y0 (* rise t)) grade) lip best))
+                    (if (and (<= x1 x) (> x1 best))
+                      (loop (cdr ps) hit (+ y0 rise) x1)
+                      (loop (cdr ps) hit lip best)))))))))
+        (let ((q (car ps)))
+          (if (= (piece-k q) 1.0)
+            (let ((x0 (piece-x q)))
+              (if (> x0 x)
+                (filter (cdr ps) acc lip best)
+                (let ((x1 (+ x0 (piece-w q))))
+                  (if (>= x1 lo)
+                    (filter (cdr ps) (cons q acc) lip best)
+                    (if (> x1 best)
+                      (filter (cdr ps) acc (+ (piece-y q) (piece-nth q 6 0.0)) x1)
+                      (filter (cdr ps) acc lip best))))))
+            (filter (cdr ps) acc lip best))))))

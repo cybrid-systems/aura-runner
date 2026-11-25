@@ -143,7 +143,20 @@
     (candidate "wrong-scale"
                "perf/candidates/wrong-scale.aura"
                "pset"
-               "the score is doubled on the way in; the checksum has to reject it")))
+               "the score is doubled on the way in; the checksum has to reject it")
+    (candidate "grade-for-pace-once"
+               "perf/candidates/grade-for-pace-once.aura"
+               "grade-for-pace"
+               "the pace reads three positions; each read walked the whole piece list")
+    (candidate "pset-share"
+               "perf/candidates/pset-share.aura"
+               "pset"
+               "every field write built a scratch vector and a fresh list; a write of the same value returns the same list, a real write shares the prefix")
+    (candidate "road-window"
+               "perf/candidates/road-window.aura"
+               "road-at"
+               "every height and grade read walked the whole road; only ground near the reader can win, the far lip is carried"
+               "road-at")))
 
 ; ── the intend and the strategy genes ────────────────────────────────
 (define expert-intend
@@ -162,14 +175,16 @@
           "ratio" 2
           "actionable-ms" 1
           "per-round" 2
-          "order" (list "collide-nocopy" "nudge-flyers-noop"
-                        "step-poppers-noop" "collide-slack" "wrong-scale"))
+          "order" (list "grade-for-pace-once" "pset-share" "road-window"
+                        "step-poppers-noop" "collide-nocopy" "nudge-flyers-noop"
+                        "collide-slack" "wrong-scale"))
     (hash "id" "gene-ratio-8"
           "ratio" 8
           "actionable-ms" 1
           "per-round" 1
-          "order" (list "collide-nocopy" "nudge-flyers-noop"
-                        "step-poppers-noop" "collide-slack" "wrong-scale"))
+          "order" (list "grade-for-pace-once" "pset-share" "road-window"
+                        "step-poppers-noop" "collide-nocopy" "nudge-flyers-noop"
+                        "collide-slack" "wrong-scale"))
     (hash "id" "gene-high-threshold"
           "ratio" 2
           "actionable-ms" 1000000

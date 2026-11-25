@@ -1,6 +1,10 @@
 ; The piece list is rebuilt every frame, even when the stretch has no
 ; popper in it. Nothing moved means the same list comes back, so the
 ; rebuild is skipped and the allocation goes away.
+;
+; step-one-pop takes the pieces only for road-height at the popper's
+; own x; this passes the same list the old body did, so a popper's
+; motion is unchanged.
 
 (define (step-poppers pieces player dt)
   (let ((px (player-x player)))
@@ -9,5 +13,5 @@
         (if moved (reverse acc) pieces)
         (let ((q (car ps)))
           (if (= (piece-k q) 9.0)
-            (loop (cdr ps) (cons (step-one-pop q px dt) acc) #t)
+            (loop (cdr ps) (cons (step-one-pop q px dt pieces) acc) #t)
             (loop (cdr ps) (cons q acc) moved)))))))
