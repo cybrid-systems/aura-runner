@@ -27,7 +27,7 @@
     "cybrid-systems/aura-memory",
     "cybrid-systems/aura-memory-runtime"
   ],
-  "notes": "Aura main green nightly at 839c564a4; the asset digests are the GitHub release asset digests. Bump this file only through a reviewed PR; never touch tags or releases.",
+  "notes": "Aura main green nightly at 839c564a4; the asset digests are the GitHub release asset digests. .github/workflows/nightly.yml follows the tag hourly, gates a moved nightly, and commits the pin; never touch tags or releases.",
   "schema": 1,
   "stages": [
     "cybrid-systems/aura-runner",

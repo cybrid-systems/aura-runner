@@ -148,7 +148,9 @@ lumen.toml.example   Commented settings. Copy to lumen.toml.
 
 ## Checks
 
-`./run.sh` downloads a prebuilt binary and does not compile. Play leaves the sandbox on. `./run.sh` and the container pass `AURA_SANDBOX` through only when it is already set. Setting it to `off` is a debug escape, not normal play. Preset `dev` grants mutate, read, and write. This nightly does not path-scope `write:out/`, so the game itself only writes under `out/`. `aura test` needs `AURA_SANDBOX=off` and a nightly binary on `PATH`; that CI job uses `ghcr.io/cybrid-systems/aura:nightly` ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). The smoke job installs the same release on a runner without build tools and plays with the sandbox left on.
+`./run.sh` downloads a prebuilt binary and does not compile. Play leaves the sandbox on. `./run.sh` and the container pass `AURA_SANDBOX` through only when it is already set. Setting it to `off` is a debug escape, not normal play. Preset `dev` grants mutate, read, and write. This nightly does not path-scope `write:out/`, so the game itself only writes under `out/`. `aura test` needs `AURA_SANDBOX=off` and a nightly binary on `PATH`; that CI job pins the nightly in `baseline/aura-baseline.json` and installs it over `ghcr.io/cybrid-systems/aura-ci` ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). The smoke job installs the same release on a runner without build tools and plays with the sandbox left on.
+
+The nightly tag is rebuilt in place, so the pin moves with it. [`.github/workflows/nightly.yml`](.github/workflows/nightly.yml) runs hourly, gates a moved nightly with `aura test` and the seeded play review, and commits the new pin to `baseline/aura-baseline.json` and `aura.toml` only when both pass; a nightly that fails the gate is held back and the pin keeps naming the last green one. `python3 scripts/repin-nightly.py` moves the pin by hand the same way.
 
 | Command | Checks |
 | --- | --- |

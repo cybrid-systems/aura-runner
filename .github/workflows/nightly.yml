@@ -1,0 +1,105 @@
+name: nightly
+
+# The Aura nightly tag is rebuilt in place. scripts/install-aura.sh and the
+# image build compare its asset digests exactly, so every rebuild turns the
+# pinned checks red until the pin moves. This job moves the pin, but only for
+# a nightly that passes the same gate the aura job runs.
+
+on:
+  schedule:
+    - cron: "41 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: nightly-pin
+  cancel-in-progress: false
+
+jobs:
+  pin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Follow the Aura nightly tag
+        id: pin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 scripts/repin-nightly.py
+          if git diff --quiet -- baseline/aura-baseline.json aura.toml; then
+            echo "changed=0" >> "$GITHUB_OUTPUT"
+            echo "The pin already follows the nightly." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "changed=1" >> "$GITHUB_OUTPUT"
+            {
+              echo "The nightly moved."
+              echo '```diff'
+              git diff -- baseline/aura-baseline.json aura.toml
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Install and gate the new nightly
+        if: steps.pin.outputs.changed == '1'
+        env:
+          AURA_SANDBOX: "off"
+        run: |
+          set -euo pipefail
+          # A rebuild that lands mid-download, or a nightly that breaks the
+          # gate, keeps the last green pin and waits for the next hour.
+          hold() {
+            git checkout -- baseline/aura-baseline.json aura.toml
+            echo "::warning title=Nightly held back::$1"
+            echo "Held back: $1. The pin still names the last green nightly." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          }
+          bin="$(bash scripts/install-aura.sh)" || hold "the pinned download did not verify"
+          export PATH="$bin:$PATH"
+          aura test || hold "aura test failed"
+          aura --quiet --preset dev scripts/play-review.aura || hold "the seeded play review failed"
+
+      - name: Commit the pin
+        id: commit
+        if: steps.pin.outputs.changed == '1'
+        run: |
+          set -euo pipefail
+          paths=(baseline/aura-baseline.json aura.toml)
+          # A held-back nightly was reverted above, so there is nothing to move.
+          if git diff --quiet -- "${paths[@]}"; then
+            echo "moved=0" >> "$GITHUB_OUTPUT"
+            echo "Nothing to commit." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          short="$(python3 -c 'import json; print(json.load(open("baseline/aura-baseline.json"))["aura"]["commit_sha"][:9])')"
+          git config user.name "aura-nightly"
+          git config user.email "aura-nightly@users.noreply.github.com"
+          git pull --rebase --autostash origin main
+          if git diff --quiet -- "${paths[@]}"; then
+            echo "moved=0" >> "$GITHUB_OUTPUT"
+            echo "Main already names ${short}." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git add "${paths[@]}"
+          git commit -m "chore(ci): follow the Aura nightly to ${short}" \
+            -m "Moved by .github/workflows/nightly.yml after aura test and the seeded play review passed. baseline/aura-baseline.json holds the asset digests."
+          git push origin HEAD:main
+          echo "moved=1" >> "$GITHUB_OUTPUT"
+          echo "Pushed the pin for ${short}." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run the pinned checks
+        if: steps.commit.outputs.moved == '1'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # A push made with GITHUB_TOKEN does not start push workflows.
+          gh workflow run ci.yml --ref main
+          gh workflow run image.yml --ref main
