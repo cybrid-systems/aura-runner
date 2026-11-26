@@ -1324,17 +1324,6 @@ vec3 softKnee(vec3 c) {
   return min(max(c, vec3(0.0)), vec3(0.9)) + over / (vec3(1.0) + over * 10.0);
 }
 void main() {
-  // Kind 2 is a contact shadow: a thin square cut into a soft disc.
-  if (vKind > 1.5 && vKind < 2.5) {
-    float rr = length(vL.xz);
-    if (rr > 0.46) discard;
-    float feather = smoothstep(0.46, 0.12, rr);
-    vec3 shade = mix(vec3(0.46, 0.40, 0.30), vec3(0.24, 0.20, 0.14), feather);
-    float dist = length(vW - uEye);
-    float fog = clamp(1.0 - exp(-dist * 0.0055), 0.0, 0.38);
-    o = vec4(mix(shade, uFog, fog * 0.7), 1.0);
-    return;
-  }
   // A deck is one run of slabs. Darkening local Z put a black lip on
   // every join, and the post sharpen turned that lip into a seam.
   bool deck = vHalf.y < 0.12 && vHalf.x > 0.7;
@@ -1403,15 +1392,6 @@ flat in float vMetal; flat in float vSheen; flat in float vKind;
 uniform vec3 uEye; uniform vec3 uFog; uniform float uFogAmt;
 out vec4 o;
 void main() {
-  if (vKind > 1.5 && vKind < 2.5) {
-    float rr = length(vL.xz);
-    if (rr > 0.46) discard;
-    float feather = smoothstep(0.46, 0.12, rr);
-    vec3 shade = mix(vec3(0.46, 0.40, 0.30), vec3(0.24, 0.20, 0.14), feather);
-    float dist = abs(vW.x - uEye.x) + abs(vW.z - uEye.z);
-    o = vec4(mix(shade, uFog, min(dist * 0.004, 0.28)), 1.0);
-    return;
-  }
   float nd = clamp(vN.y * 0.45 + 0.55, 0.22, 1.0);
   vec3 col = vC * (0.72 + 0.36 * nd);
   col *= mix(vec3(0.86, 0.93, 1.04), vec3(1.06, 0.98, 0.86), nd);
@@ -1428,29 +1408,50 @@ function boxPat(line) {
     `${line}
   float pulse = 0.85 + 0.15 * sin(uTime * 3.0 + vCenter.z);`,
   );
-  // A wide bar can cross the near plane while its centre is still
-  // metres away. Fade by this fragment's eye depth, not the centre.
-  // Kind 5 discs get the same test, and an octagon cut so a square
-  // board does not read as a sign. The road stays on MESH_FS_BOX.
-  return withLine.replace(
-    "void main() {",
-    `void main() {
-  bool gate = vKind > 7.5 && vKind < 8.5;
-  bool disc = vKind > 4.5 && vKind < 5.5 && vHalf.z < vHalf.x * 0.45 && vHalf.z < vHalf.y * 0.45;
-  if (gate || disc) {
-    if (disc) {
-      vec2 face = abs(vL.xy);
-      if (face.x + face.y > 0.707) discard;
-    }
-    float ndc = gl_FragCoord.z * 2.0 - 1.0;
-    float eyeZ = (2.0 * 0.08 * 96.0) / max(96.08 - ndc * 95.92, 1e-4);
-    if (eyeZ < 1.65) {
-      float h = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
-      if (h < smoothstep(1.65, 0.2, eyeZ)) discard;
-    }
-  }`,
-  );
+  return withLine;
 }
+// Contact discs only. The discard stays out of the lawn and the road,
+// so those passes can keep early depth rejection.
+const MESH_FS_SHADOW = `#version 300 es
+precision highp float;
+in vec3 vL; in vec3 vW;
+uniform vec3 uEye; uniform vec3 uFog;
+out vec4 o;
+void main() {
+  float rr = length(vL.xz);
+  if (rr > 0.46) discard;
+  float feather = smoothstep(0.46, 0.12, rr);
+  vec3 shade = mix(vec3(0.46, 0.40, 0.30), vec3(0.24, 0.20, 0.14), feather);
+  float dist = abs(vW.x - uEye.x) + abs(vW.z - uEye.z);
+  o = vec4(mix(shade, uFog, min(dist * 0.004, 0.28)), 1.0);
+}`;
+
+// Gates and thin coins. Eye depth is per fragment: a wide bar can cross
+// the near plane while its centre is still metres away. An octagon cut
+// turns the coin face into a disc. Other patterned boxes do not see this.
+const MESH_FS_NEAR = `#version 300 es
+precision highp float;
+in vec3 vN; in vec3 vW; in vec3 vC; in vec3 vL;
+flat in float vEmit; flat in float vKind;
+out vec4 o;
+void main() {
+  bool disc = vKind < 6.0;
+  if (disc) {
+    vec2 face = abs(vL.xy);
+    if (face.x + face.y > 0.707) discard;
+  }
+  float ndc = gl_FragCoord.z * 2.0 - 1.0;
+  float eyeZ = 15.36 / max(96.08 - ndc * 95.92, 1e-4);
+  if (eyeZ < 1.65) {
+    float h = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+    if (h < smoothstep(1.65, 0.2, eyeZ)) discard;
+  }
+  float nd = clamp(vN.y * 0.35 + 0.62, 0.35, 1.0);
+  vec3 col = vC * (0.42 + 0.5 * nd + vEmit * 0.7);
+  if (disc) col += vec3(1.0, 0.96, 0.72) * (1.0 - smoothstep(0.02, 0.12, abs(vL.y))) * 0.4;
+  o = vec4(min(col, vec3(1.0)), 1.0);
+}`;
+
 const MESH_FS_BOX_PAT = boxPat(`if (vKind > 5.5 && vKind < 6.5) {
     float side = max(abs(vL.x), abs(vL.z));
     float face = smoothstep(0.32, 0.46, side);
@@ -1584,7 +1585,7 @@ export function createRenderer(canvas, hooks) {
     gl = null;
   }
   if (!gl) return null;
-  let sky, mesh, meshBox, meshFast, meshPat, meshBall, tri, cubeBuf, inst, vao, u, um, ub, uFast, up, uBall, castBuf, rimBuf;
+  let sky, mesh, meshBox, meshFast, meshShadow, meshNear, meshPat, meshBall, tri, cubeBuf, inst, vao, u, um, ub, uFast, uShadow, uNear, up, uBall, castBuf, rimBuf;
   const rimData = new Float32Array(3 * STRIDE);
   const data = new Float32Array(MAX * STRIDE);
   const proj = new Float32Array(16);
@@ -1620,6 +1621,8 @@ export function createRenderer(canvas, hooks) {
     mesh = link(gl, MESH_VS, MESH_FS);
     meshBox = link(gl, MESH_VS, MESH_FS_BOX);
     meshFast = link(gl, MESH_VS, MESH_FS_FAST);
+    meshShadow = link(gl, MESH_VS, MESH_FS_SHADOW);
+    meshNear = link(gl, MESH_VS, MESH_FS_NEAR);
     meshPat = link(gl, MESH_VS, MESH_FS_BOX_PAT);
     meshBall = link(gl, MESH_VS, MESH_FS_BALL);
     tri = gl.createBuffer();
@@ -1657,6 +1660,8 @@ export function createRenderer(canvas, hooks) {
     um = meshLocs(mesh);
     ub = meshLocs(meshBox);
     uFast = meshLocs(meshFast);
+    uShadow = meshLocs(meshShadow);
+    uNear = meshLocs(meshNear);
     up = meshLocs(meshPat);
     uBall = meshLocs(meshBall);
   }
@@ -4388,6 +4393,32 @@ export function createRenderer(canvas, hooks) {
       return a;
     };
     const matteEnd = splitMatte(0, boxPat);
+    const splitFront = (start, end, pred) => {
+      let a = start;
+      let b = end - 1;
+      while (a <= b) {
+        if (pred(a)) a++;
+        else {
+          swapInst(a, b);
+          b--;
+        }
+      }
+      return a;
+    };
+    const shadowEnd = splitFront(0, matteEnd, (i) => {
+      const k = data[i * STRIDE + 15];
+      return k > 1.5 && k < 2.5;
+    });
+    const nearEnd = splitFront(boxPat, lo, (i) => {
+      const base = i * STRIDE;
+      const k = data[base + 15];
+      if (k > 7.5 && k < 8.5) return true;
+      if (!(k > 4.5 && k < 5.5)) return false;
+      const sx = data[base + 4];
+      const sy = data[base + 5];
+      const sz = data[base + 6];
+      return sz < sx * 0.45 && sz < sy * 0.45;
+    });
     if (usePost && wantShadow && castN > 0 && depthProg) {
       if (splitPass) beginSpan("shadow");
       const len = Math.hypot(aim[0], aim[1], aim[2]) || 1;
@@ -4487,9 +4518,11 @@ export function createRenderer(canvas, hooks) {
     const patLoc = useHigh && uhp ? uhp : usePost && ulp ? ulp : up;
     const ballLoc = useHigh && uhBall ? uhBall : usePost && ulBall ? ulBall : uBall;
     const marchLoc = useHigh && uhm ? uhm : usePost && ulm ? ulm : um;
-    drawSpan(meshFast, uFast, 0, matteEnd, false, 0);
+    drawSpan(meshFast, uFast, shadowEnd, matteEnd - shadowEnd, false, 0);
     drawSpan(boxProg, boxLoc, matteEnd, boxPat - matteEnd, false, 0);
-    drawSpan(patProg, patLoc, boxPat, lo - boxPat, false, 0);
+    drawSpan(meshShadow, uShadow, 0, shadowEnd, false, 0);
+    drawSpan(patProg, patLoc, nearEnd, lo - nearEnd, false, 0);
+    drawSpan(meshNear, uNear, boxPat, nearEnd - boxPat, false, 0);
     drawSpan(ballProg, ballLoc, lo, mid - lo, false, 0);
     drawSpan(marchProg, marchLoc, mid, n - mid, !usePost, 0);
     gl.disable(gl.SAMPLE_ALPHA_TO_COVERAGE);
