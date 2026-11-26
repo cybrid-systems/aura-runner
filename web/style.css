@@ -786,8 +786,24 @@ html, body {
   border-radius: 8px;
 }
 #bench { position: fixed; left: 8px; top: 40%; color: white; }
+.plus-one {
+  position: fixed;
+  z-index: 6;
+  margin: 0;
+  color: #ffe56a;
+  font: 800 28px/1 system-ui, sans-serif;
+  text-shadow: 0 2px 0 rgba(120, 72, 8, 0.28);
+  pointer-events: none;
+  animation: plus-fly 0.64s ease-in forwards;
+}
+@keyframes plus-fly {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.7); }
+  18% { opacity: 1; transform: translate(-50%, -70%) scale(1.05); }
+  100% { opacity: 0; transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(0.5); }
+}
 @media (prefers-reduced-motion: reduce) {
   #score, #toast, #gain, #grade, #pace, #mult, #evo { animation: none; }
+  .plus-one { animation: none; }
 }
 
 /* The left readout is one column. A hot combo used to be pinned on top
