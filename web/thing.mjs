@@ -40,9 +40,10 @@ export function validThing(t) {
   if (!Array.isArray(t.parts) || t.parts.length < 1 || t.parts.length > MAX_PARTS) return null;
   const parts = [];
   for (const p of t.parts) {
-    if (!Array.isArray(p) || (p.length !== 11 && p.length !== 12) || !p.every(num)) return null;
+    if (!Array.isArray(p) || p.length < 11 || p.length > 13 || !p.every(num)) return null;
     const [code, x, y, z, sx, sy, sz, r, g, b, glow] = p;
-    const yaw = p.length === 12 ? p[11] : 0;
+    const yaw = p.length >= 12 ? p[11] : 0;
+    const metal = p.length >= 13 ? p[12] : -1;
     if (!Number.isInteger(code) && Math.abs(code - Math.round(code)) > 1e-6) return null;
     const ci = Math.round(code);
     if (ci < 0 || ci >= SHAPES.length) return null;
@@ -53,8 +54,9 @@ export function validThing(t) {
     if (0.25 * r + 0.5 * g + 0.25 * b < 0.3) return null;
     if (!inRange(glow, 0, 0.6)) return null;
     if (!inRange(yaw, 0, 180)) return null;
+    if (metal !== -1 && !inRange(metal, 0, 1)) return null;
     parts.push({ shape: SHADER[ci], x, y, z, sx, sy, sz, rgb: [r, g, b], glow,
-                 yaw: (yaw * Math.PI) / 180 });
+                 yaw: (yaw * Math.PI) / 180, metal });
   }
   return {
     id: t.id,
@@ -184,11 +186,12 @@ export function drawThing(push, thing, box, opts = {}) {
     const wz = box.z - s * lx + c * lz;
     const emit = Math.min(0.95, p.glow + glowBoost);
     const shade = thingShade(p.rgb, emit);
+    const metal = p.metal >= 0 ? p.metal : shade.metal;
     push(wx, box.y + ly, wz,
       Math.max(0.01, p.sx * box.w * grow),
       Math.max(0.01, p.sy * box.h * grow),
       Math.max(0.01, p.sz * box.d * grow),
-      p.shape, p.rgb, shade.rough, emit, yaw + p.yaw, shade.metal, shade.sheen);
+      p.shape, p.rgb, shade.rough, emit, yaw + p.yaw, metal, shade.sheen);
     drawn++;
   }
   return drawn;

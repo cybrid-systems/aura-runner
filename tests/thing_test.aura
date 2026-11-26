@@ -26,6 +26,8 @@
 (define speck "(thing jump 0.4 (part sphere 0 0.1 0 0.1 0.1 0.1 0.9 0.9 0.2 0))")
 (define yawed "(thing decor 1.0 (part box 0 0.5 0 0.3 0.9 0.2 0.9 0.6 0.3 0.1 45))")
 (define yawed-bad "(thing decor 1.0 (part box 0 0.5 0 0.3 0.9 0.2 0.9 0.6 0.3 0.1 181))")
+(define metal "(thing decor 1.0 (part box 0 0.5 0 0.3 0.9 0.2 0.9 0.6 0.3 0.1 45 0.8))")
+(define metal-bad "(thing decor 1.0 (part box 0 0.5 0 0.3 0.9 0.2 0.9 0.6 0.3 0.1 45 1.5))")
 
 (define (report name text)
   (let ((r (check-thing text)))
@@ -53,6 +55,8 @@
 (report "speck" speck)
 (report "yawed" yawed)
 (report "yawed-bad" yawed-bad)
+(report "metal" metal)
+(report "metal-bad" metal-bad)
 (report "none" "I could not think of one.")
 ; Replies seen from some models: the head word dropped, or the name in its place.
 (report "headless" "Here comes a donut! (pickup 1.1 (anim spin 0.08 1.2) (name donut) (part torus 0 0.5 0 0.8 0.8 0.8 0.7 0.2 1 0.2))")
