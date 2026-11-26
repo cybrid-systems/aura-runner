@@ -2883,6 +2883,39 @@ export function createRenderer(canvas, hooks) {
         push(x - 0.18 * s, 1.0 * s, z, 0.3 * s, 0.26 * s, 0.3 * s, 1, pink, 0.28, 0.1, psi);
       }
     }
+    // One oversized natural silhouette every eighteen chunks. A tree,
+    // boulder, crystal, coral, or mushroom becomes the local hero shot;
+    // it is still made from the same instanced parts, so the draw count
+    // stays flat. The ring above ties it to the current world colour.
+    function drawNaturalMark(along, lat, kind, s, tintK) {
+      const at = onRoad(along, lat);
+      const x = at.x;
+      const z = at.z;
+      const psi = at.psi;
+      if (kind === "crystal") {
+        const ice = mix3(pal.sky, [0.8, 0.95, 1], 0.45);
+        push(x, 1.2 * s, z, 0.5 * s, 2.6 * s, 0.5 * s, 2, ice, 0.15, 0.55, psi);
+        push(x, 0.35 * s, z, 1.05 * s, 0.7 * s, 1.05 * s, 1, mix3(ice, pal.flower2, 0.3), 0.18, 0.35, psi);
+        push(x, 2.75 * s, z, 0.2 * s, 0.55 * s, 0.2 * s, 5, tint(ice, 1.1), 0.2, 0.7, psi);
+      } else if (kind === "rock") {
+        const rock = mix3(pal.soil, [0.15, 0.08, 0.06], 0.25);
+        push(x, 0.55 * s, z, 1.5 * s, 1.1 * s, 1.2 * s, 1, rock, 0.78, 0.03, psi);
+        push(x + 0.3 * s, 1.0 * s, z, 0.8 * s, 0.6 * s, 0.7 * s, 1, tint(rock, 1.08), 0.7, 0.06, psi);
+      } else if (kind === "coral") {
+        const coral = mix3(pal.flower, [1, 0.45, 0.55], 0.4);
+        push(x, 0.55 * s, z, 0.35 * s, 1.1 * s, 0.35 * s, 0, pal.trunk, 0.6, 0.02, psi);
+        push(x, 1.35 * s, z, 0.9 * s, 0.9 * s, 0.9 * s, 1, coral, 0.32, 0.2, psi);
+        push(x + 0.4 * s, 1.85 * s, z, 0.5 * s, 0.5 * s, 0.5 * s, 1, pal.flower2, 0.3, 0.35, psi);
+      } else if (kind === "mushroom") {
+        push(x, 0.5 * s, z, 0.3 * s, 1.0 * s, 0.3 * s, 2, [0.94, 0.88, 0.76], 0.6, 0.02, psi);
+        push(x, 1.15 * s, z, 1.25 * s, 0.55 * s, 1.25 * s, 1, tint(pal.flower, tintK), 0.4, 0.14, psi);
+      } else {
+        drawTree(along, lat, 1 + (Math.abs(Math.floor(along)) % 4), s, true, 0, tintK);
+      }
+      const ringY = kind === "rock" ? 1.75 * s : kind === "crystal" ? 3.35 * s : 2.55 * s;
+      push(x, ringY, z, 1.35 * s, 0.06 * s, 1.35 * s, 4, tint(pal.flower2, 1.05), 0.2, 0.5, psi);
+    }
+
     function drawFace(at, face, scale, style) {
       if (n >= MAX - 10) return;
       const s = scale;
@@ -2962,6 +2995,14 @@ export function createRenderer(canvas, hooks) {
       const usePlan = !!(plan && plan.id === pal.biome);
       const props = usePlan ? plan.props : (Array.isArray(pal.props) ? pal.props : []);
       const sway = reduced ? 0 : Math.sin((st.time || 0) * 1.1 + cz * 0.13) * 0.05;
+      if (!CITY_STYLES[pal.biome] && props.length && ((cz - 1) % 18 === 0) && n < MAX - 90) {
+        const slot = Math.abs(Math.floor(cz / 18)) % props.length;
+        const mark = props[slot];
+        const side = (Math.abs(Math.floor(cz / 18)) % 2 === 0) ? -1 : 1;
+        const lat = side * (8.2 + laneHash(cz * 0.37) * 1.0);
+        const s = 1.55 + laneHash(cz * 0.71) * 0.45;
+        drawNaturalMark(cz + 1.2, lat, mark.kind, s, 1.0);
+      }
       for (let p = 0; p < props.length && n < MAX - 70; p++) {
         const prop = props[p];
         if (CITY_STYLES[pal.biome] && CITY_ARCH.has(prop.kind)) continue;
