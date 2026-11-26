@@ -7,7 +7,7 @@ export const ROLES = ["pickup", "jump", "slide", "decor", "pal"];
 export const SHAPES = ["box", "sphere", "cylinder", "cone", "torus", "gem"];
 // Shader shape codes: 0 box, 1 sphere, 2 gem, 3 cylinder, 4 cone, 5 torus.
 const SHADER = [0, 1, 3, 4, 5, 2];
-const MAX_PARTS = 8;
+const MAX_PARTS = 10;
 const SIZE_RANGE = {
   pickup: [0.8, 1.6],
   jump: [0.3, 0.6],

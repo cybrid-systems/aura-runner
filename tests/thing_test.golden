@@ -6,6 +6,7 @@ dark 0 dark
 out 0 part-outside
 bad-shape 0 part-shape
 many 0 too-many
+ten 1 fair decor 10
 hopper 0 anim
 code 0 symbol
 str 0 syntax
