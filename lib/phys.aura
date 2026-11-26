@@ -826,9 +826,12 @@
   (or (= k 8.0) (= k 9.0) (= k 10.0)))
 
 (define (live-blank)
-  (list (make-vector 512 #f) 0 (list) #f 0 #f 0 512))
+  (list (make-vector 512 #f) 0 (list) #f 0 #f 0 512 0))
 
-; (vec n movers slabs sn gaps gn cap)
+; (vec n movers slabs sn gaps gn cap head)
+; head is the first live slot. Pieces before it are behind the runner and
+; keep their packed road tables; a prune only moves the head, it does not
+; rewrite the vector.
 (define (live-vec st) (car st))
 (define (live-n st) (car (cdr st)))
 (define (live-movers st) (car (cdr (cdr st))))
@@ -837,9 +840,10 @@
 (define (live-gaps st) (car (cdr (cdr (cdr (cdr (cdr st)))))))
 (define (live-gn st) (car (cdr (cdr (cdr (cdr (cdr (cdr st))))))))
 (define (live-cap st) (car (cdr (cdr (cdr (cdr (cdr (cdr (cdr st)))))))))
+(define (live-head st) (car (cdr (cdr (cdr (cdr (cdr (cdr (cdr (cdr st))))))))))
 
-(define (live-set st vec n movers slabs sn gaps gn cap)
-  (list vec n movers slabs sn gaps gn cap))
+(define (live-set st vec n movers slabs sn gaps gn cap head)
+  (list vec n movers slabs sn gaps gn cap head))
 
 (define (copy-piece q)
   (let loop ((xs q) (acc (list)))
@@ -852,35 +856,36 @@
          (ncap (* cap 2))
          (src (live-vec st))
          (dst (make-vector ncap #f))
-         (n (live-n st)))
+         (n (live-n st))
+         (h (live-head st))
+         (count (- n h)))
     (let loop ((i 0))
-      (if (>= i n)
-        dst
+      (if (>= i count)
+        (live-set st dst count (live-movers st) (live-slabs st) (live-sn st)
+                  (live-gaps st) (live-gn st) ncap 0)
         (begin
-          (vector-set! dst i (vector-ref src i))
-          (loop (+ i 1)))))
-    (live-set st dst n (live-movers st) (live-slabs st) (live-sn st)
-              (live-gaps st) (live-gn st) ncap)))
+          (vector-set! dst i (vector-ref src (+ h i)))
+          (loop (+ i 1)))))))
 
 (define (live-push st q)
   (let ((st (if (>= (live-n st) (live-cap st)) (live-grow st) st)))
     (vector-set! (live-vec st) (live-n st) q)
     (live-set st (live-vec st) (+ (live-n st) 1) (live-movers st)
-              #f 0 #f 0 (live-cap st))))
+              #f 0 #f 0 (live-cap st) (live-head st))))
 
 (define (live-absorb st pieces)
   (let loop ((ps pieces) (st st) (mov (list)))
     (if (or (null? ps) (not (pair? ps)))
       (live-set st (live-vec st) (live-n st)
                 (append (live-movers st) (reverse mov))
-                #f 0 #f 0 (live-cap st))
+                #f 0 #f 0 (live-cap st) (live-head st))
       (let ((q (copy-piece (car ps))))
         (if (mover-kind? (piece-k q))
           (loop (cdr ps) st (cons q mov))
           (loop (cdr ps) (live-push st q) mov))))))
 
-(define (pack-slabs vec n)
-  (let loop ((i 0) (acc (list)) (count 0) (prev -1.0) (sorted #t))
+(define (pack-slabs vec start n)
+  (let loop ((i start) (acc (list)) (count 0) (prev -1.0) (sorted #t))
     (if (>= i n)
       (let ((packed (list->vector (reverse acc))))
         (cons (if sorted packed (cons #f packed)) count))
@@ -896,8 +901,8 @@
                   (and sorted (or (< count 1) (>= x0 (- prev 0.0000001))))))
           (loop (+ i 1) acc count prev sorted))))))
 
-(define (pack-gaps vec n)
-  (let loop ((i 0) (acc (list)) (count 0) (prev -1.0) (sorted #t))
+(define (pack-gaps vec start n)
+  (let loop ((i start) (acc (list)) (count 0) (prev -1.0) (sorted #t))
     (if (>= i n)
       (let ((packed (list->vector (reverse acc))))
         (cons (if sorted packed (cons #f packed)) count))
@@ -914,10 +919,10 @@
 (define (live-ensure st)
   (if (live-slabs st)
     st
-    (let ((sl (pack-slabs (live-vec st) (live-n st)))
-          (ga (pack-gaps (live-vec st) (live-n st))))
+    (let ((sl (pack-slabs (live-vec st) (live-head st) (live-n st)))
+          (ga (pack-gaps (live-vec st) (live-head st) (live-n st))))
       (live-set st (live-vec st) (live-n st) (live-movers st)
-                (car sl) (cdr sl) (car ga) (cdr ga) (live-cap st)))))
+                (car sl) (cdr sl) (car ga) (cdr ga) (live-cap st) (live-head st)))))
 
 ; Rightmost slab whose start is at or before x, then walk back while a
 ; later slab starts inside an earlier one. The first slab that contains
@@ -1067,8 +1072,8 @@
     (step-rivals (nudge-flyers movers dt) p dt)
     p dt slabs sn))
 
-(define (lower-x vec n x0)
-  (let loop ((lo 0) (hi n))
+(define (lower-x vec start n x0)
+  (let loop ((lo start) (hi n))
     (if (>= lo hi)
       lo
       (let ((mid (quotient (+ lo hi) 2)))
@@ -1184,7 +1189,7 @@
              (y2 (if sticky floor1 y))
              (vy2 (if sticky climb vy))
              (p7 (pset (pset (pset (pset p6 0 x) 1 y2) 2 vy2) 14 thrust1))
-             (tagged (near-pieces (live-vec st) (live-n st) movers x))
+             (tagged (near-pieces (live-vec st) (live-n st) (live-head st) movers x))
              (plist (pieces-of tagged))
              (done (finish-live p7 plist rules climb gaps gn slabs sn))
              (body (ease-lane (car done) dt))
@@ -1195,7 +1200,8 @@
               (maybe-prune
                 (live-set st (live-vec st) (live-n st) movers
                           (live-slabs st) (live-sn st)
-                          (live-gaps st) (live-gn st) (live-cap st))
+                          (live-gaps st) (live-gn st) (live-cap st)
+                          (live-head st))
                 (player-x body))
               ev))))))
 
@@ -1224,10 +1230,10 @@
                        p7)))
         (collide landed pieces rules)))))
 
-(define (near-pieces vec n movers px)
+(define (near-pieces vec n head movers px)
   (let ((lo (- px 6.0))
         (hi (+ px 6.0))
-        (start (lower-x vec n (- px 24.0))))
+        (start (lower-x vec head n (- px 24.0))))
     (let loop ((i start) (acc (list)))
       (if (or (>= i n) (> (piece-x (vector-ref vec i)) hi))
         (let mloop ((ms movers) (out (reverse acc)))
@@ -1246,8 +1252,9 @@
 (define (live-ahead st px)
   (let ((vec (live-vec st))
         (n (live-n st))
+        (head (live-head st))
         (x1 (+ px 40.0)))
-    (let loop ((i (lower-x vec n px)) (c 0))
+    (let loop ((i (lower-x vec head n px)) (c 0))
       (if (or (>= i n) (> (piece-x (vector-ref vec i)) x1))
         (let mloop ((ms (live-movers st)) (c c))
           (if (null? ms)
@@ -1281,38 +1288,48 @@
               (loop (cdr ms) best dist)))
           (loop (cdr ms) best dist))))))
 
-(define (maybe-prune st x)
-  (if (= (live-n st) 0)
-    st
-    (let ((q (vector-ref (live-vec st) 0)))
-      (if (or (not q)
-              (= (piece-k q) 0.0)
-              (< (+ (piece-x q) (piece-w q)) (- x 8.0)))
-        (live-prune st x)
-        st))))
+; The live vector keeps dead pieces behind a moving head. Moving the head
+; is a list rebuild, not a vector rewrite: a vector-set! inside the
+; workspace takes a MutationBoundaryGuard whose exit probes every module
+; arena, and a compaction of ~40 pieces was a 40 ms tick spike (a batch
+; of guarded writes). The packed slab/gap tables stay valid because the
+; dropped pieces are all behind the cut; a later chunk install replaces
+; them anyway.
+(define (mover-behind? q cut)
+  (< (+ (piece-x q) (piece-w q)) cut))
 
-(define (live-prune st x)
-  (let ((cut (- x 8.0))
-        (vec (live-vec st))
-        (n (live-n st)))
-    (let loop ((i 0) (j 0) (dropped #f))
-      (if (>= i n)
-        (let ((movers (let mloop ((ms (live-movers st)) (acc (list)) (drop #f))
-                        (if (null? ms)
-                          (if drop (reverse acc) (live-movers st))
-                          (let ((q (car ms)))
-                            (if (< (+ (piece-x q) (piece-w q)) cut)
-                              (mloop (cdr ms) acc #t)
-                              (mloop (cdr ms) (cons q acc) drop)))))))
-          (if (or dropped (not (eq? movers (live-movers st))))
-            (live-set st vec j movers #f 0 #f 0 (live-cap st))
-            st))
-        (let ((q (vector-ref vec i)))
-          (if (or (not q) (= (piece-k q) 0.0) (< (+ (piece-x q) (piece-w q)) cut))
-            (loop (+ i 1) j #t)
-            (begin
-              (if (not (= i j)) (vector-set! vec j q) #f)
-              (loop (+ i 1) (+ j 1) dropped))))))))
+(define (prune-movers movers cut)
+  (let loop ((ms movers) (acc (list)) (drop #f))
+    (if (null? ms)
+      (if drop (reverse acc) movers)
+      (let ((q (car ms)))
+        (if (mover-behind? q cut)
+          (loop (cdr ms) acc #t)
+          (loop (cdr ms) (cons q acc) drop))))))
+
+(define (maybe-prune st x)
+  (let ((vec (live-vec st))
+        (n (live-n st))
+        (h (live-head st))
+        (cut (- x 8.0)))
+    (if (>= h n)
+      (if (= h 0)
+        st
+        (live-set st vec 0 (live-movers st) #f 0 #f 0 (live-cap st) 0))
+      (let* ((q (vector-ref vec h))
+             (dead (or (not q)
+                       (= (piece-k q) 0.0)
+                       (mover-behind? q cut))))
+        (if dead
+          (let ((movers (live-movers st)))
+            (live-set st vec n
+                      (if (and (pair? movers) (mover-behind? (car movers) cut))
+                        (prune-movers movers cut)
+                        movers)
+                      (live-slabs st) (live-sn st)
+                      (live-gaps st) (live-gn st)
+                      (live-cap st) (+ h 1)))
+          st)))))
 
 ; Pickup points live on the player. Distance is only the server's
 ; running total; the picture scores the pickups themselves.
