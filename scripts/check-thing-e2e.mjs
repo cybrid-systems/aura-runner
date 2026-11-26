@@ -101,7 +101,7 @@ function session(sock) {
   });
   return {
     send(o) { sock.write(JSON.stringify(o) + "\n"); },
-    next(ms = 20000) {
+    next(ms = 30000) {
       if (queue.length) return Promise.resolve(queue.shift());
       return new Promise((resolve, reject) => {
         const t = setTimeout(() => reject(new Error("socket quiet")), ms);

@@ -124,6 +124,8 @@ jobs:
         run: node scripts/smoke.mjs
       - name: Mock LLM rebind
         run: node scripts/mock-llm-e2e.mjs
+      - name: Multi-fiber thing path
+        run: node scripts/check-thing-e2e.mjs
       - name: Biome EDSL gate and voice switch
         run: node scripts/check-edsl-e2e.mjs
       - name: Rebind refusal falls back to set-code
