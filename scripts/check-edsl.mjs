@@ -11,7 +11,7 @@ function sameObstacle(a, b) {
 
 const garden = dressPalette(palette(0, null), "garden", "day");
 const city = dressPalette(palette(0, null), "city", "day");
-if (city.path.join(",") !== "0.22,0.24,0.28") throw new Error("city road moved " + city.path);
+if (city.path.join(",") !== "0.16,0.46,0.74") throw new Error("city road moved " + city.path);
 if (garden.custom) throw new Error("garden daylight became a mix");
 
 const lava = acceptSpec({

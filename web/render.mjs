@@ -144,7 +144,7 @@ const CITY_ARCH = new Set([
   "clock-tower", "colonnade", "stone-bridge", "battlement", "tower",
 ]);
 export const CITY_STYLES = {
-  city: { wall: [0.3, 0.34, 0.48], vary: [0.58, 0.38, 0.4], roof: [0.18, 0.2, 0.26], trim: [1, 0.86, 0.42], faces: ["block", "step", "row"], glow: 0.2 },
+  city: { wall: [0.2, 0.46, 0.86], vary: [0.92, 0.36, 0.3], roof: [0.16, 0.18, 0.42], trim: [1, 0.78, 0.24], faces: ["block", "step", "row"], glow: 0.28 },
   beijing: { wall: [0.78, 0.16, 0.12], roof: [0.14, 0.09, 0.07], trim: [0.95, 0.78, 0.32], faces: ["eave", "gate", "hall"], mark: "pagoda" },
   shanghai: { wall: [0.14, 0.2, 0.42], roof: [0.45, 0.88, 1], trim: [0.7, 0.95, 1], faces: ["step", "lantern", "block"], mark: "pearl-tower", glow: 0.5 },
   hangzhou: { wall: [0.92, 0.9, 0.84], roof: [0.22, 0.24, 0.26], trim: [0.45, 0.62, 0.38], faces: ["eave", "hall", "pier"], mark: "stone-bridge" },
@@ -458,27 +458,29 @@ export function dressPalette(base, biome, mood, spec, sky) {
     return settleFog(pal);
   }
   if (name === "city") {
-    pal.sky0 = [0.42, 0.52, 0.82];
-    pal.sky1 = [0.98, 0.58, 0.34];
-    pal.sky = [0.55, 0.48, 0.72];
-    pal.fog = [0.96, 0.72, 0.52];
-    pal.fogAmt = Math.min(0.28, pal.fogAmt);
-    pal.hill = [0.18, 0.2, 0.32];
-    pal.hill2 = [0.28, 0.24, 0.38];
-    pal.path = [0.22, 0.24, 0.28];
-    pal.grass = [0.52, 0.54, 0.58];
-    pal.grassL = [0.62, 0.64, 0.66];
-    pal.grassR = [0.46, 0.48, 0.52];
-    pal.hedge = [0.32, 0.36, 0.48];
-    pal.soil = [0.2, 0.18, 0.16];
-    pal.leaf = [0.28, 0.55, 0.38];
-    pal.leaf2 = [0.42, 0.68, 0.46];
-    pal.trunk = [0.28, 0.3, 0.34];
-    pal.water = [0.16, 0.38, 0.58];
-    pal.flower = [1, 0.78, 0.32];
-    pal.flower2 = [0.45, 0.82, 1];
-    pal.sun = [1, 0.72, 0.38];
-    pal.lightAmt = Math.max(0.72, pal.lightAmt);
+    // Saturated cartoon street. The centre lane stays cool so it does not
+    // wear a coin or a gate colour, and the shoulders stay a step lighter.
+    pal.sky0 = [0.32, 0.6, 0.9];
+    pal.sky1 = [0.94, 0.6, 0.32];
+    pal.sky = [0.42, 0.64, 0.94];
+    pal.fog = [0.46, 0.66, 0.92];
+    pal.fogAmt = Math.min(0.16, pal.fogAmt);
+    pal.hill = [0.32, 0.4, 0.86];
+    pal.hill2 = [0.78, 0.36, 0.64];
+    pal.path = [0.16, 0.46, 0.74];
+    pal.grass = [0.24, 0.7, 0.38];
+    pal.grassL = [0.3, 0.74, 0.42];
+    pal.grassR = [0.22, 0.64, 0.7];
+    pal.hedge = [0.18, 0.55, 0.78];
+    pal.soil = [0.78, 0.42, 0.18];
+    pal.leaf = [0.22, 0.68, 0.36];
+    pal.leaf2 = [0.48, 0.82, 0.32];
+    pal.trunk = [0.62, 0.4, 0.22];
+    pal.water = [0.16, 0.52, 0.84];
+    pal.flower = [1, 0.72, 0.22];
+    pal.flower2 = [0.28, 0.78, 0.95];
+    pal.sun = [1, 0.78, 0.36];
+    pal.lightAmt = Math.max(0.88, pal.lightAmt);
   } else if (name === "space") {
     pal.sky0 = [0.05, 0.06, 0.16];
     pal.sky1 = [0.22, 0.12, 0.36];
@@ -1110,6 +1112,27 @@ void main() {
   o = vec4(c, 1.0);
 }`;
 
+// City-only sky. The garden pass keeps SKY_FS exactly, so a garden frame
+// does not run the extra sines. Still one fullscreen draw, no discard.
+const SKY_FS_CITY = SKY_FS.replace(
+  "  vec2 sun = vec2(x, uv.y) - uSun;",
+  `  float skyPx = x * 11.0 + parallax * 0.25;
+  float skyCell = floor(skyPx);
+  float skyTeeth = abs(fract(skyPx) - 0.5);
+  float skyTop = 0.50 + 0.14 * sin(skyCell * 1.7) + 0.05 * sin(skyCell * 2.9);
+  float skyBand = smoothstep(skyTop, skyTop - 0.012, uv.y) * smoothstep(0.40, 0.46, uv.y);
+  float skyGap = smoothstep(0.07, 0.18, skyTeeth);
+  vec3 skyTone = mix(uHill, uHill2, 0.5 + 0.5 * sin(skyCell * 2.1));
+  c = mix(c, skyTone, skyBand * (1.0 - skyGap) * 0.92);
+  float skyPx2 = x * 19.0 + parallax * 0.5 + 2.4;
+  float skyCell2 = floor(skyPx2);
+  float skyTop2 = 0.44 + 0.07 * sin(skyCell2 * 2.3);
+  float skyBand2 = smoothstep(skyTop2, skyTop2 - 0.01, uv.y) * smoothstep(0.36, 0.42, uv.y);
+  float skyGap2 = smoothstep(0.1, 0.22, abs(fract(skyPx2) - 0.5));
+  c = mix(c, mix(uHill2, uHill, 0.35), skyBand2 * (1.0 - skyGap2) * 0.55);
+  vec2 sun = vec2(x, uv.y) - uSun;`,
+);
+
 const MESH_VS = `#version 300 es
 precision highp float;
 layout(location=0) in vec3 aPos;
@@ -1585,7 +1608,7 @@ export function createRenderer(canvas, hooks) {
     gl = null;
   }
   if (!gl) return null;
-  let sky, mesh, meshBox, meshFast, meshShadow, meshNear, meshPat, meshBall, tri, cubeBuf, inst, vao, u, um, ub, uFast, uShadow, uNear, up, uBall, castBuf, rimBuf;
+  let sky, citySky, mesh, meshBox, meshFast, meshShadow, meshNear, meshPat, meshBall, tri, cubeBuf, inst, vao, u, uCitySky, um, ub, uFast, uShadow, uNear, up, uBall, castBuf, rimBuf;
   const rimData = new Float32Array(3 * STRIDE);
   const data = new Float32Array(MAX * STRIDE);
   const proj = new Float32Array(16);
@@ -1618,6 +1641,9 @@ export function createRenderer(canvas, hooks) {
   }
   function bootGL() {
     sky = link(gl, SKY_VS, SKY_FS);
+    citySky = link(gl, SKY_VS, SKY_FS_CITY);
+    litCitySky = link(gl, SKY_VS, litSky(SKY_FS_CITY));
+    highCitySky = link(gl, SKY_VS, highSky(SKY_FS_CITY));
     mesh = link(gl, MESH_VS, MESH_FS);
     meshBox = link(gl, MESH_VS, MESH_FS_BOX);
     meshFast = link(gl, MESH_VS, MESH_FS_FAST);
@@ -1657,6 +1683,9 @@ export function createRenderer(canvas, hooks) {
     gl.enable(gl.CULL_FACE);
     gl.cullFace(gl.BACK);
     u = skyLocs(sky);
+    uCitySky = skyLocs(citySky);
+    uLitCitySky = skyLocs(litCitySky);
+    uHighCitySky = skyLocs(highCitySky);
     um = meshLocs(mesh);
     ub = meshLocs(meshBox);
     uFast = meshLocs(meshFast);
@@ -1692,6 +1721,10 @@ export function createRenderer(canvas, hooks) {
   let usePost = false;
   let wasPost = false;
   let post = null;
+  let litCitySky = null;
+  let uLitCitySky = null;
+  let highCitySky = null;
+  let uHighCitySky = null;
   let litSkyProg = null;
   let litMesh = null;
   let litBox = null;
@@ -1832,6 +1865,7 @@ export function createRenderer(canvas, hooks) {
   function dropLit() {
     litSkyProg = litMesh = litBox = litPat = litBall = depthProg = null;
     highSkyProg = highMesh = highBox = highPat = highBall = null;
+    litCitySky = uLitCitySky = highCitySky = uHighCitySky = null;
     uLitSky = ulm = ulb = ulp = ulBall = depthLoc = null;
     uHighSky = uhm = uhb = uhp = uhBall = null;
     highReady = false;
@@ -1908,6 +1942,10 @@ export function createRenderer(canvas, hooks) {
     litBall = litBall || takeMesh("litBall", MESH_VS, litFragment(MESH_FS_BALL));
     depthProg = depthProg || takeMesh("depth", MESH_VS, DEPTH_FS);
     if (!(litSkyProg && litMesh && litBox && litPat && litBall && depthProg)) return false;
+    if (!litCitySky) {
+      litCitySky = link(gl, SKY_VS, litSky(SKY_FS_CITY));
+      uLitCitySky = skyLocs(litCitySky);
+    }
     if (!uLitSky) {
       uLitSky = skyLocs(litSkyProg);
       ulm = meshLocs(litMesh);
@@ -1930,6 +1968,10 @@ export function createRenderer(canvas, hooks) {
     highPat = highPat || takeMesh("highPat", MESH_VS, highFragment(MESH_FS_BOX_PAT));
     highBall = highBall || takeMesh("highBall", MESH_VS, highFragment(MESH_FS_BALL));
     if (!(highSkyProg && highMesh && highBox && highPat && highBall)) return false;
+    if (!highCitySky) {
+      highCitySky = link(gl, SKY_VS, highSky(SKY_FS_CITY));
+      uHighCitySky = skyLocs(highCitySky);
+    }
     if (!uHighSky) {
       uHighSky = skyLocs(highSkyProg);
       uhm = meshLocs(highMesh);
@@ -2888,7 +2930,8 @@ export function createRenderer(canvas, hooks) {
         gl.cullFace(gl.BACK);
         wasPost = false;
       }
-      rush = paintSky(sky, u);
+      const lowCity = CITY_STYLES[pal.biome] && citySky;
+      rush = paintSky(lowCity ? citySky : sky, lowCity ? uCitySky : u);
     }
 
     n = 0;
@@ -3161,6 +3204,65 @@ export function createRenderer(canvas, hooks) {
         push(x, h * 0.5, z, 0.95 * s, h, 0.72 * s, 0, wall, 0.48, glow * 0.2, psi, 0, 0, 6);
         push(x, h + 0.08 * s, z, 1.05 * s, 0.14 * s, 0.8 * s, 0, roof, 0.4, 0.04, psi);
         push(x, h * 0.72, z, 0.22 * s, 0.14 * s, 0.76 * s, 0, trim, 0.25, Math.max(glow, 0.35), psi);
+      }
+    }
+    const SIGN_COLORS = [
+      [0.95, 0.28, 0.34],
+      [0.98, 0.74, 0.16],
+      [0.2, 0.74, 0.88],
+      [0.58, 0.34, 0.92],
+      [0.3, 0.78, 0.4],
+      [0.98, 0.46, 0.64],
+    ];
+    const TRAIN_COLORS = [
+      [0.92, 0.32, 0.28],
+      [0.2, 0.62, 0.86],
+      [0.95, 0.72, 0.18],
+      [0.36, 0.72, 0.42],
+    ];
+    // Matte boxes share the short lawn shader (rough >= 0.72) and the
+    // same instanced draw. No discard and no second program.
+    function pushMatte(along, lat, y, sx, sy, sz, rgb, emit = 0) {
+      if (n >= MAX - 4) return;
+      const at = onRoad(along, lat);
+      push(at.x, y, at.z, sx, sy, sz, 0, rgb, 0.8, emit, at.psi);
+    }
+    function drawTrainCar(along, lat, rgb, wheels) {
+      if (n >= MAX - 12) return;
+      pushMatte(along, lat, 0.58, 1.15, 1.0, 4.6, rgb);
+      pushMatte(along, lat, 1.18, 1.02, 0.26, 4.3, mix3(rgb, [1, 1, 1], 0.28));
+      pushMatte(along, lat, 0.72, 1.2, 0.32, 1.6, [0.55, 0.86, 0.98], 0.12);
+      if (!wheels) return;
+      pushMatte(along - 1.35, lat, 0.2, 0.28, 0.28, 0.28, [0.14, 0.14, 0.18]);
+      pushMatte(along + 1.35, lat, 0.2, 0.28, 0.28, 0.28, [0.14, 0.14, 0.18]);
+    }
+    // Rails, a side track, fences, boards and cars. Low keeps the near
+    // rail, the fence, and a thinner set of boards and cars.
+    function drawCityDress(cz, block, rich) {
+      if (n >= MAX - 28) return;
+      const rail = [0.16, 0.5, 0.78];
+      const tie = [0.62, 0.34, 0.16];
+      const railSpan = rich ? 8.25 : 16.4;
+      for (const side of [-1, 1]) {
+        if (rich || block % 2 === 0) pushMatte(cz, side * 2.55, 0.13, 0.07, 0.08, railSpan, rail);
+        if (rich || block % 2 === 0) {
+          pushMatte(cz, side * 3.95, 0.36, 0.055, 0.46, rich ? 8.15 : 16.3, side < 0 ? [0.98, 0.74, 0.18] : [0.2, 0.76, 0.56]);
+        }
+        if (rich && (block + (side < 0 ? 0 : 1)) % 2 === 0) {
+          pushMatte(cz, side * 7.2, 0.05, 0.9, 0.05, 0.22, tie);
+        }
+      }
+      if (block % (rich ? 1 : 4) === 0 && n < MAX - 8) {
+        const side = laneHash(block * 1.7) > 0.5 ? 1 : -1;
+        const col = SIGN_COLORS[(laneHash(block * 3.1) * SIGN_COLORS.length) | 0];
+        const lat = side * 5.15;
+        pushMatte(cz, lat, 0.8, 0.07, 1.45, 0.07, [0.2, 0.16, 0.28]);
+        pushMatte(cz, lat, 1.65, 0.08, 0.7, 1.5, col, 0.1);
+      }
+      if (block % (rich ? 2 : 8) === 0 && n < MAX - 14) {
+        const side = block % 4 === 0 ? -1 : 1;
+        const rgb = TRAIN_COLORS[Math.abs((block / (rich ? 2 : 8)) | 0) % TRAIN_COLORS.length];
+        drawTrainCar(cz + 0.2, side * 7.2, rgb, rich);
       }
     }
     function drawCityStreet(cz) {
@@ -3439,10 +3541,11 @@ export function createRenderer(canvas, hooks) {
           }
           if (step8) {
             drawCityStreet(cz);
+            drawCityDress(cz, ((z / 2) | 0) >> 2, usePost);
             for (const side of [-1, 1]) {
               const lamp = onRoad(cz, side * 3.15);
-              push(lamp.x, 0.9, lamp.z, 0.08, 1.8, 0.08, 0, [0.24, 0.26, 0.3], 0.45, 0.05, lamp.psi);
-              push(lamp.x, 1.86, lamp.z, 0.2, 0.12, 0.2, 1, [1, 0.9, 0.55], 0.2, 0.9, lamp.psi);
+              push(lamp.x, 0.9, lamp.z, 0.08, 1.8, 0.08, 0, [0.18, 0.55, 0.78], 0.8, 0.08, lamp.psi);
+              push(lamp.x, 1.86, lamp.z, 0.22, 0.14, 0.22, 1, [1, 0.86, 0.42], 0.2, 0.9, lamp.psi);
             }
           }
         } else if (pal.biome === "space") {
@@ -3517,6 +3620,22 @@ export function createRenderer(canvas, hooks) {
         const at = onRoad(along, lat);
         const bob = reduced ? 0 : Math.sin((st.time || 0) * 1.4 + i) * 0.18;
         push(at.x, 1.1 + (i % 4) * 0.28 + bob, at.z, 0.06, 0.06, 0.06, 1, moteRgb, 0.2, 0.85, at.psi);
+      }
+    }
+    // Short streaks beside the lanes. Medium and High only; Low stays on
+    // the single pass and does not grow the instance list for them.
+    if (usePost && !reduced && speed >= 8 && n < MAX - 12) {
+      const lines = activeProfile.tier === "high" ? 7 : 5;
+      const span = 7 + Math.min(6, speed * 0.25);
+      for (let i = 0; i < lines; i++) {
+        const side = i % 2 ? 1 : -1;
+        const lat = side * (1.35 + (i % 3) * 0.4);
+        const phase = ((st.time || 0) * (5.5 + speed * 0.28) + i * 2.4) % span;
+        const along = pz + 1.2 + phase;
+        const len = 0.65 + (i % 3) * 0.3;
+        const y = 0.4 + (i % 4) * 0.26;
+        const col = i % 2 ? [0.98, 0.9, 0.48] : [0.62, 0.88, 1];
+        pushMatte(along, lat, y, 0.03, 0.018, len, col, 0.2);
       }
     }
 
@@ -4459,8 +4578,17 @@ export function createRenderer(canvas, hooks) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, post.sceneFb());
       gl.viewport(0, 0, w, h);
       gl.colorMask(true, true, true, true);
-      const skyProg = activeProfile.tier === "high" && highSkyProg ? highSkyProg : (litSkyProg || sky);
-      const skyLoc = activeProfile.tier === "high" && uHighSky ? uHighSky : (uLitSky || u);
+      const cityLook = !!CITY_STYLES[pal.biome];
+      const skyProg = cityLook && activeProfile.tier === "high" && highCitySky ? highCitySky
+        : cityLook && litCitySky ? litCitySky
+        : cityLook && citySky ? citySky
+        : activeProfile.tier === "high" && highSkyProg ? highSkyProg
+        : (litSkyProg || sky);
+      const skyLoc = skyProg === highCitySky ? uHighCitySky
+        : skyProg === litCitySky ? uLitCitySky
+        : skyProg === citySky ? uCitySky
+        : activeProfile.tier === "high" && uHighSky ? uHighSky
+        : (uLitSky || u);
       if (splitPass) beginSpan("scene");
       rush = paintSky(skyProg, skyLoc);
     }
