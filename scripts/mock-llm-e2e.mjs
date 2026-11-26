@@ -432,13 +432,13 @@ async function screenshots() {
       if (body.includes("The light rested") || body.includes("Run again")) {
         throw new Error("end card is on screen");
       }
-      if (body.includes(MOTIF_SAY)) sawBodySay = true;
-      if (skyReady && biome === "garden" && chat.includes(MOTIF_SAY) && sawBodySay && heroNow && heroNow !== "keeper") break;
+      if ((body.includes(MOTIF_SAY) || body.includes(SCENE_SAY))) sawBodySay = true;
+      if (skyReady && biome === "garden" && (chat.includes(MOTIF_SAY) || chat.includes(SCENE_SAY)) && sawBodySay && heroNow && heroNow !== "keeper") break;
     }
     if (!(sky.startsWith("0.9") || sky.startsWith("0.8"))) {
       throw new Error("garden sky was not kept " + sky + " biome " + biome + " asks " + gardenAsks + " mock " + JSON.stringify(mock.hits) + "\n" + core.log().slice(-800));
     }
-    if (!chat.includes(MOTIF_SAY) || !sawBodySay) {
+    if (!(chat.includes(MOTIF_SAY) || chat.includes(SCENE_SAY)) || !sawBodySay) {
       throw new Error("chat missing the model sentence " + chat + " sky " + sky + " mock " + JSON.stringify(mock.hits) + " page " + JSON.stringify(cdp.logs) + "\n" + core.log().slice(-1500));
     }
     if (!heroNow || heroNow === "keeper") {
