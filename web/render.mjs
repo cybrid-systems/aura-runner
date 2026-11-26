@@ -1428,17 +1428,25 @@ function boxPat(line) {
     `${line}
   float pulse = 0.85 + 0.15 * sin(uTime * 3.0 + vCenter.z);`,
   );
-  // Kind 8 is a gate bar. A bar that crosses the near plane used to
-  // fill the screen. Dither it out as its centre approaches the eye.
-  // The road stays on MESH_FS_BOX, so this branch is not on those pixels.
+  // A wide bar can cross the near plane while its centre is still
+  // metres away. Fade by this fragment's eye depth, not the centre.
+  // Kind 5 discs get the same test, and an octagon cut so a square
+  // board does not read as a sign. The road stays on MESH_FS_BOX.
   return withLine.replace(
     "void main() {",
     `void main() {
-  if (vKind > 7.5 && vKind < 8.5) {
-    float d2 = dot(vCenter - uEye, vCenter - uEye);
-    if (d2 < 8.0) {
+  bool gate = vKind > 7.5 && vKind < 8.5;
+  bool disc = vKind > 4.5 && vKind < 5.5 && vHalf.z < vHalf.x * 0.45 && vHalf.z < vHalf.y * 0.45;
+  if (gate || disc) {
+    if (disc) {
+      vec2 face = abs(vL.xy);
+      if (face.x + face.y > 0.707) discard;
+    }
+    float ndc = gl_FragCoord.z * 2.0 - 1.0;
+    float eyeZ = (2.0 * 0.08 * 96.0) / max(96.08 - ndc * 95.92, 1e-4);
+    if (eyeZ < 1.65) {
       float h = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
-      if (h < smoothstep(8.0, 0.36, d2)) discard;
+      if (h < smoothstep(1.65, 0.2, eyeZ)) discard;
     }
   }`,
   );
@@ -3594,16 +3602,40 @@ export function createRenderer(canvas, hooks) {
       }
     }
 
-    // A bar whose centre is near or behind the eye clips into a full-screen band.
-    function nearCamera(x, y, z) {
+    // Coarse skip once the closest point of the bar is through the eye.
+    // A wide bar whose centre is still ahead fades in the shader instead,
+    // so one end can cross the near plane without covering the picture.
+    function nearestAhead(x, y, z, sx, sy, sz, yaw) {
+      const dx = eye[0] - x;
+      const dy = eye[1] - y;
+      const dz = eye[2] - z;
+      const c = Math.cos(yaw);
+      const s = Math.sin(yaw);
+      const lx = c * dx - s * dz;
+      const ly = dy;
+      const lz = s * dx + c * dz;
+      const hx = Math.abs(sx) * 0.5;
+      const hy = Math.abs(sy) * 0.5;
+      const hz = Math.abs(sz) * 0.5;
+      const qx = Math.max(-hx, Math.min(hx, lx));
+      const qy = Math.max(-hy, Math.min(hy, ly));
+      const qz = Math.max(-hz, Math.min(hz, lz));
+      const wx = c * qx + s * qz;
+      const wz = -s * qx + c * qz;
+      const fx = Math.sin(psi);
+      const fz = Math.cos(psi);
+      return (x + wx - eye[0]) * fx + (z + wz - eye[2]) * fz;
+    }
+    function nearCamera(x, y, z, sx, sy, sz, yaw) {
+      if (sx > 0) return nearestAhead(x, y, z, sx, sy, sz, yaw) < 0.25;
       const dx = x - eye[0];
       const dy = y - eye[1];
       const dz = z - eye[2];
       const ahead = dx * Math.sin(psi) + dz * Math.cos(psi);
-      return ahead < 1.35 || dx * dx + dy * dy + dz * dz < 2.1;
+      return ahead < 0.35 || dx * dx + dy * dy + dz * dz < 0.5;
     }
     function gateBar(x, y, z, sx, sy, sz, rgb, rough, emit, yaw) {
-      if (nearCamera(x, y, z)) return;
+      if (nearCamera(x, y, z, sx, sy, sz, yaw)) return;
       push(x, y, z, sx, sy, sz, 0, rgb, rough, emit, yaw, 0, 0, 8);
     }
     function drawGate(q, zc, sc, glow) {
