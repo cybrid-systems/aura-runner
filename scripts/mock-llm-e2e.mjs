@@ -312,6 +312,7 @@ async function screenshots() {
     const chromeOut = fs.openSync(chromeLog, "a");
     let bridge;
     let chrome;
+    let cdp = null;
     try {
       await core.ready;
       bridge = spawn(process.execPath, ["bridge/server.mjs"], {
@@ -342,7 +343,7 @@ async function screenshots() {
       const list = await waitJson(`http://127.0.0.1:${dbg}/json`, chromeLog);
     const page = list.find((t) => t.type === "page" && t.webSocketDebuggerUrl);
     if (!page) throw new Error("no chrome page " + JSON.stringify(list.map((t) => t.type)));
-    const cdp = await cdpClient(page.webSocketDebuggerUrl);
+    cdp = await cdpClient(page.webSocketDebuggerUrl);
     await cdp.call("Page.enable");
     await cdp.call("Runtime.enable");
     const early = path.join(root, "out", "garden-before.png");
@@ -475,14 +476,21 @@ async function screenshots() {
     // Chrome that cannot start or paint skips the optional screenshots.
     console.log("screenshot skipped: " + (e && e.message ? e.message : e));
   } finally {
+    if (cdp) { try { cdp.close(); } catch { /* already gone */ } }
     fs.closeSync(chromeOut);
     if (chrome) chrome.kill("SIGTERM");
     if (bridge) bridge.kill("SIGTERM");
     core.child.kill("SIGTERM");
     await new Promise((r) => {
-      if (core.child.exitCode !== null || core.child.signalCode !== null) r();
-      else core.child.once("exit", () => r());
+      const stop = setTimeout(() => {
+        try { core.child.kill("SIGKILL"); } catch { /* already gone */ }
+        r();
+      }, 5000);
+      const done = () => { clearTimeout(stop); r(); };
+      if (core.child.exitCode !== null || core.child.signalCode !== null) done();
+      else core.child.once("exit", done);
     });
+    if (mock.server.closeAllConnections) mock.server.closeAllConnections();
     await new Promise((r) => mock.server.close(r));
   }
 }
