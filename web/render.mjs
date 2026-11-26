@@ -119,7 +119,7 @@ function knownName(name, list, fallback) {
   return list.includes(name) ? name : fallback;
 }
 
-const PROP_KINDS = new Set(["tree", "tower", "arch", "crystal", "rock", "coral", "ring",
+export const PROP_KINDS = new Set(["tree", "tower", "arch", "crystal", "rock", "coral", "ring",
   "pagoda", "palace-gate", "pearl-tower", "spire", "bridge-tower", "eiffel-tower",
   "clock-tower", "colonnade", "bamboo", "palm", "stone-bridge", "battlement", "willow", "cypress", "sakura",
   "pine", "bush", "fern", "mushroom", "cactus", "reed"]);
@@ -362,8 +362,80 @@ function settleFog(pal) {
 
 // Garden in daylight is the palette above, unchanged. Other venues replace
 // sky, ground, and road colours. A mix recipe is painted from its EDSL spec.
+// The kinds the per-instance prop loop actually draws. A venue's pool
+// stays inside it, so the step never rotates in a shape the view skips.
+export const VENUE_PROP_KINDS = new Set(["tree", "pine", "bush", "fern", "mushroom",
+  "cactus", "reed", "crystal", "rock", "coral", "ring"]);
+
+// Props a built-in venue shows while no painted world is up. The core's
+// level step rotates the pool, so the garden's trees, the space rocks,
+// and the coast's reeds are not the same on every level. The city leaves
+// towers and arches to its street, so its shoulder is park and rubble.
+export const BIOME_PROPS = {
+  garden: [
+    { kind: "tree", density: 0.3, scale: 1.0 },
+    { kind: "bush", density: 0.18, scale: 0.95 },
+    { kind: "fern", density: 0.14, scale: 0.85 },
+    { kind: "mushroom", density: 0.08, scale: 0.75 },
+  ],
+  city: [
+    { kind: "rock", density: 0.16, scale: 0.9 },
+    { kind: "bush", density: 0.14, scale: 0.9 },
+    { kind: "fern", density: 0.1, scale: 0.8 },
+  ],
+  space: [
+    { kind: "crystal", density: 0.22, scale: 1.0 },
+    { kind: "ring", density: 0.16, scale: 0.95 },
+    { kind: "rock", density: 0.12, scale: 1.1 },
+  ],
+  coast: [
+    { kind: "coral", density: 0.24, scale: 1.0 },
+    { kind: "reed", density: 0.12, scale: 0.85 },
+    { kind: "rock", density: 0.1, scale: 0.9 },
+  ],
+};
+
+// Start the venue's pool at the step's shift and walk it once.
+export function propOrder(biome, shift) {
+  const pool = BIOME_PROPS[biome] || BIOME_PROPS.garden;
+  const k = Number.isInteger(shift) ? ((shift % pool.length) + pool.length) % pool.length : 0;
+  const out = [];
+  for (let i = 0; i < pool.length; i++) out.push(pool[(i + k) % pool.length]);
+  return out;
+}
+
+// The level step's look, for a venue with no painted world. A painted
+// world owns its own body, sun and props, so this does nothing there.
+function applySky(pal, sky, custom) {
+  if (!sky || custom) return;
+  const body = typeof sky.body === "string" ? sky.body : "";
+  if (body === "moon") {
+    pal.sun = [0.82, 0.9, 1];
+    pal.stars = Math.max(pal.stars, 0.7);
+    pal.disc = 0.5;
+  } else if (body === "stars") {
+    pal.sun = [0.82, 0.9, 1];
+    pal.stars = 1;
+    pal.disc = 0.18;
+    pal.nebula = [0.22, 0.18, 0.38];
+  } else if (body === "aurora") {
+    pal.sun = [0.72, 0.96, 0.9];
+    pal.stars = Math.max(pal.stars, 0.5);
+    pal.nebula = [0.3, 0.85, 0.62];
+    pal.disc = 0.35;
+  } else if (body === "none") {
+    pal.disc = 0;
+  }
+  const uv = sky.uv;
+  if (Array.isArray(uv) && uv.length === 2
+      && uv.every((n) => typeof n === "number" && n >= 0 && n <= 1)) {
+    pal.sunUv = [uv[0], uv[1]];
+  }
+  if (Number.isInteger(sky.shift)) pal.props = propOrder(pal.biome, sky.shift);
+}
+
 // Hurdles, gates, coins, and pots stay put so every biome stays readable.
-export function dressPalette(base, biome, mood, spec) {
+export function dressPalette(base, biome, mood, spec, sky) {
   const custom = !!(spec && spec.recipe === "mix" && spec.id);
   const name = custom ? spec.id : knownName(biome, BIOME_NAMES, "garden");
   const tone = knownName(mood, MOOD_NAMES, "day");
@@ -456,7 +528,10 @@ export function dressPalette(base, biome, mood, spec) {
     pal.sun = [1, 0.9, 0.62];
     pal.lightAmt = Math.max(0.78, pal.lightAmt);
   }
-  if (name === "garden" && tone === "day") return pal;
+  if (name === "garden" && tone === "day") {
+    applySky(pal, sky, custom);
+    return pal;
+  }
   if (tone === "night") {
     pal.sky0 = mix3(pal.sky0, [0.06, 0.08, 0.16], 0.72);
     pal.sky1 = mix3(pal.sky1, [0.14, 0.16, 0.28], 0.62);
@@ -493,6 +568,7 @@ export function dressPalette(base, biome, mood, spec) {
     pal.flower = [0.2, 0.95, 0.9];
     pal.flower2 = [1, 0.35, 0.75];
   }
+  applySky(pal, sky, custom);
   return settleFog(pal);
 }
 
@@ -2325,6 +2401,56 @@ export function createRenderer(canvas, hooks) {
     eyes(x, y + 0.46, z + 0.16);
   }
 
+  function drawPenguin(x, y, z, rgb) {
+    const belly = [0.96, 0.97, 1];
+    const orange = [0.98, 0.62, 0.2];
+    push(x, y + 0.34, z, 0.42, 0.54, 0.4, 1, rgb, 0.3, 0.04);
+    push(x, y + 0.32, z + 0.08, 0.3, 0.42, 0.3, 1, belly, 0.28, 0.06);
+    push(x, y + 0.72, z + 0.04, 0.3, 0.28, 0.3, 1, shade(rgb, 1.04), 0.26, 0.08);
+    push(x - 0.24, y + 0.38, z, 0.08, 0.34, 0.18, 0, shade(rgb, 0.82), 0.4, 0.02);
+    push(x + 0.24, y + 0.38, z, 0.08, 0.34, 0.18, 0, shade(rgb, 0.82), 0.4, 0.02);
+    push(x - 0.1, y + 0.06, z + 0.1, 0.16, 0.06, 0.22, 0, orange, 0.35, 0.02);
+    push(x + 0.1, y + 0.06, z + 0.1, 0.16, 0.06, 0.22, 0, orange, 0.35, 0.02);
+    push(x, y + 0.68, z + 0.3, 0.1, 0.08, 0.16, 3, orange, 0.3, 0.05);
+    eyes(x, y + 0.74, z + 0.28);
+  }
+
+  function drawPanda(x, y, z, rgb) {
+    const white = [0.97, 0.96, 0.93];
+    const ink = [0.12, 0.11, 0.12];
+    push(x, y + 0.32, z, 0.48, 0.44, 0.42, 1, white, 0.35, 0.03);
+    push(x, y + 0.62, z + 0.08, 0.4, 0.34, 0.36, 1, white, 0.3, 0.06);
+    push(x - 0.17, y + 0.84, z + 0.06, 0.14, 0.14, 0.1, 1, ink, 0.4, 0);
+    push(x + 0.17, y + 0.84, z + 0.06, 0.14, 0.14, 0.1, 1, ink, 0.4, 0);
+    push(x - 0.1, y + 0.7, z + 0.26, 0.11, 0.12, 0.06, 1, ink, 0.3, 0.02);
+    push(x + 0.1, y + 0.7, z + 0.26, 0.11, 0.12, 0.06, 1, ink, 0.3, 0.02);
+    push(x - 0.24, y + 0.35, z + 0.02, 0.12, 0.3, 0.14, 0, ink, 0.4, 0);
+    push(x + 0.24, y + 0.35, z + 0.02, 0.12, 0.3, 0.14, 0, ink, 0.4, 0);
+    push(x - 0.16, y + 0.08, z + 0.06, 0.16, 0.12, 0.22, 0, ink, 0.4, 0);
+    push(x + 0.16, y + 0.08, z + 0.06, 0.16, 0.12, 0.22, 0, ink, 0.4, 0);
+    push(x - 0.1, y + 0.72, z + 0.31, 0.035, 0.05, 0.03, 1, [1, 1, 1], 0.2, 0.1);
+    push(x + 0.1, y + 0.72, z + 0.31, 0.035, 0.05, 0.03, 1, [1, 1, 1], 0.2, 0.1);
+  }
+
+  function drawDragon(x, y, z, rgb) {
+    const wing = shade(rgb, 1.12);
+    const belly = mix3(rgb, [1, 0.94, 0.78], 0.55);
+    const horn = [0.98, 0.9, 0.66];
+    push(x, y + 0.36, z, 0.54, 0.36, 0.64, 1, rgb, 0.32, 0.05);
+    push(x, y + 0.42, z + 0.12, 0.34, 0.2, 0.4, 1, belly, 0.3, 0.05);
+    push(x, y + 0.62, z + 0.34, 0.34, 0.3, 0.32, 1, rgb, 0.28, 0.08);
+    push(x, y + 0.58, z + 0.52, 0.2, 0.14, 0.22, 0, belly, 0.3, 0.05);
+    push(x - 0.12, y + 0.84, z + 0.3, 0.08, 0.24, 0.08, 3, horn, 0.25, 0.3);
+    push(x + 0.12, y + 0.84, z + 0.3, 0.08, 0.24, 0.08, 3, horn, 0.25, 0.3);
+    push(x - 0.42, y + 0.6, z - 0.06, 0.5, 0.06, 0.42, 0, wing, 0.4, 0.04);
+    push(x + 0.42, y + 0.6, z - 0.06, 0.5, 0.06, 0.42, 0, wing, 0.4, 0.04);
+    push(x - 0.24, y + 0.34, z - 0.18, 0.38, 0.1, 0.3, 0, shade(rgb, 0.82), 0.4, 0.02);
+    push(x + 0.24, y + 0.34, z - 0.18, 0.38, 0.1, 0.3, 0, shade(rgb, 0.82), 0.4, 0.02);
+    push(x, y + 0.22, z - 0.4, 0.16, 0.16, 0.3, 0, shade(rgb, 0.8), 0.4, 0.02);
+    push(x, y + 0.46, z - 0.3, 0.12, 0.12, 0.12, 3, horn, 0.3, 0.2);
+    eyes(x, y + 0.66, z + 0.5);
+  }
+
   function drawFriend(x, y, z, rgb) {
     push(x, y + 0.36, z, 0.4, 0.4, 0.4, 1, rgb, 0.28, 0.08);
     push(x, y + 0.66, z + 0.04, 0.28, 0.26, 0.26, 1, shade(rgb, 1.12), 0.22, 0.12);
@@ -2348,6 +2474,9 @@ export function createRenderer(canvas, hooks) {
     else if (plan === "fox") drawFox(x, y, z, rgb);
     else if (plan === "turtle") drawTurtle(x, y, z, rgb);
     else if (plan === "bee") drawBee(x, y, z, rgb, t, reduced);
+    else if (plan === "penguin") drawPenguin(x, y, z, rgb);
+    else if (plan === "panda") drawPanda(x, y, z, rgb);
+    else if (plan === "dragon") drawDragon(x, y, z, rgb);
     else drawFriend(x, y, z, rgb);
   }
 
@@ -2474,7 +2603,13 @@ export function createRenderer(canvas, hooks) {
     if (quality.mode !== "low") kickWarm();
     pumpWarm();
     const pace = typeof window !== "undefined" ? Number(window.__lumenPace) : 0;
-    const arrived = dressPalette(palette(st.hue || 0, st.scene), st.biome, st.mood, st.spec);
+    const arrived = dressPalette(
+      palette(st.hue || 0, st.scene),
+      st.biome,
+      st.mood,
+      st.spec,
+      { body: st.skybody, uv: st.sunuv, shift: st.propshift },
+    );
     const px = st.lx || 0;
     const py = st.y || 0;
     const pz = Number.isFinite(st.x) ? st.x : runS;
@@ -2927,6 +3062,39 @@ export function createRenderer(canvas, hooks) {
         push(x - 0.18 * s, 1.0 * s, z, 0.3 * s, 0.26 * s, 0.3 * s, 1, pink, 0.28, 0.1, psi);
       }
     }
+    // One oversized natural silhouette every eighteen chunks. A tree,
+    // boulder, crystal, coral, or mushroom becomes the local hero shot;
+    // it is still made from the same instanced parts, so the draw count
+    // stays flat. The ring above ties it to the current world colour.
+    function drawNaturalMark(along, lat, kind, s, tintK) {
+      const at = onRoad(along, lat);
+      const x = at.x;
+      const z = at.z;
+      const psi = at.psi;
+      if (kind === "crystal") {
+        const ice = mix3(pal.sky, [0.8, 0.95, 1], 0.45);
+        push(x, 1.2 * s, z, 0.5 * s, 2.6 * s, 0.5 * s, 2, ice, 0.15, 0.55, psi);
+        push(x, 0.35 * s, z, 1.05 * s, 0.7 * s, 1.05 * s, 1, mix3(ice, pal.flower2, 0.3), 0.18, 0.35, psi);
+        push(x, 2.75 * s, z, 0.2 * s, 0.55 * s, 0.2 * s, 5, tint(ice, 1.1), 0.2, 0.7, psi);
+      } else if (kind === "rock") {
+        const rock = mix3(pal.soil, [0.15, 0.08, 0.06], 0.25);
+        push(x, 0.55 * s, z, 1.5 * s, 1.1 * s, 1.2 * s, 1, rock, 0.78, 0.03, psi);
+        push(x + 0.3 * s, 1.0 * s, z, 0.8 * s, 0.6 * s, 0.7 * s, 1, tint(rock, 1.08), 0.7, 0.06, psi);
+      } else if (kind === "coral") {
+        const coral = mix3(pal.flower, [1, 0.45, 0.55], 0.4);
+        push(x, 0.55 * s, z, 0.35 * s, 1.1 * s, 0.35 * s, 0, pal.trunk, 0.6, 0.02, psi);
+        push(x, 1.35 * s, z, 0.9 * s, 0.9 * s, 0.9 * s, 1, coral, 0.32, 0.2, psi);
+        push(x + 0.4 * s, 1.85 * s, z, 0.5 * s, 0.5 * s, 0.5 * s, 1, pal.flower2, 0.3, 0.35, psi);
+      } else if (kind === "mushroom") {
+        push(x, 0.5 * s, z, 0.3 * s, 1.0 * s, 0.3 * s, 2, [0.94, 0.88, 0.76], 0.6, 0.02, psi);
+        push(x, 1.15 * s, z, 1.25 * s, 0.55 * s, 1.25 * s, 1, tint(pal.flower, tintK), 0.4, 0.14, psi);
+      } else {
+        drawTree(along, lat, 1 + (Math.abs(Math.floor(along)) % 4), s, true, 0, tintK);
+      }
+      const ringY = kind === "rock" ? 1.75 * s : kind === "crystal" ? 3.35 * s : 2.55 * s;
+      push(x, ringY, z, 1.35 * s, 0.06 * s, 1.35 * s, 4, tint(pal.flower2, 1.05), 0.2, 0.5, psi);
+    }
+
     function drawFace(at, face, scale, style) {
       if (n >= MAX - 10) return;
       if (usePost) contactShadow(at.x, at.z, at.psi, 0, 0.7 * scale);
@@ -3006,11 +3174,24 @@ export function createRenderer(canvas, hooks) {
       const plan = worldPlan(st.spec, activeProfile.tier);
       const usePlan = !!(plan && plan.id === pal.biome);
       const props = usePlan ? plan.props : (Array.isArray(pal.props) ? pal.props : []);
+      // A painted world already scales its plan by tier; a venue's pool
+      // is scaled here so Low keeps the same instance budget.
+      const densityScale = usePlan ? 1
+        : activeProfile.tier === "low" ? 0.45
+        : activeProfile.tier === "medium" ? 0.72 : 1;
       const sway = reduced ? 0 : Math.sin((st.time || 0) * 1.1 + cz * 0.13) * 0.05;
+      if (!CITY_STYLES[pal.biome] && props.length && ((cz - 1) % 18 === 0) && n < MAX - 90) {
+        const slot = Math.abs(Math.floor(cz / 18)) % props.length;
+        const mark = props[slot];
+        const side = (Math.abs(Math.floor(cz / 18)) % 2 === 0) ? -1 : 1;
+        const lat = side * (8.2 + laneHash(cz * 0.37) * 1.0);
+        const s = 1.55 + laneHash(cz * 0.71) * 0.45;
+        drawNaturalMark(cz + 1.2, lat, mark.kind, s, 1.0);
+      }
       for (let p = 0; p < props.length && n < MAX - 70; p++) {
         const prop = props[p];
         if (CITY_STYLES[pal.biome] && CITY_ARCH.has(prop.kind)) continue;
-        const density = Math.max(0.05, Math.min(0.55, Number(prop.density) || 0.2));
+        const density = Math.max(0.05, Math.min(0.55, (Number(prop.density) || 0.2) * densityScale));
         const baseScale = Math.max(0.55, Math.min(1.45, Number(prop.scale) || 1));
         for (const side of [-1, 1]) {
           if (n >= MAX - 70) return;

@@ -104,6 +104,8 @@
       (if (or (voice-has? text "狐狸") (voice-word? low "fox")) (list "fox") (list))
       (if (or (voice-has? text "乌龟") (voice-word? low "turtle")) (list "turtle") (list))
       (if (or (voice-has? text "蜜蜂") (voice-word? low "bee")) (list "bee") (list))
+      (if (or (voice-has? text "企鹅") (voice-word? low "penguin")) (list "penguin") (list))
+      (if (or (voice-has? text "熊猫") (voice-word? low "panda")) (list "panda") (list))
       (if (or (voice-has? text "出租车") (voice-word? low "taxi")) (list "taxi") (list))
       (if (or (voice-has? text "赛车") (voice-word? low "racer")) (list "racer") (list))
       (if (or (voice-has? text "货车") (voice-word? low "van")) (list "van") (list))
@@ -140,9 +142,11 @@
   (let ((names (voice-pal-names text low)))
     (if (pair? names)
       (car names)
-      (if (or (voice-has? text "守护") (voice-word? low "keeper"))
-        "keeper"
-        ""))))
+      (if (or (voice-has? text "龙") (voice-word? low "dragon"))
+        "dragon"
+        (if (or (voice-has? text "守护") (voice-word? low "keeper"))
+          "keeper"
+          "")))))
 
 (define (voice-speed-ask? text low)
   (or (voice-has? text "快点") (voice-has? text "加速") (voice-has? text "跑快")

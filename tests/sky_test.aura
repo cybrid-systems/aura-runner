@@ -1,0 +1,94 @@
+; The world step beside a gate. The same seed and level repeat, six
+; levels walk every look, the body and mood always agree, the pickup
+; walks its whole list, and a venue's props start somewhere new on each
+; shift.
+(require "lib/sky")
+
+(define (show k v)
+  (display k)
+  (display " ")
+  (display v)
+  (newline))
+
+(define (bit ok) (if ok 1 0))
+
+(define (same-step? a b)
+  (and (string=? (hash-ref a "mood") (hash-ref b "mood"))
+       (string=? (hash-ref a "body") (hash-ref b "body"))
+       (string=? (hash-ref a "loot") (hash-ref b "loot"))
+       (equal? (hash-ref a "sun") (hash-ref b "sun"))
+       (= (hash-ref a "shift") (hash-ref b "shift"))
+       (= (hash-ref a "start") (hash-ref b "start"))))
+
+(define (uv-ok? uv)
+  (and (pair? uv)
+       (number? (car uv))
+       (number? (car (cdr uv)))
+       (>= (car uv) 0.20)
+       (<= (car uv) 0.80)
+       (>= (car (cdr uv)) 0.56)
+       (<= (car (cdr uv)) 0.86)))
+
+; star and aurora fields sit in the night palette; a moon may rise at
+; dusk or at night; a sun keeps the three bright moods.
+(define (look-ok? body mood)
+  (cond
+    ((string=? body "sun") (or (string=? mood "day") (string=? mood "sunset") (string=? mood "neon")))
+    ((string=? body "moon") (or (string=? mood "night") (string=? mood "sunset")))
+    ((string=? body "stars") (string=? mood "night"))
+    ((string=? body "aurora") (string=? mood "night"))
+    (else #f)))
+
+(define (looks levels)
+  (let loop ((xs levels) (acc ""))
+    (if (null? xs)
+      acc
+      (let ((step (sky-step 42 (car xs))))
+        (loop (cdr xs)
+              (string-append acc (if (= (string-length acc) 0) "" " ")
+                             (hash-ref step "body") "/" (hash-ref step "mood")))))))
+
+(define (loots levels)
+  (let loop ((xs levels) (acc ""))
+    (if (null? xs)
+      acc
+      (loop (cdr xs)
+            (string-append acc (if (= (string-length acc) 0) "" "/")
+                           (hash-ref (sky-step 42 (car xs)) "loot"))))))
+
+(define (loot-set levels)
+  (let loop ((xs levels) (seen (list)))
+    (if (null? xs)
+      seen
+      (let ((one (hash-ref (sky-step 42 (car xs)) "loot")))
+        (loop (cdr xs) (if (member one seen) seen (cons one seen)))))))
+
+(define (look-set levels)
+  (let loop ((xs levels) (seen (list)))
+    (if (null? xs)
+      seen
+      (let ((one (hash-ref (sky-step 42 (car xs)) "body")))
+        (loop (cdr xs) (if (member one seen) seen (cons one seen)))))))
+
+(define (coherent? from to)
+  (let loop ((lv from) (ok #t))
+    (if (or (> lv to) (not ok))
+      ok
+      (let ((step (sky-step 42 lv)))
+        (loop (+ lv 1) (look-ok? (hash-ref step "body") (hash-ref step "mood")))))))
+
+(define first (sky-step 42 1))
+(define again (sky-step 42 1))
+(define other (sky-step 43 1))
+
+(show "same" (bit (same-step? first again)))
+(show "seed-differs" (bit (not (same-step? first other))))
+(show "uv-ok" (bit (uv-ok? (hash-ref first "sun"))))
+(show "uv-moves" (bit (not (equal? (hash-ref (sky-step 42 1) "sun")
+                                  (hash-ref (sky-step 42 2) "sun")))))
+(show "shift-ok" (bit (let ((s (hash-ref first "shift"))) (and (>= s 0) (< s 7)))))
+(show "looks" (looks (list 1 2 3 4 5 6)))
+(show "looks-cover" (bit (= (length (look-set (list 1 2 3 4 5 6))) 4)))
+(show "coherent" (bit (coherent? 1 12)))
+(show "loots" (loots (list 1 2 3 4 5)))
+(show "loots-cover" (bit (= (length (loot-set (list 1 2 3 4 5))) 5)))

@@ -494,6 +494,31 @@ the fill catches up. `check-play` confirms it: ten simulated minutes,
 6 -> 5 over 150s, on top of the gate fix. check-sim golden, play-review
 (11/11), check-edsl-e2e, smoke all unchanged.
 
+**The live prune compaction is now a head move** (`lib/phys.aura`).
+The live road used to compact its static vector whenever the first piece
+fell behind: one `vector-set!` per surviving piece. Inside the set-code
+workspace every `vector-set!` takes a `MutationBoundaryGuard` whose exit
+probes all loaded module arenas, so a ~35-slot compaction (once per second,
+at the ground-segment cadence) cost 30-44ms. The `state` timers showed the
+whole spike inside `live-prune`; the loop itself was ~36 iterations and a
+standalone microbenchmark of the same loop took 0.16ms.
+
+The vector now keeps dead pieces behind a `head` index. `maybe-prune`
+advances the head by one slot per physics step, a state-list rebuild and no
+vector write; the packed slab/gap tables stay valid because everything
+before the head is behind the `x - 8` cut, and the next chunk install
+replaces them anyway. `live-grow` compacts the live range only when the
+vector fills; `lower-x`, `near-pieces`, `live-ahead`, `pack-slabs` and
+`pack-gaps` start at the head.
+
+Measured on the same 300-tick / 20Hz probe (seed 42, LLM off): p50
+10.0ms, p95 **17.7ms**, avg 12.4ms, down from p50 10.1 / p95 49.9 /
+avg 14.2 on the parent commit. The remaining >50ms ticks are chunk
+installs (`live-absorb`, ~20ms, once per chunk) and the dream proving
+slice (~40ms); the next step is to slice those. Verified: check-sim golden
+42 lines, `aura test` 32/32, `check-play` ten minutes with minAhead 1 and
+watchdog ok.
+
 The boot compile (`load-slow-one`, ~7.7s) remains; that is a one-time
 startup cost, not a per-frame spike.
 

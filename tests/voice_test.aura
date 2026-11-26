@@ -289,6 +289,9 @@
 
 (show-intent "hero-fox" "变成狐狸")
 (show-intent "hero-car" "变成小车")
+(show-intent "hero-dragon" "变成龙")
+(show-intent "hero-penguin" "变成企鹅")
+(show-intent "hero-panda" "变成熊猫")
 (show-intent "hero-en" "become fox")
 (show-intent "hero-keep" "变成守护者")
 

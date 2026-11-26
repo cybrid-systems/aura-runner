@@ -1,0 +1,60 @@
+; One deterministic world step per level: the sky body, the mood, the
+; pickup kind, and where the sun or moon sits on the screen. The run
+; calls this at every gate it did not pin to a spoken world, so the
+; venue's extras move with the child instead of standing still.
+;
+; The step is a pure function of (seed, level). The same pair always
+; returns the same hash. No model, no fiber, no clock.
+
+(define sky-moods (list "day" "sunset" "night" "neon"))
+(define sky-bodies (list "sun" "moon" "stars" "aurora"))
+(define sky-loots (list "coin" "star" "gem" "blossom" "apple"))
+
+; Body and mood travel together, so a star field never sits in a bright
+; daytime palette. Six looks, then around again.
+(define sky-looks
+  (list (list "sun" "day")
+        (list "sun" "sunset")
+        (list "moon" "night")
+        (list "stars" "night")
+        (list "aurora" "night")
+        (list "sun" "neon")))
+
+(define (sky-int n)
+  (let ((x (exact->inexact (if (number? n) n 0.0))))
+    (floor (if (< x 0.0) (- 0.0 x) x))))
+
+; A cheap integer mix. Level 1 and the run seed pick the first look.
+(define (sky-mix a b)
+  (modulo (+ (* (sky-int a) 1103515) (* (sky-int b) 12345) 2531011) 2147483646))
+
+(define (sky-round v)
+  (/ (floor (+ (* 1000.0 (exact->inexact v)) 0.5)) 1000.0))
+
+(define (sky-uniform h lo hi)
+  (let ((u (/ (exact->inexact (modulo h 10000)) 10000.0)))
+    (sky-round (+ lo (* (- hi lo) u)))))
+
+(define (sky-pick xs i)
+  (if (or (not (pair? xs)) (null? xs))
+    #f
+    (list-ref xs (modulo i (length xs)))))
+
+; The look walks its six entries; the seed only decides where it starts
+; and where the disc sits, so two runs of the same length differ while
+; one run stays repeatable.
+(define (sky-step seed level)
+  (let* ((lv (if (and (number? level) (>= level 1)) (floor level) 1))
+         (h (sky-mix seed lv))
+         (start (modulo (quotient (sky-mix seed 0) 3) 6))
+         (look (sky-pick sky-looks (+ (- lv 1) start)))
+         (loot (sky-pick sky-loots (- lv 1)))
+         (x (sky-uniform h 0.20 0.80))
+         (y (sky-uniform (quotient h 11) 0.56 0.86)))
+    (hash "level" lv
+          "mood" (car (cdr look))
+          "body" (car look)
+          "loot" loot
+          "sun" (list x y)
+          "start" start
+          "shift" (modulo h 7))))

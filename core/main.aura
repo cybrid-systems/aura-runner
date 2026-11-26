@@ -104,7 +104,7 @@
   "You redesign the garden backdrop for a children's 3D endless runner called Lumen Run. No markdown. Form: (garden (sky R G B) (ground R G B) (flower KIND DENSITY) (light L)). KIND is one of daisy, tulip, blossom, buttercup. Sky channels are 0.25 to 1 and the sky stays bright. Ground is green: G is at least 0.30 and at least as large as R, and not much smaller than B. Density is 0.15 to 1. Light is 0.50 to 1, never night. Optional (fog F) is 0 to 0.38; do not ask for thicker fog. No violence, fear, weapons, or scary words. Make it look different from a plain blue sky and daisies. First write one short bright English sentence with no parentheses, then the s-expression. That sentence is what the child reads. Example: (garden (sky 0.95 0.45 0.55) (ground 0.35 0.72 0.32) (flower tulip 0.85) (light 0.9))")
 
 (define PALS-SYS
-  "You change one friendly companion in a children's 3D endless runner called Lumen Run. No markdown. Restyle a friend who is already here by keeping the same name, or add one new gentle friend. Form: (pal KIND NAME R G B MOTION). KIND is kitten, car, van, racer, taxi, wagon, bunny, bird, butterfly, frog, duck, puppy, fox, turtle, bee, or a new gentle word of 3 to 12 letters. NAME is 2 to 12 letters. R G B are 0.25 to 1 and the colour stays bright. MOTION is hop, pace, float, follow, side, near, cheer, or pace-ahead. near, cheer, and pace-ahead only change where the friend is drawn, never the hit. No violence, fear, weapons, or scary words. Always restyle the runner in that same answer with (hero KIND R G B), alone or as one clause inside (pals ...). Pick a KIND different from the runner's current look. KIND is keeper, kitten, car, van, racer, taxi, wagon, bunny, bird, butterfly, frog, duck, puppy, fox, turtle, or bee. keeper is the light-keeper. R G B stay bright, from 0.25 to 1. A hero clause changes the runner only and does not add a friend. First write one short bright English sentence with no parentheses, then the s-expression. That sentence is what the child reads. Example: (pal bird lark 0.95 0.86 0.35 float)")
+  "You change one friendly companion in a children's 3D endless runner called Lumen Run. No markdown. Restyle a friend who is already here by keeping the same name, or add one new gentle friend. Form: (pal KIND NAME R G B MOTION). KIND is kitten, car, van, racer, taxi, wagon, bunny, bird, butterfly, frog, duck, puppy, fox, turtle, bee, penguin, panda, dragon, or a new gentle word of 3 to 12 letters. NAME is 2 to 12 letters. R G B are 0.25 to 1 and the colour stays bright. MOTION is hop, pace, float, follow, side, near, cheer, or pace-ahead. near, cheer, and pace-ahead only change where the friend is drawn, never the hit. No violence, fear, weapons, or scary words. Always restyle the runner in that same answer with (hero KIND R G B), alone or as one clause inside (pals ...). Pick a KIND different from the runner's current look. KIND is keeper, kitten, car, van, racer, taxi, wagon, bunny, bird, butterfly, frog, duck, puppy, fox, turtle, bee, penguin, panda, or dragon. keeper is the light-keeper. R G B stay bright, from 0.25 to 1. A hero clause changes the runner only and does not add a friend. First write one short bright English sentence with no parentheses, then the s-expression. That sentence is what the child reads. Example: (pal bird lark 0.95 0.86 0.35 float)")
 
 (define BIOME-SYS
   "You invent one bright place for a children's running game. No markdown. Reply with one short cheerful sentence, then one s-expression: (biome ID (label WORD) (sky ZR ZG ZB HR HG HB) (fog FR FG FB AMT) (body BODY) (road R G B) (curb R G B) (ground R G B) (surface SURFACE) (light L) (mood M) (particles KIND DENSITY) (props (PROP DENSITY SCALE) ...) (recipe mix)). ID and WORD are lowercase hyphenated words. BODY is sun, moon, stars, aurora, or none. SURFACE is grass, stone, dust, sand, ice, cloud, lava, reef, or plank. KIND is fireflies, stardust, snow, embers, rain, sparkles, or none. PROP is tree, tower, arch, crystal, rock, coral, ring, pagoda, palace-gate, pearl-tower, spire, bridge-tower, eiffel-tower, clock-tower, colonnade, bamboo, palm, stone-bridge, battlement, willow, cypress, sakura, pine, bush, fern, mushroom, cactus, or reed. Use one to four props. Every colour is 0 to 1. Fog AMT is at most 0.38. Light is 0.50 to 1. Density is 0.05 to 0.55. The road colour must differ from the shoulders. No violence, fear, or scary words.")
@@ -688,6 +688,13 @@
 (define edsl-req #f)
 (define edsl-res #f)
 (define mood-now "day")
+; The level step moves these beside the mood: the sky body the view
+; draws, where the disc sits, and how far a venue's props rotate.
+(define sky-body-now "sun")
+(define sun-x-now 0.74)
+(define sun-y-now 0.78)
+(define sky-shift 0)
+(define sky-on #f)
 (define biome-pin #f)
 ; Kept places, style by band. A clear may recombine two of them once the
 ; map has a pair. archive-wait skips that many clears after a keep.
@@ -1013,6 +1020,39 @@
                     (loop (cdr ps) best dist)))))
             (loop (cdr ps) best dist)))))))
 
+; Step the extras a venue carries: the sky body, the mood, the pickup
+; kind, and where the disc sits. Called at a gate the child did not pin
+; to a spoken world, so the picture moves instead of standing still.
+; The step is a pure function of (seed, level), so a resume lands on the
+; same look without saving it.
+(define (sky-advance! . rest)
+  (let ((say? (not (and (pair? rest) (equal? (car rest) #f)))))
+  (if (not sky-on)
+    (begin (require "lib/sky") (set! sky-on #t))
+    #f)
+  (let ((step (try (sky-step seed level-n) (catch (e) #f))))
+    (if (not (hash? step))
+      #f
+      (let ((uv (hash-ref step "sun" #f)))
+        (set! mood-now (hash-ref step "mood" mood-now))
+        (set! sky-body-now (hash-ref step "body" sky-body-now))
+        (set! loot-now (hash-ref step "loot" loot-now))
+        (if (and (pair? uv) (number? (car uv)) (number? (car (cdr uv))))
+          (begin
+            (set! sun-x-now (car uv))
+            (set! sun-y-now (car (cdr uv))))
+          #f)
+        (set! sky-shift (hash-ref step "shift" sky-shift))
+        (set! rules-dirty #t)
+        (set! rules-thin #f)
+        (if say?
+          (note! "KEEP" "fair" "sky"
+                 (string-append (biome-title biome-now wish-locale)
+                                " · " (mood-title mood-now wish-locale)
+                                " · " loot-now))
+          #f)
+        #t)))))
+
 ; bonus is a challenge step that landed on this same tick. The gate
 ; still adds its own step. The page's pickup combo is not this counter.
 ; Who reached the gate first is folded into the same banner.
@@ -1069,7 +1109,10 @@
           #f
           (begin
             (edsl-clear!)
-            (set! biome-now (hash-ref cross "biome" (biome-for-level level-n)))))))
+            (set! biome-now (hash-ref cross "biome" (biome-for-level level-n)))
+            ; A built-in venue has no painted world to carry its sky, so
+            ; the step supplies one: body, mood, pickup, and the disc.
+            (sky-advance!)))))
     (set! chal-coins 0)
     (set! chal-done #f)
     (set! run-mult (hash-ref cross "mult" run-mult))
@@ -1574,6 +1617,10 @@
   (set! chal-done #f)
   (set! biome-now "garden")
   (set! mood-now "day")
+  (set! sky-body-now "sun")
+  (set! sun-x-now 0.74)
+  (set! sun-y-now 0.78)
+  (set! sky-shift 0)
   (set! biome-pin #f)
   (set! banner-id 0)
   (set! banner-kind "")
@@ -1688,6 +1735,8 @@
         "props" props "sun-hide" sun-hide "shown" shown
         "level" level-n "goal" level-x1 "level0" level-x0
         "mult" run-mult "biome" biome-now "mood" mood-now "spec" edsl-spec
+        "skybody" sky-body-now "sunuv" (list sun-x-now sun-y-now)
+        "propshift" sky-shift
         "banner-id" banner-id "banner-kind" banner-kind
         "banner" banner-text "banner-gain" banner-gain
         "tune" (tune-public)))
@@ -1735,6 +1784,8 @@
         "deck" deck-ids
         "props" props "sun-hide" sun-hide "shown" shown
         "mult" run-mult "biome" biome-now "mood" mood-now "spec" edsl-spec
+        "skybody" sky-body-now "sunuv" (list sun-x-now sun-y-now)
+        "propshift" sky-shift
         "banner-id" banner-id "banner-kind" banner-kind
         "banner" banner-text "banner-gain" banner-gain
         "tune" (tune-public)))
@@ -1800,7 +1851,9 @@
         "stall" (if stall-waiting #t #f)
         "mult" run-mult
         "biome" biome-now
-        "mood" mood-now))
+        "mood" mood-now
+        "skybody" sky-body-now "sunuv" (list sun-x-now sun-y-now)
+        "propshift" sky-shift))
 
 (define (state-full-msg ev)
   (hash "op" "state"
@@ -1863,6 +1916,8 @@
         "stall" (if stall-waiting #t #f)
         "props" props "sun-hide" sun-hide "shown" shown
         "mult" run-mult "biome" biome-now "mood" mood-now "spec" edsl-spec
+        "skybody" sky-body-now "sunuv" (list sun-x-now sun-y-now)
+        "propshift" sky-shift
         "banner-id" banner-id "banner-kind" banner-kind
         "banner" banner-text "banner-gain" banner-gain))
 
@@ -3574,7 +3629,7 @@
     ((string=? kind "pals")
      (join-hint (string-append "Friends already here: " (pal-names pals-rows)
                     ". The runner is now " (runner-kind)
-                    ". Restyle one friend already here by keeping the same name, or add one new gentle friend who is not in that list. A puppy, fox, turtle, or bee is welcome. Always include (hero KIND R G B) with a different gentle kind. Start with one short sentence.")
+                    ". Restyle one friend already here by keeping the same name, or add one new gentle friend who is not in that list. A puppy, fox, turtle, bee, penguin, panda, or dragon is welcome. Always include (hero KIND R G B) with a different gentle kind. Start with one short sentence.")
                 pals-hint))
     (else
      (join-hint (string-append "Difficulty band " (number->string band)
@@ -5216,6 +5271,9 @@
   (set! run-defeats (let ((n (hash-ref saved "defeats" 0))) (if (number? n) (max 0 (min 4 (floor n))) 0)))
   (set! run-over (equal? (hash-ref saved "over" #f) #t))
   (set! skill-seen (let ((n (hash-ref saved "skill-seen" 0.0))) (if (number? n) n 0.0)))
+  ; The step is a function of (seed, level), so the restored level gets
+  ; its own sky back instead of the one the rewind left behind.
+  (if (hash? edsl-spec) #f (sky-advance! #f))
   (set! rewind-quiet #f))
 
 (define (clear-slices!)
@@ -5340,6 +5398,7 @@
         #f)
       (let ((m (hash-ref snap "mood" "")))
         (if (mood-name? m) (set! mood-now m) #f))
+      (if (hash? edsl-spec) #f (sky-advance! #f))
       (and (scene-install! (hash-ref snap "scene" ""))
            (pals-install! (hash-ref snap "pals" ""))
            (motif-install! (hash-ref snap "motif" ""))))))
@@ -5439,6 +5498,7 @@
     (set! speed-now 8.0)
     (try (begin (reset-run!) (resume-run! msg) (take-hello-venue! msg))
          (catch (e) #f))
+    (try (if (hash? edsl-spec) #f (sky-advance! #f)) (catch (e) #f))
     (send-welcome! c)
     (try (open-hello!) (catch (e) #f))
     (send-all-chunks c)
@@ -5452,6 +5512,7 @@
     (if parsed (set! seed parsed) #f)
     (try (begin (reset-run!) (take-hello-venue! msg))
          (catch (e) #f))
+    (try (if (hash? edsl-spec) #f (sky-advance! #f)) (catch (e) #f))
     (send-welcome! c)
     (try (open-hello!) (catch (e) #f))
     (send-all-chunks c)
