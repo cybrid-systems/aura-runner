@@ -17,7 +17,7 @@
 ; KIND is tree, tower, arch, crystal, rock, coral, ring, pagoda,
 ; palace-gate, pearl-tower, spire, bridge-tower, eiffel-tower,
 ; clock-tower, colonnade, bamboo, palm, stone-bridge, battlement,
-; willow, cypress, or sakura.
+; willow, cypress, sakura, pine, bush, fern, mushroom, cactus, or reed.
 ; A proposal is kept only after evo:trial (edsl-gate).
 (require "std/string" all:)
 (require "std/evo-core" all:)
@@ -30,25 +30,26 @@
 (define edsl-kinds (list "tree" "tower" "arch" "crystal" "rock" "coral" "ring"
                          "pagoda" "palace-gate" "pearl-tower" "spire" "bridge-tower"
                          "eiffel-tower" "clock-tower" "colonnade" "bamboo" "palm"
-                         "stone-bridge" "battlement" "willow" "cypress" "sakura"))
+                         "stone-bridge" "battlement" "willow" "cypress" "sakura"
+                         "pine" "bush" "fern" "mushroom" "cactus" "reed"))
 (define edsl-recipes (list "garden" "city" "space" "coast" "mix"))
 (define edsl-builtins (list "garden" "city" "space" "coast"))
 (define EDSL-BUDGET 168.0)
 
 (define edsl-garden
-  "(biome garden (label Garden) (sky 0.55 0.72 0.95 0.86 0.91 0.98) (fog 0.78 0.86 0.94 0.22) (body sun) (road 0.93 0.78 0.52) (curb 0.45 0.32 0.22) (ground 0.42 0.68 0.38) (surface grass) (light 0.82) (mood 0.55) (particles fireflies 0.18) (props (tree 0.38 1.00)) (recipe garden))")
+  "(biome garden (label Garden) (sky 0.55 0.72 0.95 0.86 0.91 0.98) (fog 0.78 0.86 0.94 0.22) (body sun) (road 0.93 0.78 0.52) (curb 0.45 0.32 0.22) (ground 0.42 0.68 0.38) (surface grass) (light 0.82) (mood 0.55) (particles fireflies 0.18) (props (tree 0.30 1.00) (bush 0.18 0.95) (fern 0.14 0.85) (mushroom 0.08 0.75)) (recipe garden))")
 (define edsl-city
   "(biome city (label City) (sky 0.42 0.52 0.82 0.98 0.58 0.34) (fog 0.96 0.72 0.52 0.22) (body sun) (road 0.22 0.24 0.28) (curb 0.20 0.18 0.16) (ground 0.52 0.54 0.58) (surface stone) (light 0.78) (mood 0.62) (particles sparkles 0.22) (props (tower 0.28 1.10)) (recipe city))")
 (define edsl-space
   "(biome space (label Space) (sky 0.05 0.06 0.16 0.22 0.12 0.36) (fog 0.08 0.07 0.16 0.12) (body stars) (road 0.12 0.16 0.28) (curb 0.16 0.14 0.18) (ground 0.07 0.08 0.14) (surface dust) (light 0.84) (mood 0.30) (particles stardust 0.28) (props (crystal 0.22 1.00) (ring 0.18 0.95)) (recipe space))")
 (define edsl-coast
-  "(biome coast (label Coast) (sky 0.42 0.70 0.95 0.96 0.78 0.52) (fog 0.78 0.88 0.95 0.18) (body sun) (road 0.93 0.82 0.52) (curb 0.72 0.58 0.32) (ground 0.22 0.58 0.68) (surface sand) (light 0.80) (mood 0.58) (particles sparkles 0.16) (props (coral 0.24 1.00) (rock 0.14 0.80)) (recipe coast))")
+  "(biome coast (label Coast) (sky 0.42 0.70 0.95 0.96 0.78 0.52) (fog 0.78 0.88 0.95 0.18) (body sun) (road 0.93 0.82 0.52) (curb 0.72 0.58 0.32) (ground 0.22 0.58 0.68) (surface sand) (light 0.80) (mood 0.58) (particles sparkles 0.16) (props (coral 0.24 1.00) (rock 0.14 0.80) (reed 0.10 0.80)) (recipe coast))")
 (define edsl-lava
   "(biome lava-canyon (label Lava-Canyon) (sky 0.42 0.16 0.18 0.86 0.40 0.22) (fog 0.55 0.28 0.22 0.18) (body sun) (road 0.70 0.42 0.28) (curb 0.42 0.24 0.16) (ground 0.22 0.16 0.16) (surface lava) (light 0.78) (mood 0.84) (particles embers 0.36) (props (rock 0.32 1.05) (arch 0.18 0.95)) (recipe mix))")
 (define edsl-ice
-  "(biome aurora-ice (label Aurora-Ice) (sky 0.16 0.28 0.48 0.62 0.86 0.78) (fog 0.70 0.86 0.92 0.16) (body aurora) (road 0.72 0.84 0.92) (curb 0.55 0.72 0.84) (ground 0.28 0.42 0.62) (surface ice) (light 0.78) (mood 0.28) (particles snow 0.30) (props (crystal 0.30 1.15) (ring 0.12 0.85)) (recipe mix))")
+  "(biome aurora-ice (label Aurora-Ice) (sky 0.16 0.28 0.48 0.62 0.86 0.78) (fog 0.70 0.86 0.92 0.16) (body aurora) (road 0.72 0.84 0.92) (curb 0.55 0.72 0.84) (ground 0.28 0.42 0.62) (surface ice) (light 0.78) (mood 0.28) (particles snow 0.30) (props (crystal 0.30 1.15) (ring 0.12 0.85) (pine 0.10 0.95)) (recipe mix))")
 (define edsl-candy
-  "(biome candy-clouds (label Candy-Clouds) (sky 0.95 0.72 0.88 0.99 0.86 0.94) (fog 0.98 0.86 0.92 0.16) (body sun) (road 0.96 0.55 0.72) (curb 0.92 0.42 0.58) (ground 0.30 0.62 0.42) (surface cloud) (light 0.90) (mood 0.70) (particles sparkles 0.34) (props (arch 0.22 1.00) (ring 0.16 0.90)) (recipe mix))")
+  "(biome candy-clouds (label Candy-Clouds) (sky 0.95 0.72 0.88 0.99 0.86 0.94) (fog 0.98 0.86 0.92 0.16) (body sun) (road 0.96 0.55 0.72) (curb 0.92 0.42 0.58) (ground 0.30 0.62 0.42) (surface cloud) (light 0.90) (mood 0.70) (particles sparkles 0.34) (props (arch 0.22 1.00) (ring 0.16 0.90) (mushroom 0.10 0.85)) (recipe mix))")
 (define edsl-coral
   "(biome coral-reef (label Coral-Reef) (sky 0.25 0.55 0.82 0.45 0.78 0.88) (fog 0.55 0.78 0.86 0.18) (body sun) (road 0.88 0.76 0.50) (curb 0.72 0.48 0.36) (ground 0.16 0.42 0.58) (surface reef) (light 0.80) (mood 0.52) (particles sparkles 0.22) (props (coral 0.30 1.05) (rock 0.12 0.75)) (recipe mix))")
 (define edsl-cyber
@@ -58,7 +59,7 @@
 (define edsl-shanghai
   "(biome shanghai (label shanghai) (sky 0.16 0.14 0.36 0.86 0.30 0.58) (fog 0.40 0.22 0.48 0.18) (body moon) (road 0.34 0.36 0.46) (curb 0.15 0.78 0.86) (ground 0.12 0.16 0.22) (surface plank) (light 0.88) (mood 0.34) (particles sparkles 0.22) (props (pearl-tower 0.24 1.25) (spire 0.18 1.15)) (recipe mix))")
 (define edsl-hangzhou
-  "(biome hangzhou (label hangzhou) (sky 0.74 0.86 0.92 0.96 0.82 0.78) (fog 0.86 0.90 0.93 0.24) (body sun) (road 0.70 0.64 0.52) (curb 0.45 0.42 0.38) (ground 0.32 0.58 0.36) (surface grass) (light 0.84) (mood 0.48) (particles sparkles 0.14) (props (stone-bridge 0.22 1.05) (willow 0.20 1.00)) (recipe mix))")
+  "(biome hangzhou (label hangzhou) (sky 0.74 0.86 0.92 0.96 0.82 0.78) (fog 0.86 0.90 0.93 0.24) (body sun) (road 0.70 0.64 0.52) (curb 0.45 0.42 0.38) (ground 0.32 0.58 0.36) (surface grass) (light 0.84) (mood 0.48) (particles sparkles 0.14) (props (stone-bridge 0.22 1.05) (willow 0.20 1.00) (pine 0.10 0.95)) (recipe mix))")
 (define edsl-chengdu
   "(biome chengdu (label chengdu) (sky 0.62 0.84 0.70 0.78 0.90 0.72) (fog 0.70 0.86 0.74 0.20) (body sun) (road 0.68 0.42 0.22) (curb 0.30 0.48 0.28) (ground 0.16 0.52 0.22) (surface grass) (light 0.82) (mood 0.55) (particles sparkles 0.12) (props (bamboo 0.28 1.10) (pagoda 0.16 1.00)) (recipe mix))")
 (define edsl-xian
@@ -82,13 +83,13 @@
 (define edsl-venice
   "(biome venice (label venice) (sky 0.64 0.76 0.90 0.96 0.72 0.64) (fog 0.78 0.84 0.90 0.16) (body sun) (road 0.62 0.50 0.52) (curb 0.85 0.55 0.55) (ground 0.32 0.50 0.42) (surface sand) (light 0.84) (mood 0.55) (particles sparkles 0.12) (props (stone-bridge 0.24 1.10) (colonnade 0.16 1.00)) (recipe mix))")
 (define edsl-tokyo
-  "(biome tokyo (label tokyo) (sky 0.96 0.74 0.80 0.98 0.55 0.62) (fog 0.96 0.78 0.84 0.14) (body sun) (road 0.58 0.44 0.36) (curb 0.75 0.20 0.24) (ground 0.18 0.42 0.22) (surface stone) (light 0.88) (mood 0.64) (particles sparkles 0.16) (props (spire 0.24 1.20) (sakura 0.22 1.05)) (recipe mix))")
+  "(biome tokyo (label tokyo) (sky 0.96 0.74 0.80 0.98 0.55 0.62) (fog 0.96 0.78 0.84 0.14) (body sun) (road 0.58 0.44 0.36) (curb 0.75 0.20 0.24) (ground 0.18 0.42 0.22) (surface stone) (light 0.88) (mood 0.64) (particles sparkles 0.16) (props (spire 0.24 1.20) (sakura 0.22 1.05) (pine 0.10 0.95)) (recipe mix))")
 (define edsl-visit-china
   "(biome visit-china (label visit-china) (sky 0.70 0.84 0.78 0.90 0.88 0.75) (fog 0.78 0.88 0.80 0.22) (body sun) (road 0.62 0.56 0.40) (curb 0.40 0.48 0.32) (ground 0.22 0.50 0.30) (surface grass) (light 0.84) (mood 0.50) (particles sparkles 0.14) (props (bamboo 0.24 1.05) (stone-bridge 0.16 1.00)) (recipe mix))")
 (define edsl-visit-high
   "(biome visit-high (label visit-high) (sky 0.95 0.62 0.36 0.70 0.36 0.28) (fog 0.92 0.64 0.40 0.14) (body sun) (road 0.62 0.38 0.22) (curb 0.50 0.28 0.16) (ground 0.18 0.36 0.16) (surface dust) (light 0.86) (mood 0.68) (particles embers 0.12) (props (pagoda 0.22 1.10) (battlement 0.16 1.00)) (recipe mix))")
 (define edsl-visit-lake
-  "(biome visit-lake (label visit-lake) (sky 0.78 0.86 0.94 0.96 0.80 0.76) (fog 0.84 0.90 0.94 0.20) (body sun) (road 0.68 0.60 0.50) (curb 0.50 0.46 0.40) (ground 0.28 0.55 0.36) (surface grass) (light 0.86) (mood 0.52) (particles sparkles 0.12) (props (willow 0.24 1.05) (stone-bridge 0.18 1.00)) (recipe mix))")
+  "(biome visit-lake (label visit-lake) (sky 0.78 0.86 0.94 0.96 0.80 0.76) (fog 0.84 0.90 0.94 0.20) (body sun) (road 0.68 0.60 0.50) (curb 0.50 0.46 0.40) (ground 0.28 0.55 0.36) (surface grass) (light 0.86) (mood 0.52) (particles sparkles 0.12) (props (willow 0.24 1.05) (stone-bridge 0.18 1.00) (reed 0.10 0.85)) (recipe mix))")
 (define edsl-visit-canal
   "(biome visit-canal (label visit-canal) (sky 0.62 0.74 0.88 0.95 0.70 0.60) (fog 0.76 0.82 0.90 0.16) (body sun) (road 0.58 0.50 0.48) (curb 0.80 0.55 0.50) (ground 0.30 0.48 0.40) (surface sand) (light 0.84) (mood 0.54) (particles sparkles 0.12) (props (stone-bridge 0.22 1.05) (colonnade 0.16 1.00)) (recipe mix))")
 (define edsl-visit-stone
@@ -100,7 +101,7 @@
 (define edsl-visit-palm
   "(biome visit-palm (label visit-palm) (sky 0.95 0.70 0.50 0.98 0.50 0.45) (fog 0.96 0.78 0.62 0.14) (body sun) (road 0.70 0.60 0.45) (curb 0.85 0.55 0.40) (ground 0.36 0.50 0.28) (surface sand) (light 0.90) (mood 0.72) (particles sparkles 0.10) (props (palm 0.28 1.10) (spire 0.14 1.05)) (recipe mix))")
 (define edsl-sand
-  "(biome sand-dunes (label sand-dunes) (sky 0.96 0.74 0.46 0.98 0.86 0.62) (fog 0.94 0.82 0.58 0.14) (body sun) (road 0.72 0.58 0.36) (curb 0.55 0.40 0.24) (ground 0.86 0.72 0.42) (surface sand) (light 0.88) (mood 0.72) (particles sparkles 0.08) (props (rock 0.22 0.90) (palm 0.14 1.05)) (recipe mix))")
+  "(biome sand-dunes (label sand-dunes) (sky 0.96 0.74 0.46 0.98 0.86 0.62) (fog 0.94 0.82 0.58 0.14) (body sun) (road 0.72 0.58 0.36) (curb 0.55 0.40 0.24) (ground 0.86 0.72 0.42) (surface sand) (light 0.88) (mood 0.72) (particles sparkles 0.08) (props (rock 0.18 0.90) (palm 0.14 1.05) (cactus 0.10 0.95) (reed 0.08 0.80)) (recipe mix))")
 
 (define (edsl-boot)
   (list edsl-garden edsl-city edsl-space edsl-coast))
@@ -366,6 +367,12 @@
     ((string=? kind "willow") 4.0)
     ((string=? kind "cypress") 2.0)
     ((string=? kind "sakura") 4.0)
+    ((string=? kind "pine") 4.0)
+    ((string=? kind "bush") 3.0)
+    ((string=? kind "fern") 5.0)
+    ((string=? kind "mushroom") 4.0)
+    ((string=? kind "cactus") 4.0)
+    ((string=? kind "reed") 4.0)
     (else 6.0)))
 
 (define (edsl-cost props pamt)
@@ -1205,7 +1212,7 @@
 
 (define (edsl-one-prop text)
   (let ((h (edsl-hash-n (string-append text "p"))))
-    (list (hash "kind" (edsl-nth edsl-kinds (modulo h 22))
+    (list (hash "kind" (edsl-nth edsl-kinds (modulo h (length edsl-kinds)))
                 "density" (+ 0.10 (* (modulo h 9) 0.02))
                 "scale" 1.0))))
 

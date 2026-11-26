@@ -87,7 +87,7 @@ The form in [`lib/edsl.aura`](lib/edsl.aura):
   (recipe garden|city|space|coast|mix))
 ```
 
-KIND is tree, tower, arch, crystal, rock, coral, ring, pagoda, palace-gate, pearl-tower, spire, bridge-tower, eiffel-tower, clock-tower, colonnade, bamboo, palm, stone-bridge, battlement, willow, cypress, or sakura.
+KIND is tree, tower, arch, crystal, rock, coral, ring, pagoda, palace-gate, pearl-tower, spire, bridge-tower, eiffel-tower, clock-tower, colonnade, bamboo, palm, stone-bridge, battlement, willow, cypress, sakura, pine, bush, fern, mushroom, cactus, or reed.
 A proposal is kept only after evo:trial (edsl-gate).
 
 ## Music

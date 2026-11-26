@@ -37,6 +37,10 @@
 (line "coral" (edsl-gate edsl-coral))
 (line "cyber" (edsl-gate edsl-cyber))
 
+; The natural prop vocabulary: conifer, shrub, frond and mushroom.
+(define natural "(biome natural-grove (label Natural-Grove) (sky 0.55 0.72 0.95 0.86 0.91 0.98) (fog 0.78 0.86 0.94 0.22) (body sun) (road 0.93 0.78 0.52) (curb 0.45 0.32 0.22) (ground 0.42 0.68 0.38) (surface grass) (light 0.82) (mood 0.55) (particles fireflies 0.18) (props (pine 0.20 1.00) (bush 0.20 1.00) (fern 0.20 1.00) (mushroom 0.20 1.00)) (recipe mix))")
+(line "natural" (edsl-gate natural))
+
 (define dull
   "(biome dull-road (label Dull-Road) (sky 0.55 0.72 0.95 0.86 0.91 0.98) (fog 0.78 0.86 0.94 0.22) (body sun) (road 0.50 0.50 0.50) (curb 0.40 0.40 0.40) (ground 0.52 0.50 0.48) (surface stone) (light 0.80) (mood 0.50) (particles none 0.10) (props (rock 0.20 1.00)) (recipe mix))")
 (define coinish

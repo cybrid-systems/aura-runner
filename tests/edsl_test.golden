@@ -7,6 +7,7 @@ ice KEEP fair aurora-ice Aurora Ice ok
 candy KEEP fair candy-clouds Candy Clouds ok
 coral KEEP fair coral-reef Coral Reef ok
 cyber KEEP fair cyber-rain Cyber Rain ok
+natural KEEP fair natural-grove Natural Grove ok
 dull ROLLBACK contrast 
 coin ROLLBACK contrast 
 packed ROLLBACK budget 

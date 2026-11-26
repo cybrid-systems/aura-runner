@@ -75,6 +75,22 @@ const beijing = acceptSpec({
   props: [{ kind: "pagoda", density: 0.2, scale: 1 }],
 });
 if (!beijing || beijing.id !== "beijing") throw new Error("beijing spec dropped");
+
+const natural = acceptSpec({
+  ...beijing,
+  id: "natural-grove",
+  props: [
+    { kind: "pine", density: 0.2, scale: 1 },
+    { kind: "bush", density: 0.2, scale: 1 },
+    { kind: "fern", density: 0.2, scale: 1 },
+    { kind: "mushroom", density: 0.2, scale: 1 },
+  ],
+});
+if (!natural || natural.props.length !== 4) throw new Error("natural props dropped");
+if (!natural.props.every((row) => ["pine", "bush", "fern", "mushroom"].includes(row.kind))) {
+  throw new Error("natural prop kind moved");
+}
+if (!(specInstances(natural) > 0)) throw new Error("natural props have no instances");
 const fromGarden = takeVenue({ name: "garden", spec: null }, { biome: "city", spec: false });
 if (fromGarden.name !== "city" || fromGarden.spec) throw new Error("city wish kept the garden");
 const stale = takeVenue({ name: "beijing", spec: beijing }, { biome: "city" });

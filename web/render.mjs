@@ -34,6 +34,12 @@ function mul(rgb, s) {
   return [rgb[0] * s, rgb[1] * s, rgb[2] * s];
 }
 
+// A per-instance value shift. Keeps a row of one kind from reading as
+// one repeated mesh, without adding a second colour attribute.
+function tint(rgb, k) {
+  return [Math.min(1, rgb[0] * k), Math.min(1, rgb[1] * k), Math.min(1, rgb[2] * k)];
+}
+
 const FLOWERS = {
   daisy: [[0.98, 0.98, 0.94], [1.0, 0.86, 0.42]],
   tulip: [[0.93, 0.28, 0.42], [0.98, 0.55, 0.68]],
@@ -103,12 +109,14 @@ function knownName(name, list, fallback) {
 
 const PROP_KINDS = new Set(["tree", "tower", "arch", "crystal", "rock", "coral", "ring",
   "pagoda", "palace-gate", "pearl-tower", "spire", "bridge-tower", "eiffel-tower",
-  "clock-tower", "colonnade", "bamboo", "palm", "stone-bridge", "battlement", "willow", "cypress", "sakura"]);
+  "clock-tower", "colonnade", "bamboo", "palm", "stone-bridge", "battlement", "willow", "cypress", "sakura",
+  "pine", "bush", "fern", "mushroom", "cactus", "reed"]);
 const PROP_CUBES = {
   tree: 4, tower: 5, arch: 4, crystal: 3, rock: 3, coral: 4, ring: 4,
   pagoda: 8, "palace-gate": 6, "pearl-tower": 6, spire: 5, "bridge-tower": 6,
   "eiffel-tower": 7, "clock-tower": 5, colonnade: 6, bamboo: 5, palm: 6,
   "stone-bridge": 5, battlement: 5, willow: 4, cypress: 2, sakura: 4,
+  pine: 4, bush: 3, fern: 5, mushroom: 4, cactus: 4, reed: 4,
 };
 
 // Fifteen named cities, plus the plain city venue. Each street picks three
@@ -2666,14 +2674,14 @@ export function createRenderer(canvas, hooks) {
     }
     // Five roadside shapes, picked from the arc so the row does not repeat
     // one lollipop. Scale, offset and side stay stable as the camera moves.
-    function drawTree(along, lat, kind, scale, near, sway) {
+    function drawTree(along, lat, kind, scale, near, sway, tintK = 1) {
       const at = onRoad(along, lat);
       const savedLift = deckLift;
       deckLift = roadHeight(along, pieces);
       const swayX = sway * Math.cos(at.psi);
       const swayZ = -sway * Math.sin(at.psi);
-      const leaf = mix3(pal.leaf, pal.leaf2, kind === 2 ? 0.2 : 0.62);
-      const trunk = mix3(pal.trunk, [0.32, 0.2, 0.13], kind === 1 ? 0.15 : 0.4);
+      const leaf = tint(mix3(pal.leaf, pal.leaf2, kind === 2 ? 0.2 : 0.62), tintK);
+      const trunk = tint(mix3(pal.trunk, [0.32, 0.2, 0.13], kind === 1 ? 0.15 : 0.4), tintK);
       const wood = near ? 3 : 0;
       const top = [at.x + swayX, at.z + swayZ];
       // Roadside trees stand past the grass deck, so a ground blot would hang in the air.
@@ -2905,7 +2913,7 @@ export function createRenderer(canvas, hooks) {
         const prop = props[p];
         if (CITY_STYLES[pal.biome] && CITY_ARCH.has(prop.kind)) continue;
         const density = Math.max(0.05, Math.min(0.55, Number(prop.density) || 0.2));
-        const scale = Math.max(0.55, Math.min(1.45, Number(prop.scale) || 1));
+        const baseScale = Math.max(0.55, Math.min(1.45, Number(prop.scale) || 1));
         for (const side of [-1, 1]) {
           if (n >= MAX - 70) return;
           if (laneHash(cz * 0.17 + side * (3 + p) + prop.kind.length) > density + 0.2) continue;
@@ -2913,10 +2921,48 @@ export function createRenderer(canvas, hooks) {
           const lat = side * (shoulder + laneHash(cz * 0.29 + side + p) * 0.9);
           const along = cz + (laneHash(cz * 0.41 + side * 2) - 0.5) * 1.1;
           const at = onRoad(along, lat);
-          const glow = pal.flower;
-          const body = mix3(pal.trunk, pal.hedge, 0.4);
+          const jitterK = 0.9 + laneHash(cz * 0.53 + side * 1.7 + p) * 0.2;
+          const scale = baseScale * (0.88 + laneHash(cz * 0.61 + side * 2.3 + p) * 0.24);
+          const glow = tint(pal.flower, jitterK);
+          const body = tint(mix3(pal.trunk, pal.hedge, 0.4), jitterK);
           if (prop.kind === "tree") {
-            drawTree(along, lat, 1 + (p % 4), scale, dist < 16, sway);
+            drawTree(along, lat, 1 + (p % 4), scale, dist < 16, sway, jitterK);
+          } else if (prop.kind === "pine") {
+            const h = 1.9 * scale;
+            const dark = tint(pal.leaf, jitterK * 0.86);
+            push(at.x, 0.3 * scale, at.z, 0.13 * scale, 0.6 * scale, 0.13 * scale, 2, body, 0.55, 0, at.psi);
+            push(at.x, 0.88 * scale, at.z, 0.9 * scale, 0.56 * scale, 0.9 * scale, 3, dark, 0.62, 0.02, at.psi);
+            push(at.x + sway * 0.2, 1.38 * scale, at.z, 0.7 * scale, 0.52 * scale, 0.7 * scale, 3, tint(pal.leaf2, jitterK * 0.92), 0.6, 0.02, at.psi);
+            push(at.x + sway * 0.35, h - 0.08 * scale, at.z, 0.46 * scale, 0.48 * scale, 0.46 * scale, 3, tint(pal.leaf, jitterK), 0.58, 0.03, at.psi);
+          } else if (prop.kind === "bush") {
+            push(at.x, 0.18 * scale, at.z, 0.6 * scale, 0.4 * scale, 0.52 * scale, 1, tint(pal.leaf, jitterK * 0.9), 0.72, 0.01, at.psi);
+            push(at.x + 0.22 * scale, 0.3 * scale, at.z + 0.08 * scale, 0.38 * scale, 0.36 * scale, 0.36 * scale, 1, tint(pal.leaf, jitterK), 0.68, 0.02, at.psi);
+            push(at.x - 0.2 * scale, 0.26 * scale, at.z - 0.06 * scale, 0.32 * scale, 0.3 * scale, 0.32 * scale, 1, tint(pal.leaf2, jitterK), 0.66, 0.02, at.psi);
+          } else if (prop.kind === "fern") {
+            const frond = tint(pal.leaf, jitterK);
+            push(at.x, 0.12 * scale, at.z, 0.16 * scale, 0.24 * scale, 0.16 * scale, 1, body, 0.7, 0.01, at.psi);
+            push(at.x, 0.62 * scale, at.z, 0.08 * scale, 1.0 * scale, 0.08 * scale, 2, frond, 0.58, 0.02, at.psi);
+            push(at.x - 0.28 * scale, 0.5 * scale, at.z, 0.06 * scale, 0.7 * scale, 0.06 * scale, 3, tint(pal.leaf2, jitterK), 0.6, 0.02, at.psi - 0.5);
+            push(at.x + 0.28 * scale, 0.5 * scale, at.z, 0.06 * scale, 0.7 * scale, 0.06 * scale, 3, tint(pal.leaf2, jitterK), 0.6, 0.02, at.psi + 0.5);
+            push(at.x, 0.42 * scale, at.z + 0.26 * scale, 0.06 * scale, 0.6 * scale, 0.06 * scale, 3, frond, 0.62, 0.02, at.psi);
+          } else if (prop.kind === "mushroom") {
+            const cap = tint(pal.flower, jitterK);
+            push(at.x, 0.28 * scale, at.z, 0.16 * scale, 0.56 * scale, 0.16 * scale, 2, [0.94, 0.88, 0.76], 0.6, 0.02, at.psi);
+            push(at.x, 0.62 * scale, at.z, 0.66 * scale, 0.3 * scale, 0.66 * scale, 1, cap, 0.42, 0.12, at.psi);
+            push(at.x - 0.18 * scale, 0.7 * scale, at.z + 0.08 * scale, 0.12 * scale, 0.1 * scale, 0.12 * scale, 1, [1, 0.96, 0.86], 0.3, 0.28, at.psi);
+            push(at.x + 0.16 * scale, 0.68 * scale, at.z - 0.1 * scale, 0.1 * scale, 0.09 * scale, 0.1 * scale, 1, [1, 0.96, 0.86], 0.3, 0.28, at.psi);
+          } else if (prop.kind === "cactus") {
+            const green = tint([0.22, 0.56, 0.3], jitterK);
+            push(at.x, 0.65 * scale, at.z, 0.22 * scale, 1.3 * scale, 0.22 * scale, 2, green, 0.58, 0.02, at.psi);
+            push(at.x - 0.3 * scale, 0.82 * scale, at.z, 0.13 * scale, 0.5 * scale, 0.13 * scale, 2, green, 0.58, 0.02, at.psi);
+            push(at.x + 0.3 * scale, 0.95 * scale, at.z, 0.13 * scale, 0.55 * scale, 0.13 * scale, 2, green, 0.58, 0.02, at.psi);
+            push(at.x, 1.34 * scale, at.z, 0.13 * scale, 0.13 * scale, 0.13 * scale, 1, tint(pal.flower2, jitterK), 0.3, 0.4, at.psi);
+          } else if (prop.kind === "reed") {
+            const stem = tint(pal.leaf, jitterK);
+            push(at.x - 0.16 * scale, 0.65 * scale, at.z, 0.045 * scale, 1.3 * scale, 0.045 * scale, 2, stem, 0.55, 0.02, at.psi);
+            push(at.x, 0.8 * scale, at.z, 0.045 * scale, 1.6 * scale, 0.045 * scale, 2, tint(pal.leaf2, jitterK), 0.55, 0.02, at.psi);
+            push(at.x + 0.17 * scale, 0.62 * scale, at.z, 0.045 * scale, 1.24 * scale, 0.045 * scale, 2, stem, 0.55, 0.02, at.psi);
+            push(at.x + 0.02 * scale, 1.52 * scale, at.z, 0.09 * scale, 0.28 * scale, 0.09 * scale, 3, tint(pal.flower2, jitterK), 0.45, 0.05, at.psi);
           } else if (prop.kind === "tower") {
             const h = 2.1 * scale;
             push(at.x, h * 0.42, at.z, 0.55 * scale, h * 0.84, 0.46 * scale, 0, body, 0.45, 0.04, at.psi, 0.15, 0.05, 0);
