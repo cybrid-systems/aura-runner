@@ -11,6 +11,8 @@ code 0 symbol
 str 0 syntax
 gloomy 0 banned
 speck 0 cover
+yawed 1 fair decor 1
+yawed-bad 0 part-yaw
 none 0 shape
 headless 1 fair pickup 1
 named-head 1 fair pickup 1

@@ -100,7 +100,8 @@
           (raw (cdr (cdr sp))))
       (if (not (thing-member? shape thing-shapes))
         "part-shape"
-        (let ((nums (or (thing-nums raw 10)
+        (let ((nums (or (thing-nums raw 11)
+                        (thing-nums raw 10)
                         (let ((nine (thing-nums raw 9)))
                           (if nine (append nine (list 0.0)) #f)))))
           (if (not nums)
@@ -108,7 +109,8 @@
             (let ((x (list-ref nums 0)) (y (list-ref nums 1)) (z (list-ref nums 2))
                   (sx (list-ref nums 3)) (sy (list-ref nums 4)) (sz (list-ref nums 5))
                   (r (list-ref nums 6)) (g (list-ref nums 7)) (b (list-ref nums 8))
-                  (glow (list-ref nums 9)))
+                  (glow (list-ref nums 9))
+                  (yaw (if (= (length nums) 11) (list-ref nums 10) 0.0)))
               (cond
                 ((or (not (thing-in? sx THING-MIN-SIZE 1.0))
                      (not (thing-in? sy THING-MIN-SIZE 1.0))
@@ -124,9 +126,10 @@
                  "colour")
                 ((< (thing-luma r g b) THING-LUMA) "dark")
                 ((not (thing-in? glow 0.0 THING-GLOW)) "glow")
+                ((not (thing-in? yaw 0.0 180.0)) "part-yaw")
                 (else
                  (list (exact->inexact (thing-index shape thing-shapes))
-                       x y z sx sy sz r g b glow))))))))))
+                       x y z sx sy sz r g b glow yaw))))))))))
 
 ; Union box of the parts: (x0 x1 y0 y1 z0 z1).
 (define (thing-bounds parts)
@@ -499,7 +502,7 @@
 ; ---------------------------------------------------------------- prompts
 
 (define THING-SYS
-  "You design one small toy object for a children's 3D running game. Reply with one short bright English sentence, then exactly one s-expression and nothing else. Grammar: (thing ROLE SIZE (anim KIND AMP RATE) (name WORD) (part SHAPE X Y Z SX SY SZ R G B GLOW) ...). ROLE is pickup, jump, slide, decor or pal. SIZE: pickup 0.8-1.6 (height above road), jump 0.3-0.6 (hurdle height), slide 0.62-0.9 (gap under the bar), decor 0.6-2.0 (scale), pal 0.5-1.0 (scale). SHAPE is box, sphere, cylinder, cone, torus or gem. Parts live in a unit box: X and Z from -0.5 to 0.5, Y from 0 to 1 (centre), SX SY SZ from 0.05 to 1, and every part must stay inside the box. R G B from 0.1 to 1 and bright. GLOW 0 to 0.6. 2 to 8 parts. KIND is none, spin, bob, hop or float; AMP 0-0.3, RATE 0-3; jump and slide may only use none, spin, or bob with AMP at most 0.05. A jump obstacle must fill at least 0.6 of the height and half the width. The s-expression must start with the word thing, like (thing pickup 1.0 (anim spin 0.1 1) (name star) (part gem 0 0.5 0 0.6 0.6 0.6 1 0.8 0.2 0.3)). No strings, no quotes, no markdown.")
+  "You design one small toy object for a children's 3D running game. Reply with one short bright English sentence, then exactly one s-expression and nothing else. Grammar: (thing ROLE SIZE (anim KIND AMP RATE) (name WORD) (part SHAPE X Y Z SX SY SZ R G B GLOW [YAW]) ...). ROLE is pickup, jump, slide, decor or pal. SIZE: pickup 0.8-1.6 (height above road), jump 0.3-0.6 (hurdle height), slide 0.62-0.9 (gap under the bar), decor 0.6-2.0 (scale), pal 0.5-1.0 (scale). SHAPE is box, sphere, cylinder, cone, torus or gem. Parts live in a unit box: X and Z from -0.5 to 0.5, Y from 0 to 1 (centre), SX SY SZ from 0.05 to 1, and every part must stay inside the box. R G B from 0.1 to 1 and bright. GLOW 0 to 0.6. YAW is optional, 0 to 180 degrees, and turns that part around its own centre. 2 to 8 parts. KIND is none, spin, bob, hop or float; AMP 0-0.3, RATE 0-3; jump and slide may only use none, spin, or bob with AMP at most 0.05. A jump obstacle must fill at least 0.6 of the height and half the width. The s-expression must start with the word thing, like (thing pickup 1.0 (anim spin 0.1 1) (name star) (part gem 0 0.5 0 0.6 0.6 0.6 1 0.8 0.2 0.3)). No strings, no quotes, no markdown.")
 
 ; Four variants: plain, more detail, cute and round, bold colour.
 (define (thing-variant-hint i)
