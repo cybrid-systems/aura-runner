@@ -152,8 +152,12 @@ async function wish(io, text, opts) {
   // The wish reply comes before any tick.
   seen(await io.next());
   const end = performance.now() + opts.waitMs;
+  let tickX = 0;
   while (performance.now() < end) {
-    io.send({ op: "tick", jump: 0, slide: 0, lane: 0 });
+    // A live runner moves; the road must advance for the next stretch
+    // to carry the staged thing. A parked test road can wait forever.
+    tickX += 0.4;
+    io.send({ op: "tick", jump: 0, slide: 0, lane: 0, dt: 50, x: tickX });
     await untilState(io, seen);
     if (row.liveMs >= 0 && row.chunkMs >= 0) break;
     if (row.phase === "none") break;
@@ -176,7 +180,7 @@ async function mockRun() {
     const io = session(sock);
     io.send({ op: "hello", seed: 42 });
     await untilState(io, () => {});
-    const row = await wish(io, "来一个粉色的蛋糕", { waitMs: 20000 });
+    const row = await wish(io, "来一个粉色的蛋糕", { waitMs: 30000 });
     const log = core.log();
     if (row.placeholderMs < 0 || row.placeholderMs > 1500) throw new Error("placeholder slow " + row.placeholderMs);
     if (row.phase !== "live") throw new Error("thing not live " + JSON.stringify(row) + " hits " + JSON.stringify(mock.hits) + "\n" + log);
