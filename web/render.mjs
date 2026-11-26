@@ -107,7 +107,7 @@ function knownName(name, list, fallback) {
   return list.includes(name) ? name : fallback;
 }
 
-const PROP_KINDS = new Set(["tree", "tower", "arch", "crystal", "rock", "coral", "ring",
+export const PROP_KINDS = new Set(["tree", "tower", "arch", "crystal", "rock", "coral", "ring",
   "pagoda", "palace-gate", "pearl-tower", "spire", "bridge-tower", "eiffel-tower",
   "clock-tower", "colonnade", "bamboo", "palm", "stone-bridge", "battlement", "willow", "cypress", "sakura",
   "pine", "bush", "fern", "mushroom", "cactus", "reed"]);
@@ -350,8 +350,80 @@ function settleFog(pal) {
 
 // Garden in daylight is the palette above, unchanged. Other venues replace
 // sky, ground, and road colours. A mix recipe is painted from its EDSL spec.
+// The kinds the per-instance prop loop actually draws. A venue's pool
+// stays inside it, so the step never rotates in a shape the view skips.
+export const VENUE_PROP_KINDS = new Set(["tree", "pine", "bush", "fern", "mushroom",
+  "cactus", "reed", "crystal", "rock", "coral", "ring"]);
+
+// Props a built-in venue shows while no painted world is up. The core's
+// level step rotates the pool, so the garden's trees, the space rocks,
+// and the coast's reeds are not the same on every level. The city leaves
+// towers and arches to its street, so its shoulder is park and rubble.
+export const BIOME_PROPS = {
+  garden: [
+    { kind: "tree", density: 0.3, scale: 1.0 },
+    { kind: "bush", density: 0.18, scale: 0.95 },
+    { kind: "fern", density: 0.14, scale: 0.85 },
+    { kind: "mushroom", density: 0.08, scale: 0.75 },
+  ],
+  city: [
+    { kind: "rock", density: 0.16, scale: 0.9 },
+    { kind: "bush", density: 0.14, scale: 0.9 },
+    { kind: "fern", density: 0.1, scale: 0.8 },
+  ],
+  space: [
+    { kind: "crystal", density: 0.22, scale: 1.0 },
+    { kind: "ring", density: 0.16, scale: 0.95 },
+    { kind: "rock", density: 0.12, scale: 1.1 },
+  ],
+  coast: [
+    { kind: "coral", density: 0.24, scale: 1.0 },
+    { kind: "reed", density: 0.12, scale: 0.85 },
+    { kind: "rock", density: 0.1, scale: 0.9 },
+  ],
+};
+
+// Start the venue's pool at the step's shift and walk it once.
+export function propOrder(biome, shift) {
+  const pool = BIOME_PROPS[biome] || BIOME_PROPS.garden;
+  const k = Number.isInteger(shift) ? ((shift % pool.length) + pool.length) % pool.length : 0;
+  const out = [];
+  for (let i = 0; i < pool.length; i++) out.push(pool[(i + k) % pool.length]);
+  return out;
+}
+
+// The level step's look, for a venue with no painted world. A painted
+// world owns its own body, sun and props, so this does nothing there.
+function applySky(pal, sky, custom) {
+  if (!sky || custom) return;
+  const body = typeof sky.body === "string" ? sky.body : "";
+  if (body === "moon") {
+    pal.sun = [0.82, 0.9, 1];
+    pal.stars = Math.max(pal.stars, 0.7);
+    pal.disc = 0.5;
+  } else if (body === "stars") {
+    pal.sun = [0.82, 0.9, 1];
+    pal.stars = 1;
+    pal.disc = 0.18;
+    pal.nebula = [0.22, 0.18, 0.38];
+  } else if (body === "aurora") {
+    pal.sun = [0.72, 0.96, 0.9];
+    pal.stars = Math.max(pal.stars, 0.5);
+    pal.nebula = [0.3, 0.85, 0.62];
+    pal.disc = 0.35;
+  } else if (body === "none") {
+    pal.disc = 0;
+  }
+  const uv = sky.uv;
+  if (Array.isArray(uv) && uv.length === 2
+      && uv.every((n) => typeof n === "number" && n >= 0 && n <= 1)) {
+    pal.sunUv = [uv[0], uv[1]];
+  }
+  if (Number.isInteger(sky.shift)) pal.props = propOrder(pal.biome, sky.shift);
+}
+
 // Hurdles, gates, coins, and pots stay put so every biome stays readable.
-export function dressPalette(base, biome, mood, spec) {
+export function dressPalette(base, biome, mood, spec, sky) {
   const custom = !!(spec && spec.recipe === "mix" && spec.id);
   const name = custom ? spec.id : knownName(biome, BIOME_NAMES, "garden");
   const tone = knownName(mood, MOOD_NAMES, "day");
@@ -444,7 +516,10 @@ export function dressPalette(base, biome, mood, spec) {
     pal.sun = [1, 0.9, 0.62];
     pal.lightAmt = Math.max(0.78, pal.lightAmt);
   }
-  if (name === "garden" && tone === "day") return pal;
+  if (name === "garden" && tone === "day") {
+    applySky(pal, sky, custom);
+    return pal;
+  }
   if (tone === "night") {
     pal.sky0 = mix3(pal.sky0, [0.06, 0.08, 0.16], 0.72);
     pal.sky1 = mix3(pal.sky1, [0.14, 0.16, 0.28], 0.62);
@@ -481,6 +556,7 @@ export function dressPalette(base, biome, mood, spec) {
     pal.flower = [0.2, 0.95, 0.9];
     pal.flower2 = [1, 0.35, 0.75];
   }
+  applySky(pal, sky, custom);
   return settleFog(pal);
 }
 
@@ -2433,7 +2509,13 @@ export function createRenderer(canvas, hooks) {
     if (quality.mode !== "low") kickWarm();
     pumpWarm();
     const pace = typeof window !== "undefined" ? Number(window.__lumenPace) : 0;
-    const arrived = dressPalette(palette(st.hue || 0, st.scene), st.biome, st.mood, st.spec);
+    const arrived = dressPalette(
+      palette(st.hue || 0, st.scene),
+      st.biome,
+      st.mood,
+      st.spec,
+      { body: st.skybody, uv: st.sunuv, shift: st.propshift },
+    );
     const px = st.lx || 0;
     const py = st.y || 0;
     const pz = Number.isFinite(st.x) ? st.x : runS;
@@ -2994,6 +3076,11 @@ export function createRenderer(canvas, hooks) {
       const plan = worldPlan(st.spec, activeProfile.tier);
       const usePlan = !!(plan && plan.id === pal.biome);
       const props = usePlan ? plan.props : (Array.isArray(pal.props) ? pal.props : []);
+      // A painted world already scales its plan by tier; a venue's pool
+      // is scaled here so Low keeps the same instance budget.
+      const densityScale = usePlan ? 1
+        : activeProfile.tier === "low" ? 0.45
+        : activeProfile.tier === "medium" ? 0.72 : 1;
       const sway = reduced ? 0 : Math.sin((st.time || 0) * 1.1 + cz * 0.13) * 0.05;
       if (!CITY_STYLES[pal.biome] && props.length && ((cz - 1) % 18 === 0) && n < MAX - 90) {
         const slot = Math.abs(Math.floor(cz / 18)) % props.length;
@@ -3006,7 +3093,7 @@ export function createRenderer(canvas, hooks) {
       for (let p = 0; p < props.length && n < MAX - 70; p++) {
         const prop = props[p];
         if (CITY_STYLES[pal.biome] && CITY_ARCH.has(prop.kind)) continue;
-        const density = Math.max(0.05, Math.min(0.55, Number(prop.density) || 0.2));
+        const density = Math.max(0.05, Math.min(0.55, (Number(prop.density) || 0.2) * densityScale));
         const baseScale = Math.max(0.55, Math.min(1.45, Number(prop.scale) || 1));
         for (const side of [-1, 1]) {
           if (n >= MAX - 70) return;

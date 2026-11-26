@@ -67,7 +67,9 @@ Hold Space, speak, and release. Built-in lines apply at once and the combo stays
 
 ## Evolution
 
-A world, the runner, or a phrase is proposed while the run stays up. `evo:trial` returns KEEP or ROLLBACK. Only KEEP rebinds, live, with no restart. With no LLM key, a themed recipe takes that same gate. A clear steps the venue with the level (garden, city, space, coast) and the garden scene follows how that level went. A city the child names stays until they ask again. A clear, or saying 换一个, can recombine two kept worlds into one new place. That child still has to pass the same gate, and a world is not dreamed on a clock.
+A world, the runner, or a phrase is proposed while the run stays up. `evo:trial` returns KEEP or ROLLBACK. Only KEEP rebinds, live, with no restart. With no LLM key, a themed recipe takes that same gate. A clear steps the venue with the level (garden, city, space, coast) and the garden scene follows how that level went. A clear that keeps a built-in venue also steps its sky: sun, moon, stars and aurora take turns with the mood, the disc crosses the sky, the pickup becomes a star, gem, blossom or apple, and the venue's props rotate. A spoken or painted world keeps the sky it was given. A city the child names stays until they ask again. A clear, or saying 换一个, can recombine two kept worlds into one new place. That child still has to pass the same gate, and a world is not dreamed on a clock.
+
+The sky step is `lib/sky.aura`: a pure function of `(seed, level)`, so the same run repeats and a resume or a rewind lands on the level's own look without saving it.
 
 A thing round, and a friend who is already here, each take one small seeded step beside the tick before the same KEEP. When a world is proposed, light, fog, and particle density can move by PSO, and particle kind, surface, and props are ant credits. The friend's motion is chosen from the same motion list, which only moves the picture. The search reads the local check only, one generation at a time, and leaves the physics step alone. One `evo:trial` still decides what is installed.
 
@@ -167,6 +169,7 @@ The nightly tag is rebuilt in place, so the pin moves with it. [`.github/workflo
 | `node scripts/check-musicdir.mjs` | Music folder discovery and local files |
 | `node scripts/check-music.mjs` | Tune bounds, KEEP/ROLLBACK, tempo, playlist, missing file |
 | `node scripts/check-voice.mjs` | Soft voice stays on 196 Hz |
+| `node scripts/check-sky.mjs` | Sky body, disc, and venue props step per level |
 | `bash scripts/check-install.sh` | Install from an empty cache, offline reuse |
 | `bash scripts/check-runsh.sh` | `./run.sh` downloads a prebuilt binary and serves the page |
 | `bash scripts/check-play.sh` | `./play.sh` questions, hidden key, gitignored env and config |

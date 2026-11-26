@@ -74,6 +74,7 @@ jobs:
           node --check scripts/check-musicdir.mjs
           node --check scripts/check-config.mjs
           node --check scripts/check-voice.mjs
+          node --check scripts/check-sky.mjs
       - name: Physics parity with the Aura golden
         run: node scripts/check-sim.mjs
       - name: Left moves toward screen-left
@@ -96,6 +97,8 @@ jobs:
         run: node scripts/check-musicdir.mjs
       - name: Soft voice stays on one pitch
         run: node scripts/check-voice.mjs
+      - name: Sky body, disc, and venue props step per level
+        run: node scripts/check-sky.mjs
 
   smoke:
     runs-on: ubuntu-latest

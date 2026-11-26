@@ -688,6 +688,13 @@
 (define edsl-req #f)
 (define edsl-res #f)
 (define mood-now "day")
+; The level step moves these beside the mood: the sky body the view
+; draws, where the disc sits, and how far a venue's props rotate.
+(define sky-body-now "sun")
+(define sun-x-now 0.74)
+(define sun-y-now 0.78)
+(define sky-shift 0)
+(define sky-on #f)
 (define biome-pin #f)
 ; Kept places, style by band. A clear may recombine two of them once the
 ; map has a pair. archive-wait skips that many clears after a keep.
@@ -1013,6 +1020,39 @@
                     (loop (cdr ps) best dist)))))
             (loop (cdr ps) best dist)))))))
 
+; Step the extras a venue carries: the sky body, the mood, the pickup
+; kind, and where the disc sits. Called at a gate the child did not pin
+; to a spoken world, so the picture moves instead of standing still.
+; The step is a pure function of (seed, level), so a resume lands on the
+; same look without saving it.
+(define (sky-advance! . rest)
+  (let ((say? (not (and (pair? rest) (equal? (car rest) #f)))))
+  (if (not sky-on)
+    (begin (require "lib/sky") (set! sky-on #t))
+    #f)
+  (let ((step (try (sky-step seed level-n) (catch (e) #f))))
+    (if (not (hash? step))
+      #f
+      (let ((uv (hash-ref step "sun" #f)))
+        (set! mood-now (hash-ref step "mood" mood-now))
+        (set! sky-body-now (hash-ref step "body" sky-body-now))
+        (set! loot-now (hash-ref step "loot" loot-now))
+        (if (and (pair? uv) (number? (car uv)) (number? (car (cdr uv))))
+          (begin
+            (set! sun-x-now (car uv))
+            (set! sun-y-now (car (cdr uv))))
+          #f)
+        (set! sky-shift (hash-ref step "shift" sky-shift))
+        (set! rules-dirty #t)
+        (set! rules-thin #f)
+        (if say?
+          (note! "KEEP" "fair" "sky"
+                 (string-append (biome-title biome-now wish-locale)
+                                " · " (mood-title mood-now wish-locale)
+                                " · " loot-now))
+          #f)
+        #t)))))
+
 ; bonus is a challenge step that landed on this same tick. The gate
 ; still adds its own step. The page's pickup combo is not this counter.
 ; Who reached the gate first is folded into the same banner.
@@ -1069,7 +1109,10 @@
           #f
           (begin
             (edsl-clear!)
-            (set! biome-now (hash-ref cross "biome" (biome-for-level level-n)))))))
+            (set! biome-now (hash-ref cross "biome" (biome-for-level level-n)))
+            ; A built-in venue has no painted world to carry its sky, so
+            ; the step supplies one: body, mood, pickup, and the disc.
+            (sky-advance!)))))
     (set! chal-coins 0)
     (set! chal-done #f)
     (set! run-mult (hash-ref cross "mult" run-mult))
@@ -1574,6 +1617,10 @@
   (set! chal-done #f)
   (set! biome-now "garden")
   (set! mood-now "day")
+  (set! sky-body-now "sun")
+  (set! sun-x-now 0.74)
+  (set! sun-y-now 0.78)
+  (set! sky-shift 0)
   (set! biome-pin #f)
   (set! banner-id 0)
   (set! banner-kind "")
@@ -1688,6 +1735,8 @@
         "props" props "sun-hide" sun-hide "shown" shown
         "level" level-n "goal" level-x1 "level0" level-x0
         "mult" run-mult "biome" biome-now "mood" mood-now "spec" edsl-spec
+        "skybody" sky-body-now "sunuv" (list sun-x-now sun-y-now)
+        "propshift" sky-shift
         "banner-id" banner-id "banner-kind" banner-kind
         "banner" banner-text "banner-gain" banner-gain
         "tune" (tune-public)))
@@ -1735,6 +1784,8 @@
         "deck" deck-ids
         "props" props "sun-hide" sun-hide "shown" shown
         "mult" run-mult "biome" biome-now "mood" mood-now "spec" edsl-spec
+        "skybody" sky-body-now "sunuv" (list sun-x-now sun-y-now)
+        "propshift" sky-shift
         "banner-id" banner-id "banner-kind" banner-kind
         "banner" banner-text "banner-gain" banner-gain
         "tune" (tune-public)))
@@ -1800,7 +1851,9 @@
         "stall" (if stall-waiting #t #f)
         "mult" run-mult
         "biome" biome-now
-        "mood" mood-now))
+        "mood" mood-now
+        "skybody" sky-body-now "sunuv" (list sun-x-now sun-y-now)
+        "propshift" sky-shift))
 
 (define (state-full-msg ev)
   (hash "op" "state"
@@ -1863,6 +1916,8 @@
         "stall" (if stall-waiting #t #f)
         "props" props "sun-hide" sun-hide "shown" shown
         "mult" run-mult "biome" biome-now "mood" mood-now "spec" edsl-spec
+        "skybody" sky-body-now "sunuv" (list sun-x-now sun-y-now)
+        "propshift" sky-shift
         "banner-id" banner-id "banner-kind" banner-kind
         "banner" banner-text "banner-gain" banner-gain))
 
@@ -5216,6 +5271,9 @@
   (set! run-defeats (let ((n (hash-ref saved "defeats" 0))) (if (number? n) (max 0 (min 4 (floor n))) 0)))
   (set! run-over (equal? (hash-ref saved "over" #f) #t))
   (set! skill-seen (let ((n (hash-ref saved "skill-seen" 0.0))) (if (number? n) n 0.0)))
+  ; The step is a function of (seed, level), so the restored level gets
+  ; its own sky back instead of the one the rewind left behind.
+  (if (hash? edsl-spec) #f (sky-advance! #f))
   (set! rewind-quiet #f))
 
 (define (clear-slices!)
@@ -5340,6 +5398,7 @@
         #f)
       (let ((m (hash-ref snap "mood" "")))
         (if (mood-name? m) (set! mood-now m) #f))
+      (if (hash? edsl-spec) #f (sky-advance! #f))
       (and (scene-install! (hash-ref snap "scene" ""))
            (pals-install! (hash-ref snap "pals" ""))
            (motif-install! (hash-ref snap "motif" ""))))))
@@ -5439,6 +5498,7 @@
     (set! speed-now 8.0)
     (try (begin (reset-run!) (resume-run! msg) (take-hello-venue! msg))
          (catch (e) #f))
+    (try (if (hash? edsl-spec) #f (sky-advance! #f)) (catch (e) #f))
     (send-welcome! c)
     (try (open-hello!) (catch (e) #f))
     (send-all-chunks c)
@@ -5452,6 +5512,7 @@
     (if parsed (set! seed parsed) #f)
     (try (begin (reset-run!) (take-hello-venue! msg))
          (catch (e) #f))
+    (try (if (hash? edsl-spec) #f (sky-advance! #f)) (catch (e) #f))
     (send-welcome! c)
     (try (open-hello!) (catch (e) #f))
     (send-all-chunks c)

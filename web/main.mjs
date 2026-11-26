@@ -133,6 +133,11 @@ let runMult = 1;
 let biomeName = "garden";
 let biomeSpec = null;
 let moodName = "day";
+// The level step: the sky body, where its disc sits, and how far a
+// venue's props rotate. Absent keys keep the last look.
+let skyBody = "";
+let sunUv = null;
+let propShift = 0;
 let bannerId = 0;
 let bannerUntil = 0;
 let levelGoal = 0;
@@ -716,11 +721,27 @@ function applyVenue(msg) {
   biomeName = venue.name;
   biomeSpec = venue.spec;
   if (typeof msg.mood === "string" && MOODS.has(msg.mood)) moodName = msg.mood;
+  applySky(msg);
   const id = msg["banner-id"];
   if (typeof id === "number" && id !== bannerId && typeof msg.banner === "string" && msg.banner) {
     bannerId = id;
     showEvo(msg.banner);
   }
+}
+
+const SKY_BODIES = new Set(["sun", "moon", "stars", "aurora", "none"]);
+
+// The level step. A missing key keeps the last look, so a thin rules
+// message does not reset the sky.
+function applySky(msg) {
+  if (typeof msg.skybody === "string" && SKY_BODIES.has(msg.skybody)) skyBody = msg.skybody;
+  if (Array.isArray(msg.sunuv) && msg.sunuv.length === 2) {
+    const [ux, uy] = msg.sunuv;
+    if (Number.isFinite(ux) && Number.isFinite(uy) && ux >= 0 && ux <= 1 && uy >= 0 && uy <= 1) {
+      sunUv = [ux, uy];
+    }
+  }
+  if (Number.isInteger(msg.propshift)) propShift = Math.abs(msg.propshift);
 }
 
 function clampInt(v, lo, hi, fallback) {
@@ -1723,6 +1744,9 @@ function frame(now) {
         goal: levelGoal,
         biome: biomeName,
         mood: moodName,
+        skybody: skyBody,
+        sunuv: sunUv,
+        propshift: propShift,
         spec: biomeSpec,
         props,
         sunHide,
