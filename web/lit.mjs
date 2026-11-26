@@ -3,7 +3,7 @@
 // lighting line. softKnee moves to the post pass so bloom can see
 // the bright pixels.
 
-export const LIGHT_LINE = "vec3 col = vC * (ambient + 0.28 * hemi + uLightAmt * ndl + 0.12 * wrap);";
+export const LIGHT_LINE = "vec3 col = vC * (ambient + 0.18 * hemi + uLightAmt * ndl + 0.08 * wrap);";
 
 const PCF = `
 uniform sampler2D uShadowMap;
@@ -39,9 +39,9 @@ float shadeShadow(vec3 world) {
 `;
 
 const LIGHT_LIT = `float sh = shadeShadow(vW);
-float ao = mix(0.62, 1.0, sh);
-float sun = mix(0.35, 1.0, sh);
-vec3 col = vC * (ambient * ao + 0.28 * hemi + (uLightAmt * ndl + 0.12 * wrap) * sun);
+float ao = mix(0.74, 1.0, sh);
+float sun = mix(0.48, 1.0, sh);
+vec3 col = vC * (ambient * ao + 0.18 * hemi + (uLightAmt * ndl + 0.08 * wrap) * sun);
 {
   bool flatDeck = vHalf.y < 0.12 && vHalf.x > 0.7;
   if (!flatDeck) {
@@ -185,12 +185,12 @@ vec3 surfaceDetail(vec3 col, float dist) {
   return col;
 }
 vec3 highShade(vec3 col, vec3 fogCol, float fog, float dist) {
-  vec3 haze = mix(fogCol, uHaze, clamp(uAerial, 0.0, 1.0) * 0.7);
-  float aerial = min(fog * (1.0 + uAerial * 0.35), 0.16 + uAerial * 0.1);
-  vec3 lit = mix(col, haze, clamp(aerial, 0.0, 0.62));
+  vec3 haze = mix(fogCol, uHaze, clamp(uAerial, 0.0, 1.0) * 0.35);
+  float aerial = min(fog * (1.0 + uAerial * 0.15), 0.05 + uAerial * 0.03);
+  vec3 lit = mix(col, haze, clamp(aerial, 0.0, 0.28));
   float gray = dot(lit, vec3(0.299, 0.587, 0.114));
-  float far = clamp(dist * 0.0075, 0.0, 1.0) * uAerial;
-  return mix(lit, vec3(gray), far * 0.3);
+  float far = clamp(dist * 0.004, 0.0, 1.0) * uAerial;
+  return mix(lit, vec3(gray), far * 0.08);
 }
 float highGloss(float rough, float kind, vec3 halfE, vec3 local) {
   if (uGloss < 0.01) return 0.0;

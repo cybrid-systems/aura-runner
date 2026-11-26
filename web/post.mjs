@@ -114,7 +114,9 @@ vec3 acesShoulder(vec3 x) {
   float d = 0.59;
   float e = 0.14;
   vec3 mapped = clamp((c * (a * c + b)) / (c * (c2 * c + d) + e), 0.0, 1.0);
-  return mix(c, mapped, 0.72);
+  // A heavy mix pulls midtones toward grey. Keep the shoulder for
+  // highlights and leave the stylized colour in place.
+  return mix(c, mapped, 0.34);
 }
 void main() {
   vec3 scene = texture(uScene, vUv).rgb;
@@ -149,6 +151,12 @@ void main() {
     col = mix(col, vec3(0.55, 0.7, 0.88), vig * uBack * 0.45);
   }
   if (uHit > 0.001) col = mix(col, vec3(1.0, 0.96, 0.9), uHit * 0.28);
+  // Put chroma back after the shoulder. Quiet midtones take the boost;
+  // the bright end stays put so the sun and coins do not clip white.
+  float midL = dot(col, vec3(0.2126, 0.7152, 0.0722));
+  float vivid = mix(1.08, 1.0, smoothstep(0.66, 0.9, midL));
+  col = mix(vec3(midL), col, vivid);
+  col = clamp(col, 0.0, 1.0);
   // Medium draws this straight to the screen, so the edge pass and the
   // dither live here. High leaves uDirect at 0 and uses its own finish.
   if (uDirect > 0.5) {
@@ -167,7 +175,7 @@ void main() {
     }
     col += (fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) - 0.5) / 255.0;
   }
-  o = vec4(max(col, vec3(0.0)), 1.0);
+  o = vec4(col, 1.0);
 }`;
 
 const FINISH_FS = `#version 300 es

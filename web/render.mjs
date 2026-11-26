@@ -34,6 +34,17 @@ function mul(rgb, s) {
   return [rgb[0] * s, rgb[1] * s, rgb[2] * s];
 }
 
+// Push a colour away from grey without changing its luma much.
+function punch(rgb, k) {
+  const y = rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
+  const t = k > 0 ? k : 0;
+  return [
+    Math.max(0, Math.min(1, y + (rgb[0] - y) * t)),
+    Math.max(0, Math.min(1, y + (rgb[1] - y) * t)),
+    Math.max(0, Math.min(1, y + (rgb[2] - y) * t)),
+  ];
+}
+
 // A per-instance value shift. Keeps a row of one kind from reading as
 // one repeated mesh, without adding a second colour attribute.
 function tint(rgb, k) {
@@ -60,19 +71,20 @@ export function palette(h, scene) {
   const ground = (scene && scene.ground) || [0.42, 0.68, 0.38];
   const light = scene && typeof scene.light === "number" ? scene.light : 0.82;
   const bloom = flowerPair(scene && scene.flower);
-  const skyLift = 0.78 + 0.22 * light;
+  const skyLift = 0.86 + 0.14 * light;
+  const lawn = punch(ground, 1.32);
   return {
     sky,
     sky0: mul(sky, skyLift),
-    sky1: mix3(mul(sky, skyLift), [1.0, 0.72, 0.48], 0.42),
-    fog: mix3(mix3(mul(sky, 0.92), [1, 1, 1], 0.42), [1.0, 0.86, 0.72], 0.18),
+    sky1: mix3(mul(sky, skyLift), [1.0, 0.78, 0.52], 0.18),
+    fog: mix3(mix3(mul(sky, 0.96), [1, 1, 1], 0.1), [1.0, 0.9, 0.76], 0.06),
     fogAmt: scene && typeof scene.fog === "number" ? scene.fog : 0.22,
-    hill: mix3([0.55, 0.66, 0.74], [0.32, 0.28, 0.48], t),
-    hill2: mix3([0.40, 0.55, 0.62], [0.24, 0.22, 0.38], t),
+    hill: mix3([0.42, 0.66, 0.44], [0.34, 0.32, 0.58], t),
+    hill2: mix3([0.28, 0.52, 0.38], [0.24, 0.22, 0.42], t),
     soil: mix3([0.45, 0.32, 0.22], [0.28, 0.20, 0.22], t),
-    grass: ground,
-    grassL: mix3(ground, [1, 1, 1], 0.14),
-    grassR: mix3(ground, [0.1, 0.15, 0.08], 0.12),
+    grass: lawn,
+    grassL: punch(mix3(ground, [0.75, 0.95, 0.55], 0.1), 1.22),
+    grassR: punch(mix3(ground, [0.08, 0.16, 0.05], 0.12), 1.18),
     path: mix3([0.93, 0.78, 0.52], [0.62, 0.46, 0.40], t),
     hedge: mix3([0.22, 0.46, 0.28], [0.14, 0.32, 0.26], t),
     water: [0.18, 0.55, 0.62],
@@ -670,7 +682,7 @@ export const FOG_CAP = 0.38;
 // obstacles keep most of their colour instead of dissolving into it.
 export function fogStrength(dist, requested = 0.22) {
   const cap = Math.min(FOG_CAP, Math.max(0, Number(requested) || 0));
-  const base = 1 - Math.exp(-Math.max(0, dist) * 0.011);
+  const base = 1 - Math.exp(-Math.max(0, dist) * 0.0055);
   return Math.max(0, Math.min(cap, base));
 }
 
@@ -866,15 +878,24 @@ export function roadPoint(s, lateral, bend = 0) {
   return projectLateral(integrateRoad([{ s: 0, bend }], s), lateral);
 }
 
-export function cameraPose(simLx, simY, simZ, fovy = 0.95, bend = 0) {
+// Third-person frame shared by the view and by screenX. The eye sits
+// high and close, the look point is low and near, and the field is
+// narrow, so the sky is a thin band and the runner reads large.
+const CAM_EYE_Y = 3.55;
+const CAM_BACK = 4.55;
+const CAM_LOOK_Y = 0.42;
+const CAM_AHEAD = 3.9;
+const CAM_FOV = 0.7;
+
+export function cameraPose(simLx, simY, simZ, fovy = CAM_FOV, bend = 0) {
   const centre = roadPoint(simZ, 0, bend);
   const body = roadPoint(simZ, simLx, bend);
   const psi = centre.psi;
   const ox = body.x - centre.x;
   const oz = body.z - centre.z;
   return {
-    eye: [centre.x + ox * 0.55 - Math.sin(psi) * 4.4, 2.15, centre.z + oz * 0.55 - Math.cos(psi) * 4.4],
-    at: [centre.x + ox * 0.2 + Math.sin(psi) * 8, 0.95 + simY * 0.2, centre.z + oz * 0.2 + Math.cos(psi) * 8],
+    eye: [centre.x + ox * 0.55 - Math.sin(psi) * CAM_BACK, CAM_EYE_Y, centre.z + oz * 0.55 - Math.cos(psi) * CAM_BACK],
+    at: [centre.x + ox * 0.2 + Math.sin(psi) * CAM_AHEAD, CAM_LOOK_Y + simY * 0.15, centre.z + oz * 0.2 + Math.cos(psi) * CAM_AHEAD],
     fovy,
     psi,
   };
@@ -931,7 +952,7 @@ function mulMatPoint(m, p) {
 // grows to the right. After a Left press, this value must fall.
 // The point and the camera both come from roadPoint, including when the road bends.
 export function screenX(simLx, simY, simZ, width, height, bend = 0) {
-  const pose = cameraPose(0, 0, simZ, 0.95, bend);
+  const pose = cameraPose(0, 0, simZ, CAM_FOV, bend);
   const proj = new Float32Array(16);
   const viewM = new Float32Array(16);
   perspective(proj, pose.fovy, width / height, 0.08, 80);
@@ -959,17 +980,17 @@ uniform float uFlash;
 out vec4 o;
 void main() {
   vec2 uv = gl_FragCoord.xy / uRes;
-  float horizon = smoothstep(0.0, 0.72, uv.y);
+  float horizon = smoothstep(0.04, 0.48, uv.y);
   vec3 c = mix(uSky1, uSky0, horizon);
-  float haze = exp(-max(uv.y - 0.18, 0.0) * 3.2);
-  c = mix(c, uSky1, haze * 0.35);
+  float haze = exp(-max(uv.y - 0.42, 0.0) * 5.4);
+  c = mix(c, uSky1, haze * 0.1);
   // Hills and the sun are world-fixed. uYaw is the road heading, so a turn
   // carries the opening sky off to the side instead of leaving it on screen.
   float span = max(uFov * uRes.x / max(uRes.y, 1.0), 0.3);
   float x = uv.x - uYaw / span;
   float parallax = uCamZ * 0.004;
-  float h1 = 0.30 + 0.045 * sin(x * 7.0 + parallax);
-  float h2 = 0.22 + 0.035 * sin(x * 15.0 + 1.4 + parallax * 1.7);
+  float h1 = 0.16 + 0.03 * sin(x * 7.0 + parallax);
+  float h2 = 0.10 + 0.022 * sin(x * 15.0 + 1.4 + parallax * 1.7);
   if (uv.y < h1) c = mix(c, uHill, smoothstep(h1, h1 - 0.08, uv.y));
   if (uv.y < h2) c = mix(c, uHill2, 0.9);
   // Two slow sine sheets. uTime is seconds; no FBM, just a drift.
@@ -979,8 +1000,8 @@ void main() {
   float cloudC = sin(x * 2.3 + drift * 0.45 + uv.y * 3.2);
   float band = smoothstep(0.4, 0.75, uv.y);
   float puff = smoothstep(0.2, 0.9, cloudA) * 0.62 + smoothstep(0.3, 0.92, cloudB) * 0.38;
-  c = mix(c, vec3(1.0, 0.95, 0.88), puff * band * 0.24);
-  c = mix(c, vec3(1.0, 0.97, 0.93), smoothstep(0.5, 0.98, cloudC) * smoothstep(0.62, 0.9, uv.y) * 0.12);
+  c = mix(c, vec3(1.0, 0.97, 0.92), puff * band * 0.1);
+  c = mix(c, vec3(1.0, 0.98, 0.95), smoothstep(0.5, 0.98, cloudC) * smoothstep(0.62, 0.9, uv.y) * 0.05);
   vec2 sun = vec2(x, uv.y) - uSun;
   // UV is 0..1 on both axes, so a circle there is 16:9 wide on screen.
   sun.x *= uRes.x / max(uRes.y, 1.0);
@@ -1166,8 +1187,9 @@ void main() {
   float metal = clamp(vMetal, 0.0, 1.0);
   float sheen = clamp(vSheen, 0.0, 1.0);
   float rough = clamp(vRough, 0.0, 1.0);
-  vec3 ambient = mix(vec3(0.22), uSkyAmb, 0.10);
-  vec3 col = vC * (ambient + 0.28 * hemi + uLightAmt * ndl + 0.12 * wrap);
+  vec3 ambient = mix(vec3(0.46, 0.54, 0.68), uSkyAmb, 0.16);
+  vec3 col = vC * (ambient + 0.18 * hemi + uLightAmt * ndl + 0.08 * wrap);
+  col *= mix(vec3(0.82, 0.90, 1.06), vec3(1.08, 0.97, 0.84), clamp(ndl, 0.0, 1.0));
   float rim = pow(1.0 - max(dot(n, viewDir), 0.0), 2.2);
   col += vec3(1.0, 0.93, 0.82) * rim * (0.16 + vEmit * 0.22);
   float specPow = mix(48.0, 12.0, rough);
@@ -1204,7 +1226,7 @@ void main() {
   col += vC * vEmit * pulse;
   float dist = length(vW - uEye);
   float cap = min(max(uFogAmt, 0.0), 0.38);
-  float fog = 1.0 - exp(-dist * 0.011);
+  float fog = 1.0 - exp(-dist * 0.0055);
   fog = clamp(fog, 0.0, cap);
   fog *= (1.0 - 0.82 * clamp(vEmit, 0.0, 1.0));
   o = vec4(softKnee(mix(col, uFog, fog)), cov);
@@ -1233,7 +1255,7 @@ void main() {
     float feather = smoothstep(0.46, 0.12, rr);
     vec3 shade = mix(vec3(0.46, 0.40, 0.30), vec3(0.24, 0.20, 0.14), feather);
     float dist = length(vW - uEye);
-    float fog = clamp(1.0 - exp(-dist * 0.011), 0.0, 0.38);
+    float fog = clamp(1.0 - exp(-dist * 0.0055), 0.0, 0.38);
     o = vec4(mix(shade, uFog, fog * 0.7), 1.0);
     return;
   }
@@ -1250,8 +1272,9 @@ void main() {
   float hemi = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);
   float wrap = clamp(dot(n, L) * 0.5 + 0.5, 0.0, 1.0);
   float rough = clamp(vRough, 0.0, 1.0);
-  vec3 ambient = mix(vec3(0.22), uSkyAmb, 0.10);
-  vec3 col = vC * (ambient + 0.28 * hemi + uLightAmt * ndl + 0.12 * wrap);
+  vec3 ambient = mix(vec3(0.46, 0.54, 0.68), uSkyAmb, 0.16);
+  vec3 col = vC * (ambient + 0.18 * hemi + uLightAmt * ndl + 0.08 * wrap);
+  col *= mix(vec3(0.82, 0.90, 1.06), vec3(1.08, 0.97, 0.84), clamp(ndl, 0.0, 1.0));
   // Grass and hedges are most of the pixels: skip the pows there.
   if (vEmit > 0.05 || rough < 0.72) {
     vec3 viewDir = normalize(uEye - vW);
@@ -1286,19 +1309,62 @@ void main() {
   col += vC * vEmit * pulse;
   float dist = length(vW - uEye);
   float cap = min(max(uFogAmt, 0.0), 0.38);
-  float fog = 1.0 - exp(-dist * 0.011);
+  float fog = 1.0 - exp(-dist * 0.0055);
   fog = clamp(fog, 0.0, cap);
   fog *= (1.0 - 0.82 * clamp(vEmit, 0.0, 1.0));
   o = vec4(softKnee(mix(col, uFog, fog)), 1.0);
 }`;
 
+// Matte props (grass, hedges, trunks) are most of the pixels. They draw
+// with this short shader so a closer camera does not pay the road's
+// lighting, and so Medium and High do not run shadow taps on the lawn.
+const MESH_FS_FAST = `#version 300 es
+precision highp float;
+in vec3 vN; in vec3 vW; in vec3 vC; in vec3 vL;
+flat in vec3 vCenter; flat in vec3 vHalf; flat in float vShape;
+flat in float vRough; flat in float vEmit; flat in float vYaw;
+flat in float vMetal; flat in float vSheen; flat in float vKind;
+uniform vec3 uEye; uniform vec3 uFog; uniform float uFogAmt;
+out vec4 o;
+void main() {
+  if (vKind > 1.5 && vKind < 2.5) {
+    float rr = length(vL.xz);
+    if (rr > 0.46) discard;
+    float feather = smoothstep(0.46, 0.12, rr);
+    vec3 shade = mix(vec3(0.46, 0.40, 0.30), vec3(0.24, 0.20, 0.14), feather);
+    float dist = abs(vW.x - uEye.x) + abs(vW.z - uEye.z);
+    o = vec4(mix(shade, uFog, min(dist * 0.004, 0.28)), 1.0);
+    return;
+  }
+  float nd = clamp(vN.y * 0.45 + 0.55, 0.22, 1.0);
+  vec3 col = vC * (0.72 + 0.36 * nd);
+  col *= mix(vec3(0.86, 0.93, 1.04), vec3(1.06, 0.98, 0.86), nd);
+  float dist = abs(vW.x - uEye.x) + abs(vW.z - uEye.z);
+  float fog = min(dist * 0.0032, min(max(uFogAmt, 0.0), 0.22));
+  o = vec4(mix(col, uFog, fog), 1.0);
+}`;
+
 // One pattern each, so a grass tile does not also run the wood and metal
 // math. The road stays on MESH_FS_BOX. Kind selects the program.
 function boxPat(line) {
-  return MESH_FS_BOX.replace(
+  const withLine = MESH_FS_BOX.replace(
     "float pulse = 0.85 + 0.15 * sin(uTime * 3.0 + vCenter.z);",
     `${line}
   float pulse = 0.85 + 0.15 * sin(uTime * 3.0 + vCenter.z);`,
+  );
+  // Kind 8 is a gate bar. A bar that crosses the near plane used to
+  // fill the screen. Dither it out as its centre approaches the eye.
+  // The road stays on MESH_FS_BOX, so this branch is not on those pixels.
+  return withLine.replace(
+    "void main() {",
+    `void main() {
+  if (vKind > 7.5 && vKind < 8.5) {
+    float d2 = dot(vCenter - uEye, vCenter - uEye);
+    if (d2 < 8.0) {
+      float h = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+      if (h < smoothstep(8.0, 0.36, d2)) discard;
+    }
+  }`,
   );
 }
 const MESH_FS_BOX_PAT = boxPat(`if (vKind > 5.5 && vKind < 6.5) {
@@ -1354,8 +1420,9 @@ void main() {
   float metal = clamp(vMetal, 0.0, 1.0);
   float sheen = clamp(vSheen, 0.0, 1.0);
   float rough = clamp(vRough, 0.0, 1.0);
-  vec3 ambient = mix(vec3(0.22), uSkyAmb, 0.10);
-  vec3 col = vC * (ambient + 0.28 * hemi + uLightAmt * ndl + 0.12 * wrap);
+  vec3 ambient = mix(vec3(0.46, 0.54, 0.68), uSkyAmb, 0.16);
+  vec3 col = vC * (ambient + 0.18 * hemi + uLightAmt * ndl + 0.08 * wrap);
+  col *= mix(vec3(0.82, 0.90, 1.06), vec3(1.08, 0.97, 0.84), clamp(ndl, 0.0, 1.0));
   float rim = pow(1.0 - max(dot(n, viewDir), 0.0), 2.2);
   col += vec3(1.0, 0.93, 0.82) * rim * (0.16 + vEmit * 0.22);
   float specPow = mix(48.0, 12.0, rough);
@@ -1374,7 +1441,7 @@ void main() {
   float pulse = 0.85 + 0.15 * sin(uTime * 3.0 + vCenter.z);
   col += vC * vEmit * pulse;
   float dist = length(vW - uEye);
-  float fog = clamp(1.0 - exp(-dist * 0.011), 0.0, min(max(uFogAmt, 0.0), 0.38));
+  float fog = clamp(1.0 - exp(-dist * 0.0055), 0.0, min(max(uFogAmt, 0.0), 0.38));
   fog *= (1.0 - 0.82 * clamp(vEmit, 0.0, 1.0));
   o = vec4(softKnee(mix(col, uFog, fog)), cov);
 }`;
@@ -1433,7 +1500,7 @@ export function createRenderer(canvas, hooks) {
     gl = null;
   }
   if (!gl) return null;
-  let sky, mesh, meshBox, meshPat, meshBall, tri, cubeBuf, inst, vao, u, um, ub, up, uBall, castBuf, rimBuf;
+  let sky, mesh, meshBox, meshFast, meshPat, meshBall, tri, cubeBuf, inst, vao, u, um, ub, uFast, up, uBall, castBuf, rimBuf;
   const rimData = new Float32Array(3 * STRIDE);
   const data = new Float32Array(MAX * STRIDE);
   const proj = new Float32Array(16);
@@ -1468,6 +1535,7 @@ export function createRenderer(canvas, hooks) {
     sky = link(gl, SKY_VS, SKY_FS);
     mesh = link(gl, MESH_VS, MESH_FS);
     meshBox = link(gl, MESH_VS, MESH_FS_BOX);
+    meshFast = link(gl, MESH_VS, MESH_FS_FAST);
     meshPat = link(gl, MESH_VS, MESH_FS_BOX_PAT);
     meshBall = link(gl, MESH_VS, MESH_FS_BALL);
     tri = gl.createBuffer();
@@ -1504,6 +1572,7 @@ export function createRenderer(canvas, hooks) {
     u = skyLocs(sky);
     um = meshLocs(mesh);
     ub = meshLocs(meshBox);
+    uFast = meshLocs(meshFast);
     up = meshLocs(meshPat);
     uBall = meshLocs(meshBall);
   }
@@ -1891,14 +1960,14 @@ export function createRenderer(canvas, hooks) {
     }
     roadKeys.push({ s: at, bend: amp });
   }
-  let camY = 2.15;
+  let camY = CAM_EYE_Y;
   // Eye height follows the road under the camera. Look height follows the
   // road ahead, so the view pitches by the hill itself. Flat ground keeps
   // both at 0, which is the old camera.
   let camFloor = 0;
   let camLook = 0;
   let camFloorSeen = false;
-  let camFov = 0.92;
+  let camFov = CAM_FOV;
   let camLatVel = 0;
   let shakeAmp = 0;
   let hitStop = 0;
@@ -1908,7 +1977,7 @@ export function createRenderer(canvas, hooks) {
   let heldHit = false;
   let keepT = 0;
   let backT = 0;
-  let drawFov = 0.92;
+  let drawFov = CAM_FOV;
   let prevY = 0;
   let prevLx = 0;
   let lean = 0;
@@ -2003,8 +2072,13 @@ export function createRenderer(canvas, hooks) {
   // Kind 2 tells the box shader to cut the square into a circle. The road
   // slab tops out near y 0.08. Off the grass deck there is nothing to sit on.
   const DECK = 2.85;
+  let shadeX = 0;
+  let shadeZ = 0;
   function contactShadow(x, z, yaw, height, radius) {
-    if (wantShadow || n >= MAX - 96) return;
+    if (n >= MAX - 64) return;
+    const dx = x - shadeX;
+    const dz = z - shadeZ;
+    if (dx * dx + dz * dz > 324) return;
     const s = Math.max(0.16, radius) * 0.78 / (1 + Math.max(0, height) * 0.55);
     push(x, 0.09, z, s, 0.012, s, 0, [0.34, 0.28, 0.2], 0.95, 0, yaw, 0, 0, 2);
   }
@@ -2304,9 +2378,10 @@ export function createRenderer(canvas, hooks) {
       const z = pz - 0.8 + ahead + i * 1.45 + (reduced ? 0 : Math.sin(t * 0.8 + i) * 0.25);
       const at = sample(z, lat);
       spin = at.psi;
-      if (Math.abs(lat) <= DECK) contactShadow(at.x, at.z, at.psi, hop, 0.34);
       const plan = pal.plan || pal.kind;
       const look = carLook(plan, t, i, reduced);
+      const blob = CAR_LOOKS.includes(look) ? 0.62 : 0.38;
+      if (Math.abs(lat) <= DECK + 1.2) contactShadow(at.x, at.z, at.psi, hop, blob);
       looks.push(look);
       drawBody(look, at.x, hop, at.z, palRgb(pal), t, reduced);
       spin = 0;
@@ -2364,6 +2439,25 @@ export function createRenderer(canvas, hooks) {
     if (dist >= 24) return 0.18;
     const t = (24 - dist) / 15;
     return 0.18 + 0.82 * (t * t * (3 - 2 * t));
+  }
+
+  function flyPlus(nx, ny) {
+    if (typeof document === "undefined") return;
+    const score = document.getElementById("score");
+    if (!score || !document.body) return;
+    const rect = canvas.getBoundingClientRect();
+    const sr = score.getBoundingClientRect();
+    const el = document.createElement("span");
+    el.className = "plus-one";
+    el.textContent = "+1";
+    const x = rect.left + nx * rect.width;
+    const y = rect.top + (1 - ny) * rect.height;
+    el.style.left = x + "px";
+    el.style.top = y + "px";
+    el.style.setProperty("--dx", ((sr.left + sr.width * 0.35) - x).toFixed(1) + "px");
+    el.style.setProperty("--dy", ((sr.top + sr.height * 0.45) - y).toFixed(1) + "px");
+    document.body.appendChild(el);
+    setTimeout(() => { if (el.parentNode) el.remove(); }, 720);
   }
 
   function frame(st) {
@@ -2445,6 +2539,8 @@ export function createRenderer(canvas, hooks) {
     const feet = sample(drawS, px);
     const rx = feet.x;
     const rz = feet.z;
+    shadeX = rx;
+    shadeZ = rz;
     const reduced = !!st.reduced;
     if (Math.abs(speed - prevSpeed) > 0.05 || Math.abs(grav - prevG) > 0.05) pulse = 1;
     prevSpeed = speed;
@@ -2534,7 +2630,7 @@ export function createRenderer(canvas, hooks) {
     backT = Math.max(0, backT - frameDt / 0.55);
     camS += (drawS - camS) * followS;
     const floorCam = roadHeight(camS, roadPieces);
-    const lookAhead = Math.max(6, speed * 1.3);
+    const lookAhead = CAM_AHEAD + Math.min(0.7, Math.max(0, speed - 5) * 0.05);
     const floorLook = roadHeight(drawS + lookAhead, roadPieces);
     // A head follows the path. The same ease on both heights keeps the
     // pitch equal to the slope between them.
@@ -2548,9 +2644,9 @@ export function createRenderer(canvas, hooks) {
       camLook += (floorLook - camLook) * followH;
     }
     const floaty = Math.max(0, (32 - grav) * 0.03);
-    const wantY = 2.25 + floaty + (rel > 0.4 ? 0.18 : 0) - land * 0.16;
+    const wantY = CAM_EYE_Y + floaty * 0.45 + (rel > 0.4 ? 0.1 : 0) - land * 0.1;
     camY += (wantY - camY) * (reduced ? 1 : 0.08);
-    const wantFov = (rel > 0.35 ? 1.04 : 0.9) + Math.min(0.1, Math.max(0, speed - 5) * 0.025) + pulse * 0.04
+    const wantFov = (rel > 0.35 ? CAM_FOV + 0.06 : CAM_FOV) + Math.min(0.04, Math.max(0, speed - 5) * 0.005) + pulse * 0.02
       + (gpuFeel ? fovKick(speed, activeProfile.fovKick) : 0);
     camFov += (wantFov - camFov) * (reduced ? 1 : 0.08);
     const bob = reduced || !alive ? 0 : Math.sin(st.time * (8 + speed * 0.25)) * 0.02;
@@ -2561,9 +2657,9 @@ export function createRenderer(canvas, hooks) {
     const oz = followed.z - basis.z;
     const leanWorld = lean * 0.15;
     const eye = [
-      basis.x + ox * 0.62 - Math.sin(psi) * 4.7 + leanWorld * Math.cos(psi),
+      basis.x + ox * 0.62 - Math.sin(psi) * CAM_BACK + leanWorld * Math.cos(psi),
       camY + bob + camFloor,
-      basis.z + oz * 0.62 - Math.cos(psi) * 4.7 - leanWorld * Math.sin(psi),
+      basis.z + oz * 0.62 - Math.cos(psi) * CAM_BACK - leanWorld * Math.sin(psi),
     ];
     if (shakeAmp > 0) {
       const off = shakeOffset(shakeAmp, st.time || 0);
@@ -2580,12 +2676,13 @@ export function createRenderer(canvas, hooks) {
       eye[1] += nudge * (whooshSide === 0 ? 0.7 : 0.28);
     }
     drawFov = camFov - (hitStop > 0 ? (activeProfile.shake || 0.04) * (hitStop / 0.07) * 1.4 : 0);
-    // One beat ahead, so the next move sits in the view. The eye stays
-    // 4.7 m behind, and a bend still rebases only past 8 m. The look
-    // height is the road there, so an uphill tips the view by that grade.
+    // The look point stays close and low, so the sky is a thin band and
+    // the runner stays large. The eye is CAM_BACK behind, and a bend
+    // still rebases only past 8 m. The look height is the road there,
+    // so an uphill tips the view by that grade.
     const at = [
       basis.x + ox * 0.22 + Math.sin(psi) * lookAhead,
-      0.95 + Math.max(0, rel) * 0.18 + floaty * 0.4 + camLook,
+      CAM_LOOK_Y + Math.max(0, rel) * 0.12 + floaty * 0.25 + camLook,
       basis.z + oz * 0.22 + Math.cos(psi) * lookAhead,
     ];
     perspective(proj, drawFov, w / h, 0.08, 96);
@@ -2684,8 +2781,7 @@ export function createRenderer(canvas, hooks) {
       const trunk = tint(mix3(pal.trunk, [0.32, 0.2, 0.13], kind === 1 ? 0.15 : 0.4), tintK);
       const wood = near ? 3 : 0;
       const top = [at.x + swayX, at.z + swayZ];
-      // Roadside trees stand past the grass deck, so a ground blot would hang in the air.
-      if (Math.abs(lat) <= DECK) contactShadow(at.x, at.z, at.psi, 0, 0.42 * scale);
+      if (usePost || Math.abs(lat) <= 3.05) contactShadow(at.x, at.z, at.psi, 0, 0.55 * scale);
       if (kind === 1) {
         push(at.x, 0.72 * scale, at.z, 0.11 * scale, 1.45 * scale, 0.11 * scale, 0, trunk, 0.8, 0, at.psi, 0, 0, wood);
         push(top[0], 1.62 * scale, top[1], 0.38 * scale, 1.2 * scale, 0.38 * scale, 1, leaf, 0.7, 0.02, at.psi);
@@ -2711,6 +2807,7 @@ export function createRenderer(canvas, hooks) {
       deckLift = savedLift;
     }
     function drawCityMark(at, kind, scale, pal) {
+      if (usePost) contactShadow(at.x, at.z, at.psi, 0, 0.72 * scale);
       const s = scale;
       const red = [0.78, 0.14, 0.12];
       const roof = [0.16, 0.1, 0.08];
@@ -2832,6 +2929,7 @@ export function createRenderer(canvas, hooks) {
     }
     function drawFace(at, face, scale, style) {
       if (n >= MAX - 10) return;
+      if (usePost) contactShadow(at.x, at.z, at.psi, 0, 0.7 * scale);
       const s = scale;
       const x = at.x;
       const z = at.z;
@@ -2923,6 +3021,7 @@ export function createRenderer(canvas, hooks) {
           const at = onRoad(along, lat);
           const jitterK = 0.9 + laneHash(cz * 0.53 + side * 1.7 + p) * 0.2;
           const scale = baseScale * (0.88 + laneHash(cz * 0.61 + side * 2.3 + p) * 0.24);
+          if (prop.kind !== "tree" && (usePost || Math.abs(lat) <= 3.05)) contactShadow(at.x, at.z, at.psi, 0, 0.5 * scale);
           const glow = tint(pal.flower, jitterK);
           const body = tint(mix3(pal.trunk, pal.hedge, 0.4), jitterK);
           if (prop.kind === "tree") {
@@ -3043,7 +3142,7 @@ export function createRenderer(canvas, hooks) {
             // breaks into shorter slabs so the ends still meet.
             const gradeSplit = Math.abs(roadGrade(cursor, pieces) - roadGrade(Math.max(cursor, end - 0.05), pieces)) > 0.015;
             const step = Math.abs(yB - yA) > 0.02 && gradeSplit ? 1 : span;
-            const grass = lane !== 1 && dist > -2 && dist < 4 ? surfaceBand(pal) : 0;
+            const grass = 0;
             for (let s = cursor; s < end - 0.001; s += step) {
               const e = Math.min(end, s + step);
               const mid = (s + e) * 0.5;
@@ -3104,7 +3203,9 @@ export function createRenderer(canvas, hooks) {
         const tint = mix3(pal.hedge, hv > 0.5 ? pal.leaf : [0.08, 0.12, 0.06], Math.abs(hv - 0.5) * 0.35);
         const hedgeL = onRoad(cz, -3.35);
         const hedgeR = onRoad(cz, 3.35);
+        if (usePost) contactShadow(hedgeL.x, hedgeL.z, hedgeL.psi, 0, 0.48);
         push(hedgeL.x, hedgeH * 0.5, hedgeL.z, hedgeW, hedgeH, hedgeD, 0, tint, 0.8, 0, hedgeL.psi);
+        if (usePost) contactShadow(hedgeR.x, hedgeR.z, hedgeR.psi, 0, 0.48);
         push(hedgeR.x, hedgeH * 0.5, hedgeR.z, hedgeW, hedgeH, hedgeD, 0, tint, 0.8, 0, hedgeR.psi);
       }
       if (dist < 34) {
@@ -3181,8 +3282,8 @@ export function createRenderer(canvas, hooks) {
                 const h = 2.4;
                 push(a.x, h * 0.5, a.z, 0.1, h, 0.1, 0, railCol, 0.25, 0.55, a.psi);
                 push(b.x, h * 0.5, b.z, 0.1, h, 0.1, 0, railCol, 0.25, 0.55, b.psi);
-                if (!barBlocksHero(pz - cz)) {
-                  push(mid.x, h, mid.z, Math.abs(outer - inner), 0.09, 0.1, 0, railCol, 0.2, 0.75, mid.psi);
+                if (!barBlocksHero(pz - cz) && !nearCamera(mid.x, h, mid.z)) {
+                  push(mid.x, h, mid.z, Math.abs(outer - inner), 0.09, 0.1, 0, railCol, 0.2, 0.75, mid.psi, 0, 0, 8);
                 }
               }
             }
@@ -3195,6 +3296,7 @@ export function createRenderer(canvas, hooks) {
           if (step8) {
             for (const side of [-1, 1]) {
               const at = onRoad(cz, side * (4.6 + laneHash(z + side) * 0.4));
+              if (usePost) contactShadow(at.x, at.z, at.psi, 0, 0.55);
               push(at.x, 0.9, at.z, 0.12, 1.8, 0.12, 0, [0.52, 0.36, 0.2], 0.7, 0, at.psi);
               push(at.x, 1.85, at.z, 0.85, 0.12, 0.28, 0, pal.leaf, 0.5, 0.06, at.psi);
               push(at.x, 1.9, at.z, 0.28, 0.1, 0.85, 0, pal.leaf2, 0.5, 0.06, at.psi);
@@ -3225,20 +3327,24 @@ export function createRenderer(canvas, hooks) {
     }
 
     function drawLoot(at, y, s, kind) {
-      contactShadow(at.x, at.z, spin, Math.max(0, y - s * 0.45), Math.max(0.22, s * 1.15));
+      contactShadow(at.x, at.z, at.psi || spin, Math.max(0, y - s * 0.45), Math.max(0.28, s * 1.35));
+      const yaw = (at.psi || spin) + (reduced ? 0 : (st.time || 0) * 3.2);
       if (kind === "star") {
-        push(at.x, y, at.z, s * 1.15, s * 0.42, s * 1.15, 2, [1, 0.86, 0.28], 0.12, 0.95);
-        push(at.x, y, at.z, s * 0.42, s * 1.15, s * 0.42, 2, [1, 0.95, 0.55], 0.12, 0.9);
+        push(at.x, y, at.z, s * 1.35, s * 0.16, s * 1.35, 0, [1, 0.86, 0.28], 0.14, 0.9, yaw, 0.7, 0.6, 5);
+        push(at.x, y, at.z, s * 0.5, s * 0.2, s * 0.5, 0, [1, 0.96, 0.6], 0.12, 0.95, yaw, 0.3, 0.8, 5);
       } else if (kind === "gem") {
-        push(at.x, y, at.z, s * 0.72, s * 1.25, s * 0.72, 2, [0.45, 0.78, 1], 0.1, 0.95);
+        push(at.x, y, at.z, s * 0.9, s * 1.35, s * 0.28, 0, [0.45, 0.82, 1], 0.12, 0.9, yaw, 0.55, 0.7, 5);
       } else if (kind === "blossom") {
-        push(at.x, y, at.z, s * 1.05, s * 0.38, s * 1.05, 1, [1, 0.55, 0.75], 0.25, 0.7);
-        push(at.x, y, at.z, s * 0.32, s * 0.32, s * 0.32, 1, [1, 0.92, 0.45], 0.2, 0.85);
+        push(at.x, y, at.z, s * 1.25, s * 0.16, s * 1.25, 0, [1, 0.55, 0.75], 0.22, 0.7, yaw, 0.2, 0.4, 5);
+        push(at.x, y, at.z, s * 0.4, s * 0.2, s * 0.4, 0, [1, 0.92, 0.45], 0.16, 0.9, yaw, 0.2, 0.5, 5);
       } else if (kind === "apple") {
-        push(at.x, y, at.z, s * 0.95, s * 1.05, s * 0.95, 1, [0.95, 0.32, 0.38], 0.35, 0.55);
-        push(at.x, y + s * 0.62, at.z, 0.05, 0.14, 0.05, 0, [0.35, 0.62, 0.28], 0.4, 0.1);
+        push(at.x, y, at.z, s * 1.15, s * 1.2, s * 0.28, 0, [0.95, 0.32, 0.38], 0.28, 0.55, yaw, 0.15, 0.3, 5);
+        push(at.x, y + s * 0.55, at.z, 0.06, 0.16, 0.06, 0, [0.35, 0.62, 0.28], 0.4, 0.1, yaw);
       } else {
-        push(at.x, y, at.z, s, s, s, 2, pal.coin, 0.12, 0.95, spin, 0.74, 0.58, 5);
+        // A thin box yawed about Y. A marched coin was too heavy on SwiftShader.
+        const diam = Math.max(0.62, s * 2.15);
+        const thick = Math.max(0.055, s * 0.2);
+        push(at.x, y, at.z, diam, diam, thick, 0, [1.0, 0.8, 0.2], 0.16, 0.72, yaw, 0.82, 0.85, 5);
       }
     }
     // Look is field 6. A stored look is kept. A phrase that left the word
@@ -3254,6 +3360,8 @@ export function createRenderer(canvas, hooks) {
 
     function drawHurdle(q, zc, lane, sc, glow) {
       const look = variedLook(q, 3);
+      const shadowAt = onRoad(zc, lane < 0 ? 0 : laneX(lane));
+      contactShadow(shadowAt.x, shadowAt.z, shadowAt.psi, 0, lane < 0 ? 1.1 : 0.55);
       const hh = q[3] * sc;
       const wide = lane < 0;
       const lat0 = wide ? 0 : laneX(lane);
@@ -3305,6 +3413,18 @@ export function createRenderer(canvas, hooks) {
       }
     }
 
+    // A bar whose centre is near or behind the eye clips into a full-screen band.
+    function nearCamera(x, y, z) {
+      const dx = x - eye[0];
+      const dy = y - eye[1];
+      const dz = z - eye[2];
+      const ahead = dx * Math.sin(psi) + dz * Math.cos(psi);
+      return ahead < 1.35 || dx * dx + dy * dy + dz * dz < 2.1;
+    }
+    function gateBar(x, y, z, sx, sy, sz, rgb, rough, emit, yaw) {
+      if (nearCamera(x, y, z)) return;
+      push(x, y, z, sx, sy, sz, 0, rgb, rough, emit, yaw, 0, 0, 8);
+    }
     function drawGate(q, zc, sc, glow) {
       const look = variedLook(q, 4);
       const bottom = q[4];
@@ -3316,16 +3436,19 @@ export function createRenderer(canvas, hooks) {
       const solid = gateBarDepth(q[2]);
       const span = 5.2 * sc;
       const postRgb = look === 2 ? pal.trunk : look === 1 ? [1, 0.82, 0.38] : look === 4 ? [0.95, 0.55, 0.62] : pal.gate;
-      push(postL.x, bottom * 0.5 * sc, postL.z, 0.28, bottom * sc, 0.28, 0, postRgb, 0.4, 0.12, postL.psi);
-      push(postR.x, bottom * 0.5 * sc, postR.z, 0.28, bottom * sc, 0.28, 0, postRgb, 0.4, 0.12, postR.psi);
+      contactShadow(gate.x, gate.z, gate.psi, 0, 0.7);
+      if (!nearCamera(postL.x, bottom * 0.5 * sc, postL.z)) {
+        push(postL.x, bottom * 0.5 * sc, postL.z, 0.28, bottom * sc, 0.28, 0, postRgb, 0.4, 0.12, postL.psi);
+        push(postR.x, bottom * 0.5 * sc, postR.z, 0.28, bottom * sc, 0.28, 0, postRgb, 0.4, 0.12, postR.psi);
+      }
       if (barBlocksHero(pz - zc)) return;
       if (look === 1) {
-        push(gate.x, gy, gate.z, span, barH * sc * 0.62, solid * 0.85, 0, [1, 0.55, 0.72], 0.25, 0.35 + glow, gate.psi);
-        push(gate.x, gy, gate.z, span, Math.max(0.05, barH * sc * 0.2), solid * 0.55, 0, [1, 0.82, 0.38], 0.2, 0.45, gate.psi);
+        gateBar(gate.x, gy, gate.z, span, barH * sc * 0.62, solid * 0.85, [1, 0.55, 0.72], 0.25, 0.35 + glow, gate.psi);
+        gateBar(gate.x, gy, gate.z, span, Math.max(0.05, barH * sc * 0.2), solid * 0.55, [1, 0.82, 0.38], 0.2, 0.45, gate.psi);
         const bow = 0.3 * sc;
-        push(gate.x, gy + barH * sc * 0.28, gate.z, bow, bow, bow, 1, [1, 0.42, 0.58], 0.22, 0.4, gate.psi);
+        if (!nearCamera(gate.x, gy, gate.z)) push(gate.x, gy + barH * sc * 0.28, gate.z, bow, bow, bow, 1, [1, 0.42, 0.58], 0.22, 0.4, gate.psi);
       } else if (look === 2) {
-        push(gate.x, gy, gate.z, span, barH * sc, solid, 0, pal.leaf, 0.45, 0.12 + glow, gate.psi);
+        gateBar(gate.x, gy, gate.z, span, barH * sc, solid, pal.leaf, 0.45, 0.12 + glow, gate.psi);
         const leaves = [-1.6, -0.8, 0, 0.8, 1.6];
         const bulb = 0.18 * sc;
         for (let i = 0; i < leaves.length; i++) {
@@ -3333,7 +3456,7 @@ export function createRenderer(canvas, hooks) {
           push(leaf.x, gy + barH * sc * 0.22, leaf.z, bulb, bulb, bulb, 1, i % 2 ? pal.leaf2 : pal.leaf, 0.4, 0.1, leaf.psi);
         }
       } else if (look === 3) {
-        push(gate.x, gy, gate.z, span, Math.max(0.05, barH * sc * 0.22), solid * 0.7, 0, [0.42, 0.32, 0.2], 0.4, 0.08, gate.psi);
+        gateBar(gate.x, gy, gate.z, span, Math.max(0.05, barH * sc * 0.22), solid * 0.7, [0.42, 0.32, 0.2], 0.4, 0.08, gate.psi);
         const bulbs = [-1.8, -0.9, 0, 0.9, 1.8];
         const bulb = 0.18 * sc;
         for (let i = 0; i < bulbs.length; i++) {
@@ -3343,12 +3466,12 @@ export function createRenderer(canvas, hooks) {
       } else if (look === 4) {
         const a = onRoad(zc - 0.04, 0);
         const b = onRoad(zc + 0.05, 0);
-        push(a.x, gy, a.z, span * 0.98, barH * sc * 0.7, solid * 0.72, 0, [0.95, 0.42, 0.55], 0.3, 0.22 + glow, a.psi);
-        push(b.x, gy, b.z, span, barH * sc * 0.42, solid * 0.55, 0, [0.98, 0.82, 0.55], 0.28, 0.18, b.psi);
+        gateBar(a.x, gy, a.z, span * 0.98, barH * sc * 0.7, solid * 0.72, [0.95, 0.42, 0.55], 0.3, 0.22 + glow, a.psi);
+        gateBar(b.x, gy, b.z, span, barH * sc * 0.42, solid * 0.55, [0.98, 0.82, 0.55], 0.28, 0.18, b.psi);
       } else {
         const thick = Math.max(0.45, q[2]);
-        push(gate.x, gy, gate.z, 5.45 * sc, barH * sc * 1.45, Math.max(0.28, thick * 0.5), 0, [1, 0.97, 0.86], 0.18, 0.95, gate.psi);
-        push(gate.x, gy, gate.z, span, barH * sc, solid, 0, pal.gate, 0.28, 0.78 + glow, gate.psi);
+        gateBar(gate.x, gy, gate.z, 5.45 * sc, barH * sc * 1.45, Math.max(0.28, thick * 0.5), [1, 0.97, 0.86], 0.18, 0.95, gate.psi);
+        gateBar(gate.x, gy, gate.z, span, barH * sc, solid, pal.gate, 0.28, 0.78 + glow, gate.psi);
       }
     }
 
@@ -3481,6 +3604,7 @@ export function createRenderer(canvas, hooks) {
       const lat = laneX(lane < 0 ? 1 : lane);
       const here = onRoad(zc, lat);
       const yaw = here.psi;
+      contactShadow(here.x, here.z, yaw, 0, 0.55 * sc);
       if (look === 1) {
         push(here.x, 0.62 * sc, here.z, 0.78 * sc, 1.24 * sc, 0.78 * sc, 0, [0.52, 0.34, 0.2], 0.6, 0.05, yaw, 0, 0, 3);
         push(here.x, 1.3 * sc, here.z, 0.98 * sc, 0.18 * sc, 0.98 * sc, 0, [0.7, 0.5, 0.32], 0.45, 0.08, yaw, 0, 0, 3);
@@ -3547,8 +3671,10 @@ export function createRenderer(canvas, hooks) {
       const barH = q[3] * sc;
       const postL = onRoad(zc, -2.35);
       const postR = onRoad(zc, 2.35);
-      push(postL.x, bottom * 0.5, postL.z, 0.28, bottom, 0.28, 0, pal.gate, 0.4, 0.12, postL.psi);
-      push(postR.x, bottom * 0.5, postR.z, 0.28, bottom, 0.28, 0, pal.gate, 0.4, 0.12, postR.psi);
+      if (!nearCamera(postL.x, bottom * 0.5, postL.z)) {
+        push(postL.x, bottom * 0.5, postL.z, 0.28, bottom, 0.28, 0, pal.gate, 0.4, 0.12, postL.psi);
+        push(postR.x, bottom * 0.5, postR.z, 0.28, bottom, 0.28, 0, pal.gate, 0.4, 0.12, postR.psi);
+      }
       // Daylight under the bar stays: the tiles start at the bar's bottom
       // and only grow upward.
       const tiles = 4;
@@ -3557,6 +3683,8 @@ export function createRenderer(canvas, hooks) {
       const th2 = Math.max(barH, 0.9 * sc);
       const depth = gateBarDepth(q[2]) * 1.4;
       const grow = growOf(th.id, nowMs, reduced);
+      const midBar = onRoad(zc, 0);
+      if (nearCamera(midBar.x, bottom + th2 * 0.5, midBar.z)) return;
       for (let t = 0; t < tiles; t++) {
         const at = onRoad(zc, -span / 2 + tw * (t + 0.5));
         placeThing(th, { x: at.x, y: bottom, z: at.z, psi: at.psi, w: tw * 0.96, h: th2, d: depth },
@@ -3747,6 +3875,10 @@ export function createRenderer(canvas, hooks) {
         : kind === "blossom" ? [10, 0.07, 1]
         : [8, 0.05, 0];
       burst(rx, py + 0.9, rz, pal.coin, rich[0], rich[1], rich[2], heading);
+      if (!reduced) {
+        const plus = mulMatPoint(proj, mulMatPoint(view, [rx, py + 0.9, rz, 1]));
+        if (plus[3] > 0.05) flyPlus(plus[0] / plus[3] * 0.5 + 0.5, plus[1] / plus[3] * 0.5 + 0.5);
+      }
     }
     if (st.event === "spring") burst(rx, py + 0.4, rz, pal.spring, 8, 0.08, 0, heading);
     if (st.near) burst(rx + ax.tx * 0.4, py + 0.7, rz + ax.tz * 0.4, pal.sun, 6, 0.02, 0, heading);
@@ -3985,8 +4117,7 @@ export function createRenderer(canvas, hooks) {
     const ahead = Math.hypot(at[0] - eye[0], at[2] - eye[2]) || 1;
     const pitch = Math.atan2(at[1] - eye[1], ahead);
     const aim = sunAim(psi, camFov, w / Math.max(1, h), pal.sunUv, pitch);
-    const sunI = 0.55 + 0.55 * pal.lightAmt;
-    const lightAmt = 0.55 * sunI * (1 + lift * 0.08 + pulse * 0.06);
+    const lightAmt = Math.min(0.9, Math.max(0.8, 0.74 + 0.16 * pal.lightAmt + lift * 0.015 + pulse * 0.015));
     const swapInst = (i, j) => {
       if (i === j) return;
       const a = i * STRIDE;
@@ -4029,6 +4160,21 @@ export function createRenderer(canvas, hooks) {
       return a;
     };
     const boxPat = splitKind(0, lo, 2.5);
+    // Matte boxes (rough >= 0.72) draw with the short shader. The road
+    // and the hero stay on the full one.
+    const splitMatte = (start, end) => {
+      let a = start;
+      let b = end - 1;
+      while (a <= b) {
+        if (data[a * STRIDE + 7] >= 0.72) a++;
+        else {
+          swapInst(a, b);
+          b--;
+        }
+      }
+      return a;
+    };
+    const matteEnd = splitMatte(0, boxPat);
     if (usePost && wantShadow && castN > 0 && depthProg) {
       if (splitPass) beginSpan("shadow");
       const len = Math.hypot(aim[0], aim[1], aim[2]) || 1;
@@ -4128,7 +4274,8 @@ export function createRenderer(canvas, hooks) {
     const patLoc = useHigh && uhp ? uhp : usePost && ulp ? ulp : up;
     const ballLoc = useHigh && uhBall ? uhBall : usePost && ulBall ? ulBall : uBall;
     const marchLoc = useHigh && uhm ? uhm : usePost && ulm ? ulm : um;
-    drawSpan(boxProg, boxLoc, 0, boxPat, false, 0);
+    drawSpan(meshFast, uFast, 0, matteEnd, false, 0);
+    drawSpan(boxProg, boxLoc, matteEnd, boxPat - matteEnd, false, 0);
     drawSpan(patProg, patLoc, boxPat, lo - boxPat, false, 0);
     drawSpan(ballProg, ballLoc, lo, mid - lo, false, 0);
     drawSpan(marchProg, marchLoc, mid, n - mid, !usePost, 0);
