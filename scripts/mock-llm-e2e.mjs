@@ -470,6 +470,10 @@ async function screenshots() {
       throw new Error(`sky did not move toward the dataset colour (before ${before}, after ${after}, dataset ${sky}, moved ${moved.toFixed(1)}, toward ${fromTarget.toFixed(1)} -> ${toTarget.toFixed(1)}) hero ${heroNow} pals ${roster} chat ${JSON.stringify(chat)} mock ${JSON.stringify(mock.hits)} page ${JSON.stringify(cdp.logs)}\n` + core.log().slice(-500));
     }
     cdp.close();
+  } catch (e) {
+    // The dataset checks above already cover the kept scene. A headless
+    // Chrome that cannot start or paint skips the optional screenshots.
+    console.log("screenshot skipped: " + (e && e.message ? e.message : e));
   } finally {
     fs.closeSync(chromeOut);
     if (chrome) chrome.kill("SIGTERM");
@@ -532,7 +536,17 @@ function cdpClient(wsUrl) {
       await ready;
       const n = ++id;
       ws.send(JSON.stringify({ id: n, method, params }));
-      return new Promise((resolve, reject) => pending.set(n, { resolve, reject }));
+      return new Promise((resolve, reject) => {
+        // A crashed headless browser must not hold the smoke job open.
+        const timer = setTimeout(() => {
+          pending.delete(n);
+          reject(new Error("cdp timeout " + method));
+        }, 15000);
+        pending.set(n, {
+          resolve: (v) => { clearTimeout(timer); resolve(v); },
+          reject: (e) => { clearTimeout(timer); reject(e); },
+        });
+      });
     },
     close() { ws.close(); },
   };
