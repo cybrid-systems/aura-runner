@@ -291,6 +291,10 @@ print(f"{r:.1f} {g:.1f} {b:.1f}")
 }
 
 async function screenshots() {
+  if (process.env.LUMEN_SHOTS === "0") {
+    console.log("screenshot skipped: LUMEN_SHOTS=0");
+    return;
+  }
   const bin = chromeBin();
   if (!bin) {
     console.log("screenshot skipped: no Chrome");
