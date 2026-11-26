@@ -16,9 +16,15 @@ empty 0 empty
 shape 0 shape
 count 0 count
 example 1 fair A bird flew along
+penguin 1 fair A penguin waddled in
+panda 1 fair A panda rolled in
+dragon 1 fair A little dragon glided in
 merge 1
 update 1
 plan puppy
+plan-dragon dragon
+plan-penguin penguin
+plan-panda panda
 round 1
 cap 1
 roster mochi kitten, beep car, hopp frog, wadd duck, bun bunny, flip butterfly
@@ -47,6 +53,9 @@ ahead 1 fair A puppy bounded in
 hero-fox 1 fair The runner became a fox
 hero-bee 1 fair The runner became a bee
 hero-turtle 1 fair The runner became a turtle
+hero-penguin 1 fair The runner became a penguin
+hero-panda 1 fair The runner became a panda
+hero-dragon 1 fair The runner became a dragon
 near-motion near
 evolve 1
 hero-step kitten
