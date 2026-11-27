@@ -11,6 +11,103 @@ The target program is `lib/phys.aura`. The runtime set-codes the seed
 rebinds - `nudge-flyers`, `step-poppers`, `collide-far?`, `pset` - live in
 the module the runtime mutates.
 
+## The profile on nightly `760246314` (2026-11-27): the bottleneck moved into the runtime
+
+Re-mined on the pinned nightly (`aura-perf install` + `mine-tick.aura`,
+`autotune perf/spec.aura`, `aura-perf profile` native sampling, and
+`mine-run.aura` against a live `core/main.aura` server, seed 42, LLM off).
+The #5388 IR-cap fix is in this nightly: the physics seed now IR-compiles
+(`ir-calls=17.6M`, `tw-calls=0.67M` per two kernels; was `ir-calls=0`).
+The hot leaf moved with it:
+
+```
+mine class=flat-hot hot-node=step site=bench-kernel   (was hot-node=collide on e174386808)
+hotspot step         self-ms=2355 calls=1200 share=38
+hotspot collide      self-ms=1260 calls=1200 share=20
+hotspot bench-kernel self-ms=1999 calls=1    share=32
+```
+
+Native `perf record` of the same kernel (24921 samples, task-clock) says
+where the time actually goes — the nightly binary has **no LLVM symbols,
+the JIT is not linked in**, so "IR-compiled" means the IR *interpreter*:
+
+| share | symbol | what it is |
+|---|---|---|
+| 29.6% | `ir_enter_feedback` | per-call type-feedback entry; the single-slot TLS cache misses on every alternation in the step→collide→road-height→… loop, so calls fall into `enter_slow` (global mutex + string-key hash lookup + shared_ptr atomics) |
+| 21.1% | `IRInterpreter::run_function` | the IR interpreter loop itself |
+| ~12% | `ir_exec_control/data/call` + `std::variant` visit/move | per-instruction dispatch and EvalValue moves |
+| ~5% | `_Hash_bytes`, malloc/cfree, `__aarch64_ldadd8_relax` | hashing, allocation, atomics |
+
+The gated round agrees the target-side wins are mostly spent:
+`verdict intend-met=1 KEEP=2 ROLLBACK=4 speedup-x=1.09 (2237ms->2040ms)`
+— the intend passes on the SITE floor only (`collide-slack`, collide
+541→392 ms, -27%); the program floor (10%) is NOT met (`intend-met 0`
+line). `collide-slack` stays evaluated-not-landed (its win does not
+transfer to the live road, see below). Five old candidates are
+negative-skipped from `memory.json`; `nudge-flyers-noop` is now
+screen-pruned (its site is 32 ms, already noop-fast).
+
+Two probe results bound the remaining target-side headroom:
+
+- The `bench-kernel` self time (32-55%) is NOT the digest string:
+  a no-digest twin of the kernel (same steps, no string-append) measured
+  20730 ms/10 vs 18939 ms/10 with the digest. It is the untimed physics
+  callees (`road-height`, `finish-step`, `pull-pickups`, …) plus
+  allocation churn (region `alloc-pages=39618`).
+- `pset` still rebuilds the whole 16-field player list per write
+  (`list->vector` + `vector-set!` + `vector->list`), ~10 writes per step;
+  the `pset-share` candidate is the recorded lever, negative-skipped on
+  the old hot-node — it deserves a re-trial now that the hot node moved.
+
+The live server is a DIFFERENT path: `core/main.aura` (658 defines) is
+file-loaded, not set-coded, so it runs on the file-mode tree-walker
+(`ir-calls=0` in the server; the #5388 workspace pass caps at 512 and
+does not apply to plain file loads). Native profile of the server under
+6000 driven ticks (17.7 s CPU / 60 s):
+
+| share | symbol |
+|---|---|
+| 9.4% | `FlatAST::assemble_nodeview` |
+| 5.8% + 4.3% + 1.9% | `file_reclaim_mark_value` / `reclaim_tw_unreachable` (heap reclaim) |
+| ~10% | `Env::lookup` / `lookup_cell_index` / `rebuild_symid_index` + `_Hash_bytes` (string-keyed env lookups) |
+| ~9% | `try_eval_flat_hot` / `eval_flat_prepare_visit` / `let_bind_kind_cached` (flat eval dispatch) |
+
+Live-tick windows (6000 ticks, 50 ms cadence): median 8-10 ms FLAT
+across all 12 windows (growth median-x=0), p99 87-120 ms, 4-8 ticks over
+100 ms per 500 — the residual spikes are the chunk installs and dream
+seal already attributed below. Server RSS flat (~72 MB).
+
+The autopilot target re-mined on the same nightly: `hot-node=step`,
+`autopilot-kernel` self 77% (the physics it leans on), its own scans
+(`autopilot-press`, `next-hazard`) ~4% — same shape as before, and it
+too now IR-compiles (`ir-calls=27.3M`).
+
+**Where the next wins are, in order:**
+
+1. Runtime: the feedback-entry tax (~30% of the offline kernel). A
+   per-function feedback cache that survives call alternation (or
+   cooling the whole hot set once warm) removes the `enter_slow`
+   mutex/hash path from every call. `AURA_FEEDBACK_ENTRIES=1` does NOT
+   help (the TLS `known_off` bit is reset by every nested call).
+2. Runtime: ship the JIT in the nightly (this binary has no LLVM). The
+   local `build-jit2` build ran the same probe at the same wall time
+   (82.5 s vs 81.8 s) with `run_function` still 51% — the set-code
+   mutation workspace does not reach the JIT tiers today; that path
+   needs the runtime-side work, not a target edit.
+3. Runtime: the file-mode server path (TW dispatch + env string lookups
+   + reclaim ≈ 35% of server CPU). Getting `core/main.aura`'s hot
+   defines onto IR (per-define specialization for file loads, or
+   splitting the 658-define module) is the live-tick lever.
+4. Target: re-trial `pset-share` against the new hot node; the
+   per-write full-list rebuild is the largest remaining target-side
+   allocation source in `step`.
+
+Artifacts: `perf/out/report.txt` + `evidence.json` (the gated round),
+`perf/out/native-760246314/` (offline kernel perf.data),
+`perf/out/native-server2-760246314/` (live server perf.data + counters).
+Throwaway probes (`native-probe`, `digest-split`, `mine-autopilot-probe`)
+ran under the ignored `perf/out/` and were deleted after the measurement.
+
 | file | what it is |
 |---|---|
 | `workload.aura` | the seeded course, the kernel, the strategy and the worldline measurement; appended to the seed |
