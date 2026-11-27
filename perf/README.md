@@ -119,6 +119,19 @@ too now IR-compiles (`ir-calls=27.3M`).
    per-write full-list rebuild is NOT a win on the IR nightly: the native
    `list->vector`/`vector->list` primitives beat a Scheme-level walk.
 
+**Filed as issues (2026-11-28):**
+
+| repo | issue | what |
+|---|---|---|
+| aura | [#5488](https://github.com/cybrid-systems/aura/issues/5488) | cache_module IR 化三个前置缺陷（FnCheck named-let/值定义、disk-hit 安全门）|
+| aura | [#5489](https://github.com/cybrid-systems/aura/issues/5489) | IR 解释器每调用税：宽调用图模块 IR 化慢 1.75x（lever 3 数据）|
+| aura | [#5490](https://github.com/cybrid-systems/aura/issues/5490) | IR TopCellStore 不 bump cell-store generation（失效协议缺口）|
+| aura | [#5491](https://github.com/cybrid-systems/aura/issues/5491) | nightly 未链接 LLVM，file-mode/workspace 到不了 JIT（lever 2）|
+| aura-perf | [#34](https://github.com/cybrid-systems/aura-perf/issues/34) | install 用 sh 调 bash 脚本，dash 系统必挂 |
+| aura-perf | [#35](https://github.com/cybrid-systems/aura-perf/issues/35) | profile launch-mode 误判 workload 非零退出，丢已采数据 |
+| aura-perf | [#36](https://github.com/cybrid-systems/aura-perf/issues/36) | workload 根 self 主导时 hot-node 误归因，negative memory 键失真 |
+| aura-runner | [#63](https://github.com/cybrid-systems/aura-runner/issues/63) | player 表示横切杠杆（需先解决 trial 隔离）|
+
 ### pset-share re-trial on `760246314`: behavior-preserving, but 3x slower
 
 The standing memory negative-keys `pset-share` on `hot-node=collide` (the
