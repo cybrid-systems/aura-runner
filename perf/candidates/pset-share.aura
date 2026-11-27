@@ -1,3 +1,10 @@
+; RE-TRIAL on nightly 760246314 (2026-11-27): ROLLBACK, screen-pruned.
+; Behavior-preserving (golden checksum mismatches=0; 5776-check differential
+; 0 mismatches) but the pset site is 3x SLOWER (85->254ms; equal-workload
+; micro-bench 9.6s vs 28s per 1M writes). On the IR nightly the native
+; list->vector/vector->list primitives beat this Scheme walk + equal? +
+; front-list. NOT landed. See perf/README.md "pset-share re-trial".
+;
 ; pset allocated a scratch vector for EVERY field write: list->vector
 ; walked the spine, vector-set! wrote the slot, vector->list consed a
 ; fresh 16-cell list back. A step writes ~13 fields, and most writes

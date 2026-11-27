@@ -98,9 +98,52 @@ too now IR-compiles (`ir-calls=27.3M`).
    + reclaim ≈ 35% of server CPU). Getting `core/main.aura`'s hot
    defines onto IR (per-define specialization for file loads, or
    splitting the 658-define module) is the live-tick lever.
-4. Target: re-trial `pset-share` against the new hot node; the
-   per-write full-list rebuild is the largest remaining target-side
-   allocation source in `step`.
+4. Target: ~~re-trial `pset-share`~~ — **done, ROLLBACK (see below).** The
+   per-write full-list rebuild is NOT a win on the IR nightly: the native
+   `list->vector`/`vector->list` primitives beat a Scheme-level walk.
+
+### pset-share re-trial on `760246314`: behavior-preserving, but 3x slower
+
+The standing memory negative-keys `pset-share` on `hot-node=collide` (the
+old IR-cap-bound profile). A focused fresh-memory run
+(`perf/spec-pset-share.aura`, pset-share-first, separate out-dir) measured
+it on the current nightly against the null of `pset`:
+
+```
+candidate pset-share ROLLBACK reason=screen-pruned mismatches=0
+site pset base-ms=85 cand-ms=254 floor-pct=20
+candidate wrong-scale ROLLBACK reason=checksum mismatches=2   (negative control)
+```
+
+The checksum passes (`mismatches=0`) — the candidate returns the same
+values. But the pset site is **3x slower** (85 -> 254 ms), so the screen
+prunes it before the held-out. An equal-workload micro-benchmark confirms
+it is real, not a screen artifact (1M writes, same call sequence):
+
+| pset body | ms / 1M writes |
+|---|---|
+| current vector-rebuild (`list->vector` + `vector-set!` + `vector->list`) | 9592, 9699 |
+| candidate prefix-share (Scheme walk + `equal?` + front-list + rebuild) | 28451, 27802 |
+
+Why: on the IR nightly the vector rebuild is three native primitives over
+the 16-field list; the candidate replaces them with an interpreted Scheme
+loop that conses a `front` list, calls generic `equal?` per write, and
+conses the tail again. The same-value noop saves one rebuild but the walk
+to slot `i` plus `equal?` costs more than the native rebuild it skips.
+This is the same lesson as `collide-slack`: a gate-era win does not
+survive the runtime change. **Not landed.**
+
+Behavior-preservation proven independently: a differential of the two
+bodies over 19 live player states x 16 fields x 19 value kinds (5776
+checks) gave **0 mismatches**; the gate's golden checksum also passed.
+Player lists are functional by design (`lib/phys.aura` header: "every
+step returns new lists"; no `set-car!`/`set-cdr!` on players), so the
+prefix sharing would have been safe — it is simply slower.
+
+The remaining target-side allocation lever in `step` is therefore the
+player representation itself (a vector or a record instead of a 16-cell
+list), which is a cross-cutting change to `pxs`/`pset`/every accessor and
+the web twin — recorded, not attempted here.
 
 Artifacts: `perf/out/report.txt` + `evidence.json` (the gated round),
 `perf/out/native-760246314/` (offline kernel perf.data),
