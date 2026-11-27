@@ -84,11 +84,28 @@ too now IR-compiles (`ir-calls=27.3M`).
 
 **Where the next wins are, in order:**
 
-1. Runtime: the feedback-entry tax (~30% of the offline kernel). A
-   per-function feedback cache that survives call alternation (or
-   cooling the whole hot set once warm) removes the `enter_slow`
-   mutex/hash path from every call. `AURA_FEEDBACK_ENTRIES=1` does NOT
-   help (the TLS `known_off` bit is reset by every nested call).
+1. ~~Runtime: the feedback-entry tax (~30% of the offline kernel).~~
+   **Landed in aura `e7b3526d5`** ("perf(compiler): multi-function TLS
+   enter cache for type feedback"). The single-slot TLS enter cache is
+   now a 16-function per-thread cache (pointer-compare scan, epoch
+   invalidation on rebind/reset; `AURA_FEEDBACK_TLS_CACHE=0` restores
+   the single slot). Measured on this physics kernel, same binary
+   cache off/on:
+
+   | measure | cache off | cache on |
+   |---|---|---|
+   | kernel 10x2 courses (ms) | 21418 / 20060 | 14312 / 14093 |
+   | mine-tick `step` self (ms) | 2268 | 1568 |
+   | mine-tick `collide` self (ms) | 1208 | 662 |
+   | `enter_slow` inclusive CPU | 2.40% | 0.41% |
+   | `run_function` self CPU | 51.8% | 35.6% |
+
+   **1.46x on the whole kernel**, golden digests byte-identical
+   (on/off and vs `golden.txt`), `test_type_feedback_4568` pass,
+   `aura test` 35/35 + check-sim 42 lines on the new binary. The
+   nightly release still carries the single slot until the next
+   nightly roll; the numbers above are from a Release build of aura
+   main with the fix.
 2. Runtime: ship the JIT in the nightly (this binary has no LLVM). The
    local `build-jit2` build ran the same probe at the same wall time
    (82.5 s vs 81.8 s) with `run_function` still 51% — the set-code
