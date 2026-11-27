@@ -190,8 +190,8 @@ html, body {
   top: max(14px, env(safe-area-inset-top));
   right: max(148px, calc(env(safe-area-inset-right) + 140px));
   margin: 0;
-  font-size: 28px;
-  letter-spacing: 0.14em;
+  font-size: 22px;
+  letter-spacing: 0.1em;
   color: #ff5d6c;
   text-shadow: 0 1px 0 #3a2412, 0 0 2px rgba(36, 18, 8, 0.85);
   pointer-events: none;
@@ -511,6 +511,33 @@ html, body {
   overflow: auto;
 }
 #notes[hidden] { display: none; }
+#grade-form {
+  margin: 8px 0;
+  white-space: pre-wrap;
+  font: 12px/1.35 ui-monospace, monospace;
+}
+#grade-edit {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 72px;
+  border-radius: 12px;
+  border: 0;
+  padding: 8px;
+  font: 12px/1.35 ui-monospace, monospace;
+  background: #fff;
+  color: var(--ink);
+}
+#grade-apply {
+  margin-top: 8px;
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 12px;
+  background: #e07a3d;
+  color: #fff6e8;
+  font: 800 13px/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+#grade-note { margin: 6px 0 0; font-size: 12px; color: #8a5a32; }
 #note-list {
   margin: 8px 0 0;
   padding: 0;
@@ -811,13 +838,13 @@ html, body {
 #hud {
   position: fixed;
   z-index: 4;
-  top: max(10px, env(safe-area-inset-top));
-  left: max(16px, env(safe-area-inset-left));
+  top: max(8px, env(safe-area-inset-top));
+  left: max(14px, env(safe-area-inset-left));
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 6px;
-  width: min(280px, 46vw);
+  gap: 3px;
+  width: min(220px, 38vw);
   max-height: calc(100vh - 24px);
   pointer-events: none;
 }
@@ -846,11 +873,17 @@ html, body {
   gap: 10px;
   max-width: 100%;
 }
+#hud #kicker { font-size: 11px; letter-spacing: 0.12em; }
 #hud #score {
-  font-size: clamp(44px, 6.2vw, 76px);
+  font-size: clamp(32px, 4.4vw, 52px);
   line-height: 0.88;
 }
-#hud #mult { align-self: flex-start; margin-top: 6px; }
+#hud #grade { font-size: 16px; }
+#hud #pace,
+#hud #record,
+#hud #challenge,
+#hud #ward { font-size: 12px; }
+#hud #mult { align-self: flex-start; margin-top: 4px; font-size: 14px; padding: 1px 8px; }
 #track-row {
   display: flex;
   align-items: center;
@@ -878,9 +911,9 @@ html, body {
 }
 #hud #combo.hot { font-size: 28px; }
 @media (max-width: 820px) {
-  #hud { width: min(210px, 58vw); gap: 4px; }
-  #hud #score { font-size: 40px; }
-  #hud #grade { font-size: 16px; }
+  #hud { width: min(180px, 52vw); gap: 2px; }
+  #hud #score { font-size: 30px; }
+  #hud #grade { font-size: 14px; }
   #hud #pace,
   #hud #record,
   #hud #challenge,

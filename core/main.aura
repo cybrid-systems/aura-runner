@@ -72,6 +72,8 @@
   (load-coins!)
   (boot-note! 92 "花园马上就好"))
 (load-fast!)
+(define grade-now "(grade city (contrast-pair player track (saturate 0.94 (base city))))")
+
 (define (load-slow-one!)
   (cond
     (slow-mods #t)
@@ -88,6 +90,7 @@
     (else
      (begin
        (require "lib/voice")
+       (require "lib/grade")
        (set! edsl-pool (edsl-boot))
        (set! slow-mods #t)
        (set! slow-step 6)))))
@@ -1158,8 +1161,9 @@
       (set! gate-followups
             (append gate-followups
                     (if (or biome-pin (pair? wish-hold))
-                      jobs
-                      (append jobs (list (lambda () (archive-visit!))))))))
+                      (append jobs (list (lambda () (grade-step!))))
+                      (append jobs (list (lambda () (archive-visit!))
+                                         (lambda () (grade-step!))))))))
     (queue-chase! played bumps (chase-sum chase-recent) speed-now race)
     (set! tune-due #t)))
 
@@ -1735,6 +1739,7 @@
         "props" props "sun-hide" sun-hide "shown" shown
         "level" level-n "goal" level-x1 "level0" level-x0
         "mult" run-mult "biome" biome-now "mood" mood-now "spec" edsl-spec
+        "grade" grade-now
         "skybody" sky-body-now "sunuv" (list sun-x-now sun-y-now)
         "propshift" sky-shift
         "banner-id" banner-id "banner-kind" banner-kind
@@ -3905,14 +3910,16 @@
             (let ((text (if (string? raw) raw "")))
               (if (banned? text)
                 (refine-miss theme hint fallback held enter "banned")
-                (let ((form (extract-balanced text "(biome"))
+                (begin
+                  (consider-grade! text)
+                  (let ((form (extract-balanced text "(biome"))
                       (asked (if (string=? theme "free") hint theme))
                       (install (or (string=? theme "free") enter)))
                   (if (and (string? form) (edsl-serves? asked form))
                     (if (consider-edsl! form (say-line text) install install)
                       (begin (if install (set! edsl-held #f) #f) (preview-drop!))
                       (refine-miss theme hint fallback held enter "shape"))
-                    (refine-miss theme hint fallback held enter "shape")))))))
+                    (refine-miss theme hint fallback held enter "shape"))))))))
           (refine-miss theme hint fallback held enter "llm"))
         (send c (rules-msg))
         (set! rules-dirty #f)
@@ -5923,6 +5930,50 @@
                               (hash "role" "user" "content" user))))))
       (parse-chat (post-chat (chat-url base) body key)))))
 
+(define (grade-step!)
+  (load-slow!)
+  (if llm-on
+    #f
+    (let ((next (grade-mutate grade-now (+ seed level-n))))
+      (if (and (string? next) (not (string=? next grade-now))
+               (string=? (hash-ref (grade-gate next) "verdict" "") "KEEP"))
+        (begin (set! grade-now next) (set! rules-dirty #t) #t)
+        #f))))
+
+; An LLM reply may carry one grade form. The gate keeps a legal
+; transform nest and drops anything that is not that grammar, including
+; a raw colour plate. Absence of a form is not a failure.
+(define (consider-grade! text)
+  (load-slow!)
+  (let ((form (extract-balanced text "(grade")))
+    (if (not (string? form))
+      #f
+      (let ((gate (grade-gate form)))
+        (if (string=? (hash-ref gate "verdict" "") "KEEP")
+          (begin
+            (set! grade-now form)
+            (set! rules-dirty #t)
+            (note! "KEEP" "fair" "grade" "配色留下了" "world")
+            #t)
+          (begin
+            (note! "ROLLBACK" (hash-ref gate "why" "shape") "grade" "配色没有换" "world")
+            #f))))))
+
+(define (on-grade c msg)
+  (load-slow!)
+  (let ((text (hash-ref msg "text" "")))
+    (if (or (not (string? text)) (= (string-length text) 0) (> (string-length text) 700))
+      (note! "ROLLBACK" "shape" "grade" "配色没有换" "world")
+      (let ((gate (grade-gate text)))
+        (if (string=? (hash-ref gate "verdict" "") "KEEP")
+          (begin
+            (set! grade-now text)
+            (set! rules-dirty #t)
+            (note! "KEEP" "fair" "grade" "配色留下了" "world")
+            (send c (rules-msg))
+            (set! rules-dirty #f))
+          (note! "ROLLBACK" (hash-ref gate "why" "shape") "grade" "配色没有换" "world"))))))
+
 (define (dispatch c msg)
   (set! conn c)
   (let ((op (hash-ref msg "op" "")))
@@ -5960,6 +6011,7 @@
       ((string=? op "primer") (on-primer c msg))
       ((string=? op "propose") (on-propose c msg))
       ((string=? op "wish") (on-wish c msg))
+      ((string=? op "grade") (on-grade c msg))
       ((string=? op "thing-bad") (on-thing-bad c msg))
       ((string=? op "provider") (on-provider c msg))
       ((string=? op "audit") (on-audit c msg))

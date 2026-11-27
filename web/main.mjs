@@ -3,6 +3,7 @@ import { awardPickup, challengeFor, challengeMet, dropGrade, gradeLabel, lootWor
 import { clampMult } from "./runstate.mjs";
 import { COMBO_HEART, HEART_IFRAME, HEARTS_MAX, heartsBlank, heartsHit, heartsRecover, heartsTick } from "./hearts.mjs";
 import { raceGate, raceRead } from "./race.mjs";
+import { GRADE_CITY, activeGrade, forceGrade, setActiveGrade } from "./grade.mjs";
 import { acceptSpec, createRenderer, takeVenue } from "./render.mjs";
 import { createFallback } from "./fallback.mjs";
 import { readQualityMode, writeQualityMode } from "./quality.mjs";
@@ -358,6 +359,7 @@ function applyRules(msg) {
   rules.magnet = num(msg.magnet, rules.magnet || 0);
   if (typeof msg.hue === "number") hue = msg.hue;
   applyScene(msg);
+  if (typeof msg.grade === "string" && msg.grade.startsWith("(grade")) setActiveGrade(msg.grade);
   applyLook(msg);
   applyPals(msg);
   applyHero(msg);
@@ -387,6 +389,27 @@ function requestRewind(node) {
 
 function paintNotes() {
   paintWorld(noteList, worldline, requestRewind);
+  const shown = activeGrade();
+  const pre = document.getElementById("grade-form");
+  const edit = document.getElementById("grade-edit");
+  if (pre) pre.textContent = shown;
+  if (edit && document.activeElement !== edit) edit.value = shown;
+}
+
+function applyGradeEdit() {
+  const edit = document.getElementById("grade-edit");
+  const note = document.getElementById("grade-note");
+  const text = edit ? edit.value.trim() : "";
+  const result = setActiveGrade(text);
+  if (note) {
+    note.textContent = result.ok
+      ? "KEEP  sat " + result.report.sat.toFixed(3)
+      : "ROLLBACK  " + (result.why || "shape");
+  }
+  paintNotes();
+  if (result.ok && ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ op: "grade", text: result.form }));
+  }
 }
 
 function trialLabel(kind) {
@@ -2309,6 +2332,11 @@ function requestSongSkip(text) {
   if (!mentionsSong(text)) return;
   if (audio.skip()) songSkips += 1;
 }
+window.__lumenSetGrade = (text) => forceGrade(text);
+const gradeApply = document.getElementById("grade-apply");
+if (gradeApply) gradeApply.addEventListener("click", applyGradeEdit);
+paintNotes();
+
 installWish({
   send(payload) {
     if (!ws || ws.readyState !== 1) return false;

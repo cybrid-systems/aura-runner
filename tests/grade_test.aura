@@ -1,0 +1,21 @@
+; Colour grade: the default street is kept, a dull one rolls back,
+; and a broken form does not become the picture.
+(require "lib/grade")
+
+(define (line name gate)
+  (display name)
+  (display " ")
+  (display (hash-ref gate "verdict" "?"))
+  (display " ")
+  (display (hash-ref gate "why" "?"))
+  (newline))
+
+(line "default" (grade-gate grade-default))
+(line "dull" (grade-gate "(grade city (saturate 0.2 (base city)))"))
+(line "broken" (grade-gate "(grade city (nope (base city)))"))
+(line "raw" (grade-gate "(grade nope (base city))"))
+
+(define stepped (grade-mutate grade-default 4))
+(display "mutate ")
+(display (if (and (string? stepped) (string=? (hash-ref (grade-gate stepped) "verdict" "") "KEEP")) 1 0))
+(newline)

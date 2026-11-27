@@ -1,0 +1,299 @@
+; Composable colour grade. Nested transforms on a named plate.
+; The picture reads the evaluated swatches. This file does not draw.
+;
+; (grade city
+;   (contrast-pair player track
+;     (saturate 0.70
+;       (base city))))
+;
+; hue-shift, lift, gamma and complement nest the same way.
+; A candidate is kept only after evo:trial (grade-gate).
+(require "std/string" all:)
+(require "std/evo-core" all:)
+(require "lib/sexp")
+
+(define grade-venues (list "city" "garden" "space" "coast"))
+(define grade-default
+  "(grade city (contrast-pair player track (saturate 0.94 (base city))))")
+
+(define (grade-city)
+  (hash "track" (list 0.16 0.46 0.74)
+        "shoulderL" (list 0.30 0.74 0.42)
+        "shoulderR" (list 0.22 0.64 0.70)
+        "grass" (list 0.24 0.70 0.38)
+        "wall" (list 0.20 0.46 0.86)
+        "vary" (list 0.92 0.36 0.30)
+        "roof" (list 0.16 0.18 0.42)
+        "trim" (list 1.0 0.78 0.24)
+        "sky0" (list 0.32 0.60 0.90)
+        "sky1" (list 0.94 0.60 0.32)
+        "sky" (list 0.42 0.64 0.94)
+        "fog" (list 0.46 0.66 0.92)
+        "hill" (list 0.32 0.40 0.86)
+        "hill2" (list 0.78 0.36 0.64)
+        "soil" (list 0.78 0.42 0.18)
+        "hedge" (list 0.18 0.55 0.78)
+        "leaf" (list 0.22 0.68 0.36)
+        "leaf2" (list 0.48 0.82 0.32)
+        "trunk" (list 0.62 0.40 0.22)
+        "water" (list 0.16 0.52 0.84)
+        "flower" (list 1.0 0.72 0.22)
+        "flower2" (list 0.28 0.78 0.95)
+        "sun" (list 1.0 0.78 0.36)
+        "player" (list 0.95 0.48 0.42)
+        "playerDeep" (list 0.78 0.32 0.38)
+        "obstacle" (list 0.92 0.32 0.28)))
+
+(define (grade-plate name)
+  (if (string=? name "city") (grade-city) #f))
+
+(define grade-roles
+  (list "track" "shoulderL" "shoulderR" "grass" "wall" "vary" "roof" "trim"
+        "sky0" "sky1" "sky" "fog" "hill" "hill2" "soil" "hedge" "leaf" "leaf2"
+        "trunk" "water" "flower" "flower2" "sun" "player" "playerDeep" "obstacle"))
+
+(define (grade-member? xs name)
+  (let loop ((ys xs))
+    (if (or (not (pair? ys)) (null? ys))
+      #f
+      (if (and (string? (car ys)) (string=? (car ys) name))
+        #t
+        (loop (cdr ys))))))
+
+(define (grade-clamp n)
+  (max 0.0 (min 1.0 n)))
+
+(define (grade-luma c)
+  (+ (* 0.2126 (car c)) (* 0.7152 (car (cdr c))) (* 0.0722 (car (cdr (cdr c))))))
+
+(define (grade-map plate fn)
+  (let loop ((ks grade-roles) (acc (hash)))
+    (if (or (not (pair? ks)) (null? ks))
+      acc
+      (let ((k (car ks)))
+        (loop (cdr ks) (hash-set acc k (fn (hash-ref plate k (list 0 0 0)) k)))))))
+
+(define (grade-sat-color c k)
+  (let ((y (grade-luma c)))
+    (list (grade-clamp (+ y (* (- (car c) y) k)))
+          (grade-clamp (+ y (* (- (car (cdr c)) y) k)))
+          (grade-clamp (+ y (* (- (car (cdr (cdr c))) y) k))))))
+
+(define (grade-ch t p q)
+  (let ((x (if (< t 0) (+ t 1.0) (if (> t 1) (- t 1.0) t))))
+    (cond
+      ((< x (/ 1.0 6.0)) (+ p (* (- q p) 6.0 x)))
+      ((< x 0.5) q)
+      ((< x (/ 2.0 3.0)) (+ p (* (- q p) (- (/ 2.0 3.0) x) 6.0)))
+      (else p))))
+
+(define (grade-hue-color c turns)
+  (let* ((r (car c)) (g (car (cdr c))) (b (car (cdr (cdr c))))
+         (mx (max r (max g b)))
+         (mn (min r (min g b)))
+         (l (/ (+ mx mn) 2.0)))
+    (if (= mx mn)
+      c
+      (let* ((d (- mx mn))
+             (s (if (> l 0.5) (/ d (- 2.0 mx mn)) (/ d (+ mx mn))))
+             (h0 (cond
+                   ((= mx r) (+ (/ (- g b) d) (if (< g b) 6.0 0.0)))
+                   ((= mx g) (+ (/ (- b r) d) 2.0))
+                   (else (+ (/ (- r g) d) 4.0))))
+             (h (+ (/ h0 6.0) turns))
+             (hh (if (< h 0) (+ h 1.0) (if (> h 1) (- h 1.0) h)))
+             (q (if (< l 0.5) (* l (+ 1.0 s)) (- (+ l s) (* l s))))
+             (p (- (* 2.0 l) q)))
+        (list (grade-clamp (grade-ch (+ hh (/ 1.0 3.0)) p q))
+              (grade-clamp (grade-ch hh p q))
+              (grade-clamp (grade-ch (- hh (/ 1.0 3.0)) p q)))))))
+
+(define (grade-lin u)
+  (if (<= u 0.04045) (/ u 12.92) (expt (/ (+ u 0.055) 1.055) 2.4)))
+
+(define (grade-rel c)
+  (+ (* 0.2126 (grade-lin (car c)))
+     (* 0.7152 (grade-lin (car (cdr c))))
+     (* 0.0722 (grade-lin (car (cdr (cdr c)))))))
+
+(define (grade-ratio a b)
+  (let ((x (grade-rel a)) (y (grade-rel b)))
+    (/ (+ (max x y) 0.05) (+ (min x y) 0.05))))
+
+(define (grade-eval-expr expr)
+  (if (or (not (pair? expr)) (null? expr) (not (string? (car expr))))
+    #f
+    (let ((op (car expr)))
+      (cond
+        ((and (string=? op "base") (= (length expr) 2) (string? (car (cdr expr))))
+         (grade-plate (car (cdr expr))))
+        ((and (string=? op "saturate") (= (length expr) 3) (number? (car (cdr expr))))
+         (let ((inner (grade-eval-expr (car (cdr (cdr expr))))))
+           (if inner
+             (grade-map inner (lambda (c k) (grade-sat-color c (max 0.0 (min 1.8 (car (cdr expr)))))))
+             #f)))
+        ((and (string=? op "hue-shift") (= (length expr) 3) (number? (car (cdr expr))))
+         (let ((inner (grade-eval-expr (car (cdr (cdr expr))))))
+           (if inner
+             (grade-map inner (lambda (c k) (grade-hue-color c (max -0.5 (min 0.5 (car (cdr expr)))))))
+             #f)))
+        ((and (string=? op "contrast-pair") (= (length expr) 4))
+         (let ((inner (grade-eval-expr (car (cdr (cdr (cdr expr)))))))
+           (if inner (grade-separate inner (car (cdr expr)) (car (cdr (cdr expr)))) #f)))
+        ((and (string=? op "complement") (= (length expr) 2))
+         (let ((inner (grade-eval-expr (car (cdr expr)))))
+           (if inner (grade-map inner (lambda (c k) (grade-hue-color c 0.5))) #f)))
+        ((and (string=? op "lift") (= (length expr) 5))
+         (let ((inner (grade-eval-expr (list-ref expr 4))))
+           (if (and inner (number? (list-ref expr 1)) (number? (list-ref expr 2)) (number? (list-ref expr 3)))
+             (let ((r (max -0.2 (min 0.2 (list-ref expr 1))))
+                   (g (max -0.2 (min 0.2 (list-ref expr 2))))
+                   (b (max -0.2 (min 0.2 (list-ref expr 3)))))
+               (grade-map inner (lambda (c k)
+                                  (list (grade-clamp (+ (car c) r))
+                                        (grade-clamp (+ (car (cdr c)) g))
+                                        (grade-clamp (+ (car (cdr (cdr c))) b))))))
+             #f)))
+        ((and (string=? op "gamma") (= (length expr) 3) (number? (list-ref expr 1)))
+         (let ((inner (grade-eval-expr (list-ref expr 2))))
+           (if inner
+             (let ((p (let ((g (list-ref expr 1))) (if (and (> g 0.2) (< g 3.0)) g 1.0))))
+               (grade-map inner (lambda (c k)
+                                  (list (grade-clamp (expt (max 0.0 (car c)) (/ 1.0 p)))
+                                        (grade-clamp (expt (max 0.0 (car (cdr c))) (/ 1.0 p)))
+                                        (grade-clamp (expt (max 0.0 (car (cdr (cdr c)))) (/ 1.0 p)))))))
+             #f)))
+        (else #f)))))
+
+(define (grade-warm-body c)
+  (list (grade-clamp (+ (* (car c) 0.82) 0.18))
+        (grade-clamp (+ (* (car (cdr c)) 0.82) (* 0.82 0.18)))
+        (grade-clamp (+ (* (car (cdr (cdr c))) 0.82) (* 0.72 0.18)))))
+
+; Same street the picture paints: a warmer body, and a bluer road darkened
+; in ten small steps so the lit runner clears the lit asphalt.
+(define (grade-separate plate subject ground)
+  (if (or (not (hash? plate))
+          (not (grade-member? grade-roles subject))
+          (not (grade-member? grade-roles ground)))
+    #f
+    (let ((body (grade-warm-body (hash-ref plate subject))))
+      (let loop ((step 0) (road (hash-ref plate ground)))
+        (if (>= step 10)
+          (hash-set (hash-set plate ground road) subject body)
+          (loop (+ step 1)
+                (list (* (car road) 0.9)
+                      (* (car (cdr road)) 0.9)
+                      (* (car (cdr (cdr road))) 0.9))))))))
+
+(define grade-weights
+  (hash "sky0" 0.20 "sky" 0.08 "sky1" 0.06 "track" 0.18
+        "shoulderL" 0.10 "shoulderR" 0.10 "grass" 0.06 "wall" 0.10
+        "hill" 0.06 "fog" 0.06))
+
+(define (grade-hsv c)
+  (let ((mx (max (car c) (max (car (cdr c)) (car (cdr (cdr c))))))
+        (mn (min (car c) (min (car (cdr c)) (car (cdr (cdr c)))))))
+    (if (> mx 0.0001) (/ (- mx mn) mx) 0.0)))
+
+(define (grade-render-swatch c fog)
+  (let ((haze-r (+ (* (car fog) 0.7) 0.28))
+        (haze-g (+ (* (car (cdr fog)) 0.7) 0.28))
+        (haze-b (+ (* (car (cdr (cdr fog))) 0.7) 0.28)))
+    (list (grade-clamp (+ (* (car c) 0.72) (* haze-r 0.28)))
+          (grade-clamp (+ (* (car (cdr c)) 0.72) (* haze-g 0.28)))
+          (grade-clamp (+ (* (car (cdr (cdr c))) 0.72) (* haze-b 0.28))))))
+
+(define (grade-sat plate)
+  (let loop ((ks (list "sky0" "sky" "sky1" "track" "shoulderL" "shoulderR" "grass" "wall" "hill" "fog"))
+             (acc 0.0) (w 0.0))
+    (if (or (not (pair? ks)) (null? ks))
+      (if (> w 0.0) (/ acc w) 0.0)
+      (let ((k (car ks)))
+        (loop (cdr ks)
+              (+ acc (* (grade-hsv (grade-render-swatch (hash-ref plate k (list 0 0 0))
+                                                       (hash-ref plate "fog" (list 0.7 0.78 0.86))))
+                        (hash-ref grade-weights k 0.0)))
+              (+ w (hash-ref grade-weights k 0.0)))))))
+
+(define (grade-blue? c)
+  (or (>= (car c) 0.99) (>= (car (cdr c)) 0.99) (>= (car (cdr (cdr c))) 0.99)))
+
+(define (grade-blue plate)
+  (let loop ((ks (list "sky0" "sky1" "sky" "track" "shoulderL" "shoulderR" "fog" "grass"))
+             (n 0) (hit 0))
+    (if (or (not (pair? ks)) (null? ks))
+      (if (> n 0) (/ hit n) 0.0)
+      (loop (cdr ks) (+ n 1) (+ hit (if (grade-blue? (hash-ref plate (car ks) (list 0 0 0))) 1 0))))))
+
+(define (grade-eval text)
+  (let ((form (if (string? text) (sexp-parse text) #f)))
+    (if (or (not (pair? form)) (not (string? (car form))) (not (string=? (car form) "grade"))
+            (not (= (length form) 3)) (not (string? (car (cdr form))))
+            (not (grade-member? grade-venues (car (cdr form)))))
+      #f
+      (let ((colors (grade-eval-expr (car (cdr (cdr form))))))
+        (if colors
+          (hash "venue" (car (cdr form)) "colors" colors "sat" (grade-sat colors)
+                "player" (grade-ratio (hash-ref colors "player") (hash-ref colors "track"))
+                "blue" (grade-blue colors))
+          #f)))))
+
+(define (grade-ok? found)
+  (and (hash? found)
+       (>= (hash-ref found "sat" 0.0) 0.45)
+       (<= (hash-ref found "sat" 1.0) 0.55)
+       (>= (hash-ref found "player" 0.0) 2.0)
+       (<= (hash-ref found "blue" 1.0) 0.0)))
+
+(define grade-form-live "")
+
+(define (grade-gate text)
+  (let* ((found (grade-eval text))
+         (ok (grade-ok? found))
+         (cand (evo:candidate (if (string? text) text "")
+                              (hash "id" "grade" "target" "grade-form")))
+         (trial (evo:trial cand
+                           (hash "timeout-ms" 4000
+                                 "apply" (lambda (c)
+                                           (set! grade-form-live (if (string? text) text ""))
+                                           #t)
+                                 "evaluate"
+                                 (lambda (c)
+                                   (hash "status" "ok"
+                                         "objectives" (hash "fair" (if ok 1.0 0.0))
+                                         "constraints" (hash "sat" (if ok 0.0 1.0)
+                                                              "contrast" (if ok 0.0 1.0)
+                                                              "blue" (if ok 0.0 1.0))
+                                         "behavior" (hash "band" 0.0)))))))
+    (let ((keep (and ok trial (evo:trial-ok? trial) (evo:feasible? trial))))
+      (hash "verdict" (if keep "KEEP" "ROLLBACK")
+            "why" (if keep "fair" (if found "contract" "shape"))
+            "form" (if (string? text) text "")))))
+
+; Nearby step. The knobs stay inside a few degrees and a short saturate
+; range so a kept form is still the same street.
+(define (grade-knob venue hue sat)
+  (string-append "(grade " venue
+                 " (contrast-pair player track (hue-shift " (number->string hue)
+                 " (saturate " (number->string sat)
+                 " (base " venue ")))))"))
+
+(define (grade-mutate text seed)
+  (require "lib/evolve")
+  (let ((venue "city")
+        (n (if (number? seed) (inexact->exact (floor (abs seed))) 1)))
+    (let ((best (evolve-pso n 2 3
+                            (lambda (ind)
+                              (if (and (pair? ind) (pair? (cdr ind)))
+                                (let* ((hue (* (car ind) 0.012))
+                                       (sat (+ 0.76 (* (+ (car (cdr ind)) 1.0) 0.04)))
+                                       (form (grade-knob venue hue sat))
+                                       (found (grade-eval form)))
+                                  (if (grade-ok? found) 1.0 0.0))
+                                0.0)))))
+      (if (and (pair? best) (pair? (cdr best)))
+        (let ((form (grade-knob venue (* (car best) 0.012)
+                                 (+ 0.76 (* (+ (car (cdr best)) 1.0) 0.04)))))
+          (if (grade-ok? (grade-eval form)) form grade-default))
+        grade-default))))

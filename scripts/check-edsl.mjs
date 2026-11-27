@@ -1,5 +1,6 @@
 // Biome EDSL on the view side. A mix spec keeps obstacle colours, clamps
 // the prop budget, and does not invent a venue the gate would refuse.
+import { GRADE_CITY, evalGrade } from "../web/grade.mjs";
 import { acceptSpec, dressPalette, palette, specInstances, surfaceBand, takeVenue, worldPlan } from "../web/render.mjs";
 
 function sameObstacle(a, b) {
@@ -11,7 +12,9 @@ function sameObstacle(a, b) {
 
 const garden = dressPalette(palette(0, null), "garden", "day");
 const city = dressPalette(palette(0, null), "city", "day");
-if (city.path.join(",") !== "0.22,0.24,0.28") throw new Error("city road moved " + city.path);
+const graded = evalGrade(GRADE_CITY);
+if (!graded.ok) throw new Error("city grade failed " + graded.why);
+if (city.path.join(",") !== graded.colors.track.join(",")) throw new Error("city road moved " + city.path);
 if (garden.custom) throw new Error("garden daylight became a mix");
 
 const lava = acceptSpec({

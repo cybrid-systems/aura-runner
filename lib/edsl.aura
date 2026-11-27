@@ -39,7 +39,7 @@
 (define edsl-garden
   "(biome garden (label Garden) (sky 0.55 0.72 0.95 0.86 0.91 0.98) (fog 0.78 0.86 0.94 0.22) (body sun) (road 0.93 0.78 0.52) (curb 0.45 0.32 0.22) (ground 0.42 0.68 0.38) (surface grass) (light 0.82) (mood 0.55) (particles fireflies 0.18) (props (tree 0.30 1.00) (bush 0.18 0.95) (fern 0.14 0.85) (mushroom 0.08 0.75)) (recipe garden))")
 (define edsl-city
-  "(biome city (label City) (sky 0.42 0.52 0.82 0.98 0.58 0.34) (fog 0.96 0.72 0.52 0.22) (body sun) (road 0.22 0.24 0.28) (curb 0.20 0.18 0.16) (ground 0.52 0.54 0.58) (surface stone) (light 0.78) (mood 0.62) (particles sparkles 0.22) (props (tower 0.28 1.10)) (recipe city))")
+  "(biome city (label City) (sky 0.32 0.60 0.90 0.94 0.60 0.32) (fog 0.46 0.66 0.92 0.16) (body sun) (road 0.16 0.46 0.74) (curb 0.78 0.42 0.18) (ground 0.30 0.74 0.42) (surface stone) (light 0.90) (mood 0.62) (particles sparkles 0.22) (props (tower 0.28 1.10)) (recipe city))")
 (define edsl-space
   "(biome space (label Space) (sky 0.05 0.06 0.16 0.22 0.12 0.36) (fog 0.08 0.07 0.16 0.12) (body stars) (road 0.12 0.16 0.28) (curb 0.16 0.14 0.18) (ground 0.07 0.08 0.14) (surface dust) (light 0.84) (mood 0.30) (particles stardust 0.28) (props (crystal 0.22 1.00) (ring 0.18 0.95)) (recipe space))")
 (define edsl-coast

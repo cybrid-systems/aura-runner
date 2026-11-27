@@ -1,0 +1,5 @@
+default KEEP fair
+dull ROLLBACK contract
+broken ROLLBACK shape
+raw ROLLBACK shape
+mutate 1
