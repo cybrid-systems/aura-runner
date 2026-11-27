@@ -511,6 +511,33 @@ html, body {
   overflow: auto;
 }
 #notes[hidden] { display: none; }
+#grade-form {
+  margin: 8px 0;
+  white-space: pre-wrap;
+  font: 12px/1.35 ui-monospace, monospace;
+}
+#grade-edit {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 72px;
+  border-radius: 12px;
+  border: 0;
+  padding: 8px;
+  font: 12px/1.35 ui-monospace, monospace;
+  background: #fff;
+  color: var(--ink);
+}
+#grade-apply {
+  margin-top: 8px;
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 12px;
+  background: #e07a3d;
+  color: #fff6e8;
+  font: 800 13px/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+#grade-note { margin: 6px 0 0; font-size: 12px; color: #8a5a32; }
 #note-list {
   margin: 8px 0 0;
   padding: 0;

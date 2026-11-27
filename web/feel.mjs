@@ -6,7 +6,7 @@ const GRADE = {
   // Higher tiers mix this in. Saturation stays above 1 so the grade
   // does not grey the picture the way a filmic shoulder can.
   garden: { sat: 1.18, contrast: 1.1, lift: [0.004, 0.002, 0.0], gain: [1.04, 1.03, 0.98] },
-  city: { sat: 1.32, contrast: 1.04, lift: [0.0, 0.0, 0.0], gain: [1.0, 1.01, 0.97] },
+  city: { sat: 1.06, contrast: 1.04, lift: [0.0, 0.0, 0.0], gain: [1.0, 1.0, 0.96] },
   // Warm dust stays warm, but the gain does not pile more yellow on the sky.
   beijing: { sat: 1.06, contrast: 1.14, lift: [0.0, 0.0, 0.008], gain: [0.94, 0.98, 1.04] },
   space: { sat: 1.24, contrast: 1.16, lift: [0.004, 0.008, 0.02], gain: [0.92, 0.98, 1.12] },
