@@ -4166,18 +4166,21 @@
           (let ((b (env-str "LLM_BASE_URL"))) (if (string=? b "") "https://api.deepseek.com/v1" b))
           (let ((m (env-str "LLM_MODEL"))) (if (string=? m "") "deepseek-flash" m)))))
 
+; Thinking stays off. DeepSeek Flash otherwise spends the token budget
+; on a reasoning trace, returns a few words, and the form never arrives.
+(define (chat-body model max-tokens temp sys user)
+  (let ((body (hash "model" model
+                    "max_tokens" max-tokens
+                    "reasoning_effort" "minimal"
+                    "thinking" (hash "type" "disabled")
+                    "messages"
+                    (list (hash "role" "system" "content" sys)
+                          (hash "role" "user" "content" user)))))
+    (if (number? temp) (hash-set! body "temperature" temp) #f)
+    body))
+
 (define (thing-chat-http sys user temp timeout-s ep)
-  (let ((body (json-encode
-                (hash "model" (list-ref ep 2)
-                      ; DeepSeek V4.1 Flash spends reasoning tokens out of
-                      ; this budget. 900 truncated the (thing ...) form on
-                      ; the larger wishes; 2400 leaves room for the form.
-                      "max_tokens" 2400
-                      "temperature" temp
-                      "reasoning_effort" "minimal"
-                      "messages"
-                      (list (hash "role" "system" "content" sys)
-                            (hash "role" "user" "content" user))))))
+  (let ((body (json-encode (chat-body (list-ref ep 2) 2400 temp sys user))))
     (let ((raw (try (http-post (chat-url (list-ref ep 1)) body (list-ref ep 0) timeout-s)
                     (catch (e) ""))))
       (let ((ans (try (parse-chat (if (string? raw) raw "")) (catch (e) #f))))
@@ -4186,29 +4189,43 @@
 ; The socket POST is synchronous in the script runtime, so a wish's
 ; first TLS handshake froze the tick. The bridge runs the POST in Node
 ; and replies on the same line socket; this worker only yields.
-(define (thing-chat-proxy sys user temp timeout-s ep)
+(define (proxy-wait id timeout-s)
+  (let loop ((deadline (+ (now-ms) (* timeout-s 1000.0))))
+    (let ((r (hash-ref llm-replies id #f)))
+      (cond
+        (r (hash-set! llm-replies id #f)
+           (hash "ok" (eq? (hash-ref r "ok" #f) #t)
+                 "error" (hash-ref r "error" "")
+                 "content" (hash-ref r "content" "")))
+        ((> (now-ms) deadline)
+         (hash "ok" #f "error" "timeout" "content" ""))
+        (else
+         (try (fiber:yield) (catch (e) #f))
+         (loop deadline))))))
+
+(define (proxy-ask model max-tokens temp timeout-s sys user)
   (let ((id (number->string (+ llm-ask-id 1))))
     (set! llm-ask-id (+ llm-ask-id 1))
-    (send conn (hash "op" "llm-ask" "id" id "model" (list-ref ep 2)
-                     "max_tokens" 2400
-                     "temperature" temp
+    (let ((msg (hash "op" "llm-ask" "id" id
+                     "model" model
+                     "max_tokens" max-tokens
                      "reasoning_effort" "minimal"
+                     "thinking" (hash "type" "disabled")
                      "timeout" timeout-s
                      "messages"
                      (list (hash "role" "system" "content" sys)
-                           (hash "role" "user" "content" user))))
-    (let loop ((deadline (+ (now-ms) (* timeout-s 1000.0))))
-      (let ((r (hash-ref llm-replies id #f)))
-        (cond
-          (r (hash-set! llm-replies id #f)
-             (hash "ok" (eq? (hash-ref r "ok" #f) #t)
-                   "error" (hash-ref r "error" "")
-                   "content" (hash-ref r "content" "")))
-          ((> (now-ms) deadline)
-           (hash "ok" #f "error" "timeout" "content" ""))
-          (else
-           (try (fiber:yield) (catch (e) #f))
-           (loop deadline)))))))
+                           (hash "role" "user" "content" user)))))
+      (if (number? temp) (hash-set! msg "temperature" temp) #f)
+      (send conn msg))
+    (proxy-wait id timeout-s)))
+
+(define (thing-chat-proxy sys user temp timeout-s ep)
+  (proxy-ask (list-ref ep 2) 2400 temp timeout-s sys user))
+
+; Phrase, garden, friend, and place calls. Same yield as a thing fiber,
+; so the tick can send state while DeepSeek is still writing.
+(define (phrase-chat-proxy sys user)
+  (proxy-ask (list-ref (thing-endpoint) 2) 2048 #f llm-timeout-s sys user))
 
 (define (thing-chat sys user temp timeout-s ep)
   (if (and llm-proxy-on conn)
@@ -5927,13 +5944,7 @@
   (let ((key (provider-key llm-provider))
         (base (provider-url llm-provider))
         (model (active-model)))
-    (let ((body (json-encode
-                  (hash "model" model
-                        "max_tokens" 2048
-                        "reasoning_effort" "minimal"
-                        "messages"
-                        (list (hash "role" "system" "content" sys)
-                              (hash "role" "user" "content" user))))))
+    (let ((body (json-encode (chat-body model 2048 #f sys user))))
       (parse-chat (post-chat (chat-url base) body key)))))
 
 (define (grade-step!)
@@ -6179,16 +6190,21 @@
         ; bypasses that path so its own key and URL are used.
         (set! llm-reply
           (lambda (sys user)
-            (if (provider-ready? llm-provider)
-              (chat-via-http sys user)
-              (cond
+            ; The bridge answers llm-ask on the socket. http-post here
+            ; would hold this fiber, and the tick's yield would not
+            ; return until the model finished.
+            (if (and llm-proxy-on conn)
+              (phrase-chat-proxy sys user)
+              (if (provider-ready? llm-provider)
+                (chat-via-http sys user)
+                (cond
                 ((= llm-chat-mode 2) (llm:chat sys user))
                 ((= llm-chat-mode 1) (llm:chat sys user llm-extra))
                 (else
                  (let ((tried (try (llm:chat sys user llm-extra) (catch (e) #f))))
                    (if (hash? tried)
                      (begin (set! llm-chat-mode 1) tried)
-                     (begin (set! llm-chat-mode 2) (llm:chat sys user)))))))))
+                     (begin (set! llm-chat-mode 2) (llm:chat sys user))))))))))
         (load-llm-timeout!)
         (set! stall-scene? (env-on? "LUMEN_STALL_SCENE"))
         (set! stall-ch (channel:create 1))

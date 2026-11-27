@@ -131,6 +131,8 @@ jobs:
         run: node scripts/mock-llm-e2e.mjs
       - name: Multi-fiber thing path
         run: node scripts/check-thing-e2e.mjs
+      - name: Voice wish does not block the tick
+        run: node scripts/check-llm-proxy.mjs
       - name: Biome EDSL gate and voice switch
         run: node scripts/check-edsl-e2e.mjs
       - name: Rebind refusal falls back to set-code

@@ -167,9 +167,12 @@ async function llmAsk(msg, writeLine) {
     model,
     messages: msg.messages || [],
     max_tokens: Number(msg.max_tokens) || 2400,
-    temperature: Number.isFinite(Number(msg.temperature)) ? Number(msg.temperature) : 0.7,
     reasoning_effort: msg.reasoning_effort || "minimal",
+    // Flash thinks by default, and minimal only means low. The trace
+    // spends the token budget, so the form comes back empty.
+    thinking: { type: "disabled" },
   };
+  if (Number.isFinite(Number(msg.temperature))) body.temperature = Number(msg.temperature);
   try {
     const res = await fetch(`${base}/chat/completions`, {
       method: "POST",
