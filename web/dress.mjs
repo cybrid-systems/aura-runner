@@ -20,15 +20,8 @@ const MIN_SIZE = 0.1;
 
 const VENUES = ["city", "garden", "space", "coast"];
 const ROLES = ["wall", "vary", "roof", "trim", "flower", "flower2", "leaf", "water", "sun", "hedge"];
-const PRIMS = new Set(["box", "rod", "slab", "arch", "shard", "ring", "spire", "lantern", "disc", "bloom"]);
-
-const VARIANTS = [
-  "(dress city (mirror (place 1 0 (float 0.55 (stack 3 0.5 (shard 0.8 trim))))))",
-  "(dress city (mirror (place 1 0 (spin 0.4 (stack 3 0.5 (shard 0.8 trim))))))",
-  "(dress city (mirror (place 1 0 (stack 2 0.4 (arch 1.2 1.0 wall)))))",
-  "(dress city (mirror (place 1 0 (float 0.4 (spin 0.3 (recur 2 0.65 (shard 0.9 flower)))))))",
-  "(dress city (mirror (place 1 0 (lantern sun))))",
-];
+export const PRIM_NAMES = ["box", "rod", "slab", "arch", "shard", "ring", "spire", "lantern", "disc", "bloom"];
+const PRIMS = new Set(PRIM_NAMES);
 
 function num(v, lo, hi) {
   return typeof v === "number" && v >= lo && v <= hi;
@@ -96,7 +89,7 @@ function emitPrim(expr) {
   }
   if (op === "bloom" && expr.length === 2) {
     return [
-      cube(0, 0.2, 0, 0.28, 0.28, 0.28, role, 1),
+      cube(0, 0.28, 0, 0.5, 0.5, 0.5, role, 1),
       cube(-0.16, 0.34, 0.06, 0.18, 0.18, 0.18, role, 1),
       cube(0.14, 0.32, -0.06, 0.16, 0.16, 0.16, role, 1),
     ];
@@ -326,10 +319,80 @@ export function setActiveDress(text) {
   return ev;
 }
 
+function lcg(seed) {
+  let s = (seed >>> 0) || 1;
+  return () => {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    return s;
+  };
+}
+
+function span(rng, lo, hi) {
+  return Math.round((lo + ((hi - lo) * rng()) / 4294967296) * 100) / 100;
+}
+
+function say(n) {
+  return (Math.round(n * 100) / 100).toFixed(2);
+}
+
+function emit(node) {
+  if (typeof node === "number") return say(node);
+  if (typeof node === "string") return node;
+  return `(${node.map(emit).join(" ")})`;
+}
+
+function onePrim(rng) {
+  const role = ROLES[rng() % ROLES.length];
+  const kind = PRIM_NAMES[rng() % PRIM_NAMES.length];
+  if (kind === "box") return ["box", span(rng, 0.35, 1.3), span(rng, 0.4, 1.5), span(rng, 0.35, 1.3), role];
+  if (kind === "rod") return ["rod", span(rng, 0.6, 1.8), role];
+  if (kind === "slab") return ["slab", span(rng, 0.4, 1.6), span(rng, 0.4, 1.6), role];
+  if (kind === "arch") return ["arch", span(rng, 0.8, 1.8), span(rng, 0.7, 1.6), role];
+  if (kind === "shard") return ["shard", span(rng, 0.6, 1.6), role];
+  if (kind === "ring") return ["ring", span(rng, 0.35, 0.9), role];
+  if (kind === "spire") return ["spire", span(rng, 0.9, 1.8), role];
+  if (kind === "lantern") return ["lantern", role];
+  if (kind === "disc") return ["disc", span(rng, 0.35, 0.9), role];
+  return ["bloom", role];
+}
+
+function wrap(rng, expr) {
+  const roll = rng() % 8;
+  if (roll === 0) return ["float", span(rng, 0.2, 0.9), expr];
+  if (roll === 1) return ["spin", span(rng, 0.25, 1.2), expr];
+  if (roll === 2) return ["stack", 2 + (rng() % 2), span(rng, 0.25, 0.7), expr];
+  if (roll === 3) return ["recur", 2, span(rng, 0.55, 0.72), expr];
+  if (roll === 4) return ["yaw", span(rng, -0.2, 0.2), expr];
+  if (roll === 5) return ["scale", span(rng, 0.6, 1.3), expr];
+  if (roll === 6) return ["join", expr, onePrim(rng)];
+  return ["move", span(rng, -0.35, 0.35), span(rng, 0, 0.4), span(rng, -0.35, 0.35), expr];
+}
+
+// A new tree from the seed. Numbers, primitive, colour role, motion and
+// layout all move. A candidate that breaks the contract is discarded.
 export function dressMutate(text, seed) {
   const n = Math.abs(Math.round(Number(seed) || 1));
-  const form = VARIANTS[(n - 1) % VARIANTS.length];
-  const ev = expandDress(form);
-  if (!ev.ok) return activeDress();
-  return ev.form;
+  const rng = lcg(n * 97 + 13);
+  const fallback = text && expandDress(text).ok ? String(text) : DRESS_CITY;
+  for (let attempt = 0; attempt < 24; attempt++) {
+    let expr = onePrim(rng);
+    const wraps = 1 + (rng() % 3);
+    for (let i = 0; i < wraps; i++) expr = wrap(rng, expr);
+    const side = (rng() % 2) === 0 ? 1 : -1;
+    let group = ["place", side, span(rng, 0, 1.5), expr];
+    if ((rng() % 2) === 0) group = ["mirror", group];
+    const form = `(dress city ${emit(group)})`;
+    if (expandDress(form).ok) return form;
+  }
+  return fallback;
+}
+
+export function dressHash(form) {
+  let h = 2166136261;
+  const src = String(form || "");
+  for (let i = 0; i < src.length; i++) {
+    h ^= src.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(16);
 }

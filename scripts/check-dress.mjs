@@ -1,7 +1,7 @@
 // Sculpture forms: nested transforms, the contract, and a safe fallback.
 import { dressPalette, palette } from "../web/render.mjs";
 import {
-  DRESS_CITY, DRESS_CAP, activeDress, dressMutate, expandDress, setActiveDress,
+  DRESS_CITY, DRESS_CAP, PRIM_NAMES, activeDress, dressHash, dressMutate, expandDress, setActiveDress,
 } from "../web/dress.mjs";
 
 function fail(msg) {
@@ -42,16 +42,29 @@ const before = activeDress();
 const bad = setActiveDress("(dress city (slide (shard 1 trim)))");
 if (bad.ok || activeDress() !== before) fail("illegal form replaced the seed");
 
-const seen = new Set();
-for (const seed of [1, 2, 3, 4, 5]) {
+const hashes = new Set();
+const prims = new Set();
+const ops = new Set();
+const motions = new Set();
+for (let seed = 1; seed <= 300; seed++) {
   const form = dressMutate(DRESS_CITY, seed);
   const ev = expandDress(form);
-  if (!ev.ok) fail("mutate left the contract " + seed + " " + ev.why);
-  seen.add(ev.motion + ":" + ev.depth);
+  if (!ev.ok) fail("mutate left the contract " + seed + " " + ev.why + " " + form);
+  hashes.add(dressHash(form));
+  motions.add(ev.motion);
+  for (const name of PRIM_NAMES) {
+    if (form.includes("(" + name + " ")) prims.add(name);
+  }
+  for (const op of ["float", "spin", "stack", "recur", "join", "mirror", "yaw", "scale"]) {
+    if (form.includes("(" + op + " ")) ops.add(op);
+  }
 }
-if (seen.size < 4) fail("mutate stayed in one cell " + [...seen].join(" "));
+if (hashes.size < 80) fail("only " + hashes.size + " structures in 300 seeds");
+if (prims.size < PRIM_NAMES.length) fail("primitives " + [...prims].join(","));
+if (ops.size < 6) fail("transforms " + [...ops].join(","));
+if (motions.size < 3) fail("motion cells " + [...motions].join(","));
 
 const city = dressPalette(palette(0, null), "city", "day");
 if (!city.wall) fail("city lost its grade while the sculpture loaded");
 
-console.log(`dress ok cubes ${kept.count} motion ${kept.motion} depth ${kept.depth} cells ${seen.size}`);
+console.log(`dress ok cubes ${kept.count} hashes ${hashes.size} prims ${prims.size} ops ${ops.size}`);

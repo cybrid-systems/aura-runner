@@ -96,7 +96,7 @@
            (let ((r (list-ref expr 1)))
              (list (dress-cube 0.0 0.05 0.0 (* r 2.0) 0.1 (* r 2.0) role 0))))
           ((and (string=? op "bloom") (= n 2))
-           (list (dress-cube 0.0 0.2 0.0 0.28 0.28 0.28 role 1)
+           (list (dress-cube 0.0 0.28 0.0 0.5 0.5 0.5 role 1)
                  (dress-cube -0.16 0.34 0.06 0.18 0.18 0.18 role 1)
                  (dress-cube 0.14 0.32 -0.06 0.16 0.16 0.16 role 1)))
           (else #f))))))
@@ -362,15 +362,55 @@
                     (+ 1.0 (qd:novelty m beh 3))
                     beh)))))
 
-(define dress-variants
-  (list
-    "(dress city (mirror (place 1 0 (float 0.55 (stack 3 0.5 (shard 0.8 trim))))))"
-    "(dress city (mirror (place 1 0 (spin 0.4 (stack 3 0.5 (shard 0.8 trim))))))"
-    "(dress city (mirror (place 1 0 (stack 2 0.4 (arch 1.2 1.0 wall)))))"
-    "(dress city (mirror (place 1 0 (float 0.4 (spin 0.3 (recur 2 0.65 (shard 0.9 flower)))))))"
-    "(dress city (mirror (place 1 0 (lantern sun))))"))
+(define dress-prim-names
+  (list "box" "rod" "slab" "arch" "shard" "ring" "spire" "lantern" "disc" "bloom"))
+(define dress-role-names
+  (list "wall" "vary" "roof" "trim" "flower" "flower2" "leaf" "water" "sun" "hedge"))
+
+(define (dress-n2 n)
+  (number->string (/ (round (* n 100.0)) 100.0)))
+
+; One new tree. Bits of the seed pick the primitive, the role, and which
+; transforms wrap it, so successive seeds are not a fixed menu.
+(define (dress-candidate n)
+  (let* ((prim (list-ref dress-prim-names (modulo n 10)))
+         (role (list-ref dress-role-names (modulo (quotient n 2) 10)))
+         (role2 (list-ref dress-role-names (modulo (+ n 5) 10)))
+         (h (dress-n2 (+ 0.6 (* (modulo n 7) 0.12))))
+         (w (dress-n2 (+ 0.8 (* (modulo (+ n 2) 5) 0.16))))
+         (body (cond
+                 ((or (string=? prim "lantern") (string=? prim "bloom"))
+                  (string-append "(" prim " " role ")"))
+                 ((string=? prim "box")
+                  (string-append "(box " w " " h " " w " " role ")"))
+                 ((string=? prim "slab")
+                  (string-append "(slab " w " " h " " role ")"))
+                 ((string=? prim "arch")
+                  (string-append "(arch " w " " h " " role ")"))
+                 (else (string-append "(" prim " " h " " role ")"))))
+         (extra (if (= (modulo n 3) 0)
+                  (string-append "(join " body " (" (if (= (modulo n 2) 0) "lantern" "bloom") " " role2 "))")
+                  body))
+         (spun (if (= (modulo n 2) 0)
+                 (string-append "(spin " (dress-n2 (+ 0.3 (* (modulo n 4) 0.2))) " " extra ")")
+                 extra))
+         (floated (if (= (modulo n 5) 0)
+                    spun
+                    (string-append "(float " (dress-n2 (+ 0.25 (* (modulo n 5) 0.12))) " " spun ")")))
+         (stacked (if (and (= (modulo n 4) 1) (or (string=? prim "shard") (string=? prim "rod") (string=? prim "disc")))
+                    (string-append "(stack 2 " (dress-n2 (+ 0.3 (* (modulo n 3) 0.15))) " " floated ")")
+                    floated))
+         (placed (string-append "(place " (if (= (modulo n 2) 0) "1" "-1") " "
+                                (dress-n2 (* (modulo n 4) 0.3)) " " stacked ")"))
+         (group (if (= (modulo n 3) 1) placed (string-append "(mirror " placed ")"))))
+    (string-append "(dress city " group ")")))
 
 (define (dress-mutate text seed)
-  (let ((n (if (number? seed) (inexact->exact (floor (abs seed))) 1)))
-    (let ((form (list-ref dress-variants (modulo (- n 1) (length dress-variants)))))
-      (if (hash-ref (dress-eval form) "ok" #f) form dress-default))))
+  (let ((n0 (if (number? seed) (inexact->exact (floor (abs seed))) 1)))
+    (let loop ((k 0))
+      (if (>= k 16)
+        (if (and (string? text) (hash-ref (dress-eval text) "ok" #f)) text dress-default)
+        (let ((form (dress-candidate (+ n0 (* k 17)))))
+          (if (hash-ref (dress-eval form) "ok" #f)
+            form
+            (loop (+ k 1))))))))
