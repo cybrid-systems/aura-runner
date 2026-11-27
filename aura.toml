@@ -7,7 +7,7 @@ out = "out"
 # AURA_VERSION=v0.2.7 pins one tag. CI's aura test job uses the nightly image.
 [dependencies]
 aura = "nightly"
-aura_commit = "7602463143de0347aa513ea168e41df5dcdb231e"
-aura_sha256_linux_x86_64 = "8f2c2641629de4a99c028e845a9720fadf645aa438a8023994ef70219d57564a"
-aura_sha256_linux_arm64 = "a0e8c5abe8108f2a23448f6fd83bf50b1e95c1fc249efe6d7cbad6d6d1b73c1b"
+aura_commit = "e7b3526d5d9e0191c484b8b5ef8c73e8a5c1e627"
+aura_sha256_linux_x86_64 = "6d76731f3c504c1456051f65ef71c67c5c25a10e0c9433229a5b096d2e74b9f2"
+aura_sha256_linux_arm64 = "e85667da9ffe1b1335b4b9a2b304a9c91554d690a1e6ea334fb7300bdd91e869"
 aura_ci_digest = "sha256:66392ce2a5f24668fb923d1c900c545435f6b453f3df585dc4668402c07042d5"
