@@ -124,7 +124,7 @@ const PLATES = {
 
 // City keeps its hue and comes down into the contract band.
 // contrast-pair is a no-op while the coral runner already clears the track.
-export const GRADE_CITY = "(grade city (contrast-pair player track (saturate 0.83 (base city))))";
+export const GRADE_CITY = "(grade city (contrast-pair player track (saturate 0.94 (base city))))";
 export const GRADE_GARDEN = "(grade garden (base garden))";
 export const GRADE_SPACE = "(grade space (base space))";
 export const GRADE_COAST = "(grade coast (base coast))";
@@ -138,11 +138,9 @@ export const DEFAULT_FORM = {
 
 const ROLES = Object.keys(PLATES.city);
 const BIG = ["sky0", "sky1", "sky", "track", "shoulderL", "shoulderR", "fog", "grass"];
-// WCAG 2.2 non-text contrast, success criterion 1.4.11.
-// Luminance ratio for large shapes. 3:1 is the WCAG non-text figure;
-// these fills already differ by a large delta E, so the floor that
-// still needs a nudge is 2.0. Delta E stays the hue-separation check.
-export const CONTRAST_MIN = 2;
+// Luminance ratio of the lit runner against the lit road, after fog.
+// 3:1 is the floor a framebuffer sample has to clear on every tier.
+export const CONTRAST_MIN = 3;
 export const DELTA_E_MIN = 35;
 export const SAT_LO = 0.45;
 export const SAT_HI = 0.55;
@@ -333,20 +331,58 @@ function evalExpr(expr) {
   return null;
 }
 
-// Darken the ground swatch a little, keeping its hue, until the subject
-// clears it. A pair that already clears is not touched.
+// Linear light fitted to a SwiftShader city frame. The road gain is an
+// upward face under the key; the runner gain is the lit front of the body
+// plus a little emit. Fog is the same mix the framebuffer shows. The
+// resulting luminance ratio matches the pixels, not the raw swatches.
+function toLinear(u) {
+  return u <= 0.04045 ? u / 12.92 : ((u + 0.055) / 1.055) ** 2.4;
+}
+
+function toSrgb(u) {
+  const x = Math.max(0, u);
+  return x <= 0.0031308 ? x * 12.92 : 1.055 * (x ** (1 / 2.4)) - 0.055;
+}
+
+function shadeFace(rgb, fog, face) {
+  const road = face === "road";
+  const gain = road ? [5.6, 4.1, 3.7] : [1.15, 1.25, 1.35];
+  const emit = road ? 0 : 0.08;
+  const haze = fog || [0.46, 0.66, 0.92];
+  const fogK = 0.05;
+  return rgb.map((v, i) => {
+    const lit = toSrgb(toLinear(v) * gain[i] + emit);
+    return clamp01(lit * (1 - fogK) + haze[i] * fogK);
+  });
+}
+
+// Luminance ratio of the pixels a screenshot compares, after light and fog.
+export function renderedRatio(colors) {
+  const road = shadeFace(colors.track, colors.fog, "road");
+  const runner = shadeFace(colors.player, colors.fog, "runner");
+  return contrastRatio(runner, road);
+}
+
+// Lighten the body one step toward a warm face, then darken the ground
+// without changing its hue until the lit runner clears the lit road.
 function separate(plate, subject, ground) {
   const out = clonePlate(plate);
-  // Headroom above the reported floor, so a high-tier sky wash
-  // still leaves the runner clear of the road.
-  const goal = 2.4;
-  if (contrastRatio(out[subject], out[ground]) >= goal) return out;
+  const warm = [1, 0.82, 0.72];
+  out[subject] = out[subject].map((v, i) => clamp01(v * 0.82 + warm[i] * 0.18));
+  const goal = 3.7;
+  const lit = () => renderedRatio({
+    player: out[subject],
+    track: out[ground],
+    sky: out.sky,
+    fog: out.fog,
+  });
+  if (lit() >= goal) return out;
   let road = out[ground].slice();
-  for (let step = 0; step < 4; step++) {
-    road = road.map((v) => clamp01(v * 0.92));
-    if (contrastRatio(out[subject], road) >= goal) break;
+  for (let step = 0; step < 12; step++) {
+    road = road.map((v) => clamp01(v * 0.9));
+    out[ground] = road;
+    if (lit() >= goal) break;
   }
-  out[ground] = road;
   return out;
 }
 
@@ -397,7 +433,11 @@ export function blueClip(colors) {
 }
 
 export function gradeReport(colors) {
-  const player = contrastRatio(colors.player, colors.track);
+  const player = Math.min(
+    renderedRatio(colors, "low"),
+    renderedRatio(colors, "medium"),
+    renderedRatio(colors, "high"),
+  );
   const obstacle = contrastRatio(colors.obstacle, colors.track);
   const playerE = deltaE(colors.player, colors.track);
   const obstacleE = deltaE(colors.obstacle, colors.track);
@@ -469,12 +509,15 @@ export function gradeMutate(text, seed) {
 }
 
 // Pull a dressed runner off the blue road without repainting a friend.
-export function contrastInk(rgb, track) {
-  const warm = [0.93, 0.34, 0.32];
+export function contrastInk(rgb, track, sky, fog) {
+  const warm = [1, 0.56, 0.4];
   let cur = rgb.slice();
-  for (let step = 0; step < 4; step++) {
-    if (contrastRatio(cur, track) >= 2.2 && deltaE(cur, track) >= 40) return cur;
-    cur = cur.map((v, i) => clamp01(v * 0.8 + warm[i] * 0.2));
+  const skyC = sky || [0.4, 0.6, 0.85];
+  const fogC = fog || [0.5, 0.66, 0.9];
+  for (let step = 0; step < 5; step++) {
+    const ratio = renderedRatio({ player: cur, track, sky: skyC, fog: fogC }, "high");
+    if (ratio >= CONTRAST_MIN && deltaE(cur, track) >= DELTA_E_MIN) return cur;
+    cur = cur.map((v, i) => clamp01(v * 0.72 + warm[i] * 0.28));
   }
   return cur;
 }
@@ -487,7 +530,7 @@ export function paintGrade(pal, venue) {
   pal.sky1 = c.sky1.slice();
   pal.sky = c.sky.slice();
   pal.fog = c.fog.slice();
-  if (venue === "city") pal.fogAmt = Math.min(0.13, pal.fogAmt);
+  if (venue === "city") pal.fogAmt = Math.min(0.09, pal.fogAmt);
   else if (venue === "space") pal.fogAmt = Math.min(0.16, pal.fogAmt);
   else if (venue === "coast") pal.fogAmt = Math.min(0.22, pal.fogAmt);
   pal.hill = c.hill.slice();
@@ -514,7 +557,7 @@ export function paintGrade(pal, venue) {
     pal.bodyDeep = c.playerDeep.slice();
     // A pure pale head picks up the blue sky on High and reads as a
     // lavender rabbit against the road. Keep a warm face.
-    pal.head = [0, 1, 2].map((i) => clamp01(c.player[i] * 0.58 + [1, 0.86, 0.72][i] * 0.42));
+    pal.head = [0, 1, 2].map((i) => clamp01(c.player[i] * 0.7 + [1, 0.9, 0.78][i] * 0.3));
     pal.lightAmt = Math.max(0.88, pal.lightAmt);
   }
   return pal;

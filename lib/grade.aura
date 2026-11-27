@@ -14,7 +14,7 @@
 
 (define grade-venues (list "city" "garden" "space" "coast"))
 (define grade-default
-  "(grade city (contrast-pair player track (saturate 0.83 (base city))))")
+  "(grade city (contrast-pair player track (saturate 0.94 (base city))))")
 
 (define (grade-city)
   (hash "track" (list 0.16 0.46 0.74)
@@ -165,18 +165,26 @@
              #f)))
         (else #f)))))
 
+(define (grade-warm-body c)
+  (list (grade-clamp (+ (* (car c) 0.82) 0.18))
+        (grade-clamp (+ (* (car (cdr c)) 0.82) (* 0.82 0.18)))
+        (grade-clamp (+ (* (car (cdr (cdr c))) 0.82) (* 0.72 0.18)))))
+
+; Same street the picture paints: a warmer body, and a bluer road darkened
+; in ten small steps so the lit runner clears the lit asphalt.
 (define (grade-separate plate subject ground)
   (if (or (not (hash? plate))
           (not (grade-member? grade-roles subject))
           (not (grade-member? grade-roles ground)))
     #f
-      (if (>= (grade-ratio (hash-ref plate subject) (hash-ref plate ground)) 2.4)
-      plate
+    (let ((body (grade-warm-body (hash-ref plate subject))))
       (let loop ((step 0) (road (hash-ref plate ground)))
-        (if (or (>= step 4) (>= (grade-ratio (hash-ref plate subject) road) 2.4))
-          (hash-set plate ground road)
+        (if (>= step 10)
+          (hash-set (hash-set plate ground road) subject body)
           (loop (+ step 1)
-                (list (* (car road) 0.92) (* (car (cdr road)) 0.92) (* (car (cdr (cdr road))) 0.92))))))))
+                (list (* (car road) 0.9)
+                      (* (car (cdr road)) 0.9)
+                      (* (car (cdr (cdr road))) 0.9))))))))
 
 (define grade-weights
   (hash "sky0" 0.20 "sky" 0.08 "sky1" 0.06 "track" 0.18

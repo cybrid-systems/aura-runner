@@ -72,7 +72,7 @@
   (load-coins!)
   (boot-note! 92 "花园马上就好"))
 (load-fast!)
-(define grade-now "(grade city (contrast-pair player track (saturate 0.83 (base city))))")
+(define grade-now "(grade city (contrast-pair player track (saturate 0.94 (base city))))")
 
 (define (load-slow-one!)
   (cond

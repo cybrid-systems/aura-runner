@@ -633,6 +633,19 @@ function paletteId(p) {
   return [p.biome || "", p.mood || "", p.custom ? 1 : 0, sky].join("|");
 }
 
+function hsvSat(rgb) {
+  const max = Math.max(rgb[0], rgb[1], rgb[2]);
+  const min = Math.min(rgb[0], rgb[1], rgb[2]);
+  return max > 1e-4 ? (max - min) / max : 0;
+}
+
+function holdChroma(mixed, a, b) {
+  const sm = hsvSat(mixed);
+  const goal = Math.max(hsvSat(a), hsvSat(b));
+  if (!(sm > 0.02) || goal <= sm + 0.02) return mixed;
+  return punch(mixed, Math.min(4, goal / sm));
+}
+
 export function mixPalette(a, b, t) {
   const u = Math.max(0, Math.min(1, Number(t) || 0));
   const left = a || {};
@@ -643,7 +656,10 @@ export function mixPalette(a, b, t) {
     const av = left[k];
     const bv = right[k];
     if (Array.isArray(av) && Array.isArray(bv) && av.length === bv.length && av.every((n) => typeof n === "number") && bv.every((n) => typeof n === "number")) {
-      out[k] = av.map((n, i) => n + (bv[i] - n) * u);
+      const mixed = av.map((n, i) => n + (bv[i] - n) * u);
+      // A halfway mix of two saturated streets goes grey. Restore chroma
+      // toward the more saturated end while the blend is moving.
+      out[k] = mixed.length === 3 && u > 0.02 && u < 0.98 ? holdChroma(mixed, av, bv) : mixed;
     } else if (typeof av === "number" && typeof bv === "number") {
       out[k] = av + (bv - av) * u;
     } else {
@@ -1019,7 +1035,7 @@ void main() {
   float cloudC = sin(x * 2.3 + drift * 0.45 + uv.y * 3.2);
   float band = smoothstep(0.4, 0.75, uv.y);
   float puff = smoothstep(0.2, 0.9, cloudA) * 0.62 + smoothstep(0.3, 0.92, cloudB) * 0.38;
-  c = mix(c, vec3(1.0, 0.97, 0.92), puff * band * 0.1);
+  c = mix(c, vec3(1.0, 0.97, 0.92), puff * band * 0.04);
   c = mix(c, vec3(1.0, 0.98, 0.95), smoothstep(0.5, 0.98, cloudC) * smoothstep(0.62, 0.9, uv.y) * 0.05);
   vec2 sun = vec2(x, uv.y) - uSun;
   // UV is 0..1 on both axes, so a circle there is 16:9 wide on screen.
@@ -2278,8 +2294,8 @@ export function createRenderer(canvas, hooks) {
   }
 
   function drawBunny(x, y, z, rgb) {
-    push(x, y + 0.3, z, 0.42, 0.36, 0.48, 1, rgb, 0.3, 0.05);
-    push(x, y + 0.58, z + 0.08, 0.32, 0.28, 0.3, 1, shade(rgb, 1.05), 0.25, 0.06);
+    push(x, y + 0.3, z, 0.42, 0.36, 0.48, 1, rgb, 0.3, 0.55);
+    push(x, y + 0.58, z + 0.08, 0.32, 0.28, 0.3, 1, shade(rgb, 1.05), 0.25, 0.4);
     push(x - 0.08, y + 0.86, z + 0.06, 0.08, 0.28, 0.08, 0, shade(rgb, 0.9), 0.35, 0);
     push(x + 0.08, y + 0.86, z + 0.06, 0.08, 0.28, 0.08, 0, shade(rgb, 0.9), 0.35, 0);
     push(x, y + 0.34, z - 0.26, 0.12, 0.12, 0.12, 1, [0.98, 0.96, 0.92], 0.3, 0.1);
@@ -2478,7 +2494,7 @@ export function createRenderer(canvas, hooks) {
   // Cloth, clasp, and circlet in the road frame. Negative ds trails
   // behind the runner, toward the camera. spot() is the only placement.
   function drawGear(spot, py, leanLat, sliding, t, reduced, gear, wardAmt, pal, stride, cloak) {
-    const rose = [0.86, 0.28, 0.32];
+    const rose = [0.98, 0.62, 0.6];
     const gold = pal.cape;
     const segs = reduced ? 2 : 3;
     const neckY = py + (sliding ? 0.42 : 0.74);
@@ -4103,7 +4119,7 @@ export function createRenderer(canvas, hooks) {
       }
       if (dressed) {
         const at = spot(sliding ? 0.12 : 0, leanLat);
-        drawBody(heroPlan, at.x, py + (sliding ? -0.22 : 0), at.z, contrastInk(palRgb(hero), pal.path || [0.2, 0.4, 0.6]), st.time || 0, reduced);
+        drawBody(heroPlan, at.x, py + (sliding ? -0.22 : 0), at.z, contrastInk(palRgb(hero), pal.path || [0.2, 0.4, 0.6], pal.sky, pal.fog), st.time || 0, reduced);
       } else {
         if (!sliding) {
           const leg = air ? -0.12 : swing * 0.32;
@@ -4115,10 +4131,10 @@ export function createRenderer(canvas, hooks) {
         const torsoY = py + (sliding ? 0.3 : 0.5 * squash) - posture * 0.12;
         const torso = sliding ? 0.52 : 0.46 * widen;
         const hip = spot(posture * 0.4, leanLat);
-        push(hip.x, torsoY, hip.z, torso, sliding ? 0.3 : 0.42 * squash, sliding ? 0.62 : 0.4, 0, pal.body, 0.35, 0.14);
+        push(hip.x, torsoY, hip.z, torso, sliding ? 0.3 : 0.42 * squash, sliding ? 0.62 : 0.4, 0, pal.body, 0.35, 0.5);
         const hy = torsoY + (sliding ? 0.16 : 0.34 * squash) - posture * 0.2;
         const head = spot(sliding ? 0.16 : posture, leanLat * 0.2);
-        push(head.x, hy, head.z, sliding ? 0.32 : 0.44, sliding ? 0.26 : 0.4, sliding ? 0.3 : 0.4, 1, pal.head, 0.2, 0.28);
+        push(head.x, hy, head.z, sliding ? 0.32 : 0.44, sliding ? 0.26 : 0.4, sliding ? 0.3 : 0.4, 1, pal.head, 0.2, 0.5);
         if (!sliding) {
           const flame = reduced ? 0 : Math.sin(st.time * 11) * 0.035;
           const tuft = spot(-0.02, leanLat * 0.15);
