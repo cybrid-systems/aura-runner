@@ -111,10 +111,10 @@ too now IR-compiles (`ir-calls=27.3M`).
    (82.5 s vs 81.8 s) with `run_function` still 51% — the set-code
    mutation workspace does not reach the JIT tiers today; that path
    needs the runtime-side work, not a target edit.
-3. Runtime: the file-mode server path (TW dispatch + env string lookups
-   + reclaim ≈ 35% of server CPU). Getting `core/main.aura`'s hot
-   defines onto IR (per-define specialization for file loads, or
-   splitting the 658-define module) is the live-tick lever.
+3. ~~Runtime: the file-mode server path onto IR.~~ — **attempted,
+   REVERTED (see below).** IR-izing the required modules is correctness-
+   safe but SLOWER than the tree walker for this workload; the IR
+   interpreter's per-call cost exceeds TW's optimized `eval_flat`.
 4. Target: ~~re-trial `pset-share`~~ — **done, ROLLBACK (see below).** The
    per-write full-list rebuild is NOT a win on the IR nightly: the native
    `list->vector`/`vector->list` primitives beat a Scheme-level walk.
@@ -161,6 +161,51 @@ The remaining target-side allocation lever in `step` is therefore the
 player representation itself (a vector or a record instead of a 16-cell
 list), which is a cross-cutting change to `pxs`/`pset`/every accessor and
 the web twin — recorded, not attempted here.
+
+### Lever 3 (file-mode modules onto IR): attempted, REVERTED — IR is slower here
+
+The server's required modules (`lib/phys`, `lib/gen`, `lib/coins`, …) run on
+the tree walker: the ctor passed `module_env=nullptr` to `cache_module`, so
+the IR cache filled but no module env was ever bound to an IR closure
+(the #5420 sibling-mis-binding hold). Three changes were tried together:
+
+1. ctor: pass `module_env` so a required export binds its IR closure (the
+   #5420 identity check — func name + param count — is exact now).
+2. `cache_module`: two passes (forward refs resolve once the callee is
+   cached) + a body-safety gate (`module_define_body_ir_unsafe_`: refuse
+   #4618 non-local `set!` and #4372 lambda-`while`, on BOTH the lowering
+   and the disk-cache-hit bind paths).
+3. `cache_module` FnCheck: bind nested-lambda params (a named-let desugars
+   to `(letrec ((loop (lambda (xs n) …))) …)`; the old walker treated
+   `xs`/`n` as unresolved) and accept module-env-bound free names (value
+   defines like `PHYS-DT`, `road-memo-on` lower to a late-bound `top-ref`).
+
+Correctness held: `aura test` 35/35, check-sim 42 lines, recordq hold/queue
+semantics intact (the disk-hit guard was essential — a stale `.abfc` bundle
+written before the guard existed carried a dropped-store `record-hold!`).
+
+But it is a **performance regression**, measured two ways:
+
+| measure | tree walker | modules on IR |
+|---|---|---|
+| `step-live` 20k steps (ms) | 13564 / 13848 | 23697 / 23860 |
+| `step-live` ir-calls / tw-calls | 0 / 2.6M | 3.38M / 0.12M |
+| live server, 3000 ticks, median (ms) | 10 | 14 |
+| live server p99 (ms) / >100ms per 3000 | 123 / ~24 | 165 / 62 |
+| live server CPU (task-clock, 50s) | 0.776 | 0.934 |
+
+The IR interpreter pays per-call EvalValue vector marshaling +
+`ir_enter_feedback` + cross-binding dispatch on every call; the physics is
+many small calls (`piece-x`, `pxs`, `road-query`, …), so that overhead
+dominates and IR loses to TW's optimized `eval_flat` hot path. The offline
+kernel win (lever 1, 1.46x) came from removing the feedback tax on a tight
+self-recursive loop — not from IR-izing a wide call graph.
+
+**Reverted** (no aura commit). The live-tick lever is therefore NOT
+"move file-mode defines onto the IR interpreter" — it is either the JIT
+(lever 2: native code, no per-call interpreter tax) or making the TW hot
+path itself cheaper. The IR interpreter is a correctness/fallback face,
+not a speed face, for call-graph-heavy module code on this nightly.
 
 Artifacts: `perf/out/report.txt` + `evidence.json` (the gated round),
 `perf/out/native-760246314/` (offline kernel perf.data),
