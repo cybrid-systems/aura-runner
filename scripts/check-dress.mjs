@@ -1,5 +1,5 @@
 // Sculpture forms: nested transforms, the contract, and a safe fallback.
-import { dressPalette, palette } from "../web/render.mjs";
+import { cityBlockCubes, dressBlockInstances, dressPalette, palette } from "../web/render.mjs";
 import {
   DRESS_CITY, DRESS_CAP, PRIM_NAMES, activeDress, dressHash, dressMutate, expandDress, setActiveDress,
 } from "../web/dress.mjs";
@@ -66,5 +66,21 @@ if (motions.size < 3) fail("motion cells " + [...motions].join(","));
 
 const city = dressPalette(palette(0, null), "city", "day");
 if (!city.wall) fail("city lost its grade while the sculpture loaded");
+
+// Main's city block is two faces, their contact shadows above Low, and
+// four lamp cubes. A dressed block replaces that, so none of the tiers
+// may draw more instances there than main.
+if (cityBlockCubes("low") !== 10) fail("low main block " + cityBlockCubes("low"));
+if (cityBlockCubes("medium") !== 12) fail("medium main block " + cityBlockCubes("medium"));
+if (cityBlockCubes("high") !== 12) fail("high main block " + cityBlockCubes("high"));
+for (const tier of ["low", "medium", "high"]) {
+  const mainBlock = cityBlockCubes(tier);
+  if (dressBlockInstances(tier, kept.count) > mainBlock) fail(tier + " seed over main");
+  if (dressBlockInstances(tier, DRESS_CAP) > mainBlock) fail(tier + " cap over main");
+  for (let seed = 1; seed <= 300; seed++) {
+    const ev = expandDress(dressMutate(DRESS_CITY, seed));
+    if (dressBlockInstances(tier, ev.count) > mainBlock) fail(tier + " mutate over main " + seed);
+  }
+}
 
 console.log(`dress ok cubes ${kept.count} hashes ${hashes.size} prims ${prims.size} ops ${ops.size}`);
