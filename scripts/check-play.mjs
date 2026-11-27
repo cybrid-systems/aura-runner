@@ -82,6 +82,7 @@ async function readUntil(io, pred, limit = 80) {
 
 function startMock() {
   const hits = { motif: 0, scene: 0, pals: 0, hung: 0 };
+  let hungRes = null;
   const server = http.createServer((req, res) => {
     if (req.method !== "POST") {
       res.writeHead(404);
@@ -98,6 +99,7 @@ function startMock() {
         hits.scene += 1;
         if (hits.scene === 1) {
           hits.hung += 1;
+          hungRes = res;
           return;
         }
       } else if (pals) hits.pals += 1;
@@ -113,7 +115,19 @@ function startMock() {
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => {
       const addr = server.address();
-      resolve({ server, hits, base: `http://127.0.0.1:${addr.port}/v1` });
+      resolve({
+        server, hits, base: `http://127.0.0.1:${addr.port}/v1`,
+        releaseHung() {
+          if (!hungRes) return;
+          const res = hungRes;
+          hungRes = null;
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({
+            id: "mock",
+            choices: [{ finish_reason: "stop", message: { role: "assistant", content: "" } }],
+          }));
+        },
+      });
     });
   });
 }
@@ -249,7 +263,9 @@ await withAura({
   let motifAtClear = -1;
   const deadline = Date.now() + 90000;
   let run = 0;
+  let motifBefore = mock.hits.motif;
   while (Date.now() < deadline && !(cleared && sawTulip && mock.hits.motif > motifAtClear)) {
+    motifBefore = mock.hits.motif;
     io.send({ op: "tick", jump: 0, slide: 0, lane: 0 });
     const batch = await readUntil(io, (m) => m.op === "state", 40);
     const state = batch.find((m) => m.op === "state");
@@ -258,7 +274,11 @@ await withAura({
     if (state["scene-busy"] === true || state.stall === true) sawBusy = true;
     if (!cleared && state.watchdogs >= 1 && state["scene-busy"] === false) {
       cleared = true;
-      motifAtClear = mock.hits.motif;
+      // The obstacle call on this same tick has to count. Snapshot the
+      // count from before the tick, then let the hung POST finish so the
+      // next phrase is not stuck behind it.
+      motifAtClear = motifBefore;
+      mock.releaseHung();
     }
     if (cleared && state.stall === true) io.send({ op: "unstall" });
     for (const m of batch) {
@@ -269,7 +289,7 @@ await withAura({
     // 2s timeout and the next garden time to land, but stop before a
     // live llm fiber retains enough capture frames to exhaust the arena.
     // The wall deadline above still stops a real hang.
-    if (run > 400000) break;
+    if (!cleared && run > 400000) break;
   }
   const pace = ` run ${run} ${JSON.stringify(mock.hits)}`;
   if (!sawBusy) throw new Error("scene call never looked busy" + pace);

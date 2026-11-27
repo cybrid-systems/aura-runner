@@ -2,7 +2,7 @@
 import { dressPalette, palette } from "../web/render.mjs";
 import {
   CONTRAST_MIN, DELTA_E_MIN, GRADE_CITY, SAT_HI, SAT_LO,
-  activeGrade, deltaE, evalGrade, gradeMutate, setActiveGrade,
+  activeGrade, contrastRatio, deltaE, evalGrade, gradeMutate, setActiveGrade,
 } from "../web/grade.mjs";
 
 function fail(msg) {
@@ -11,8 +11,17 @@ function fail(msg) {
 
 const kept = evalGrade(GRADE_CITY);
 if (!kept.ok) fail("default rolled back " + kept.why);
+if (kept.report.sat < 0.46 || kept.report.sat > 0.52) fail("render sat " + kept.report.sat);
 if (kept.report.sat < SAT_LO || kept.report.sat > SAT_HI) fail("sat " + kept.report.sat);
 if (kept.report.player < CONTRAST_MIN) fail("player contrast " + kept.report.player);
+for (const tier of ["low", "medium", "high"]) {
+  const wash = tier === "high" ? 0.18 : tier === "medium" ? 0.1 : 0;
+  const player = kept.colors.player.map((v, i) => v * (1 - wash) + kept.colors.sky[i] * wash);
+  const ratio = contrastRatio(player, kept.colors.track);
+  const apart = deltaE(player, kept.colors.track);
+  if (ratio < CONTRAST_MIN) fail(tier + " player contrast " + ratio);
+  if (apart < DELTA_E_MIN) fail(tier + " player delta E " + apart);
+}
 if (kept.report.playerE < DELTA_E_MIN || kept.report.obstacleE < DELTA_E_MIN) fail("delta E");
 if (kept.report.blue !== 0) fail("blue clip");
 if (kept.colors.player.join(",") === kept.colors.track.join(",")) fail("player became the track");

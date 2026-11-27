@@ -14,7 +14,7 @@
 
 (define grade-venues (list "city" "garden" "space" "coast"))
 (define grade-default
-  "(grade city (contrast-pair player track (saturate 0.74 (base city))))")
+  "(grade city (contrast-pair player track (saturate 0.83 (base city))))")
 
 (define (grade-city)
   (hash "track" (list 0.16 0.46 0.74)
@@ -170,10 +170,10 @@
           (not (grade-member? grade-roles subject))
           (not (grade-member? grade-roles ground)))
     #f
-    (if (>= (grade-ratio (hash-ref plate subject) (hash-ref plate ground)) 2.0)
+      (if (>= (grade-ratio (hash-ref plate subject) (hash-ref plate ground)) 2.4)
       plate
       (let loop ((step 0) (road (hash-ref plate ground)))
-        (if (or (>= step 3) (>= (grade-ratio (hash-ref plate subject) road) 2.0))
+        (if (or (>= step 4) (>= (grade-ratio (hash-ref plate subject) road) 2.4))
           (hash-set plate ground road)
           (loop (+ step 1)
                 (list (* (car road) 0.92) (* (car (cdr road)) 0.92) (* (car (cdr (cdr road))) 0.92))))))))
@@ -188,6 +188,14 @@
         (mn (min (car c) (min (car (cdr c)) (car (cdr (cdr c)))))))
     (if (> mx 0.0001) (/ (- mx mn) mx) 0.0)))
 
+(define (grade-render-swatch c fog)
+  (let ((haze-r (+ (* (car fog) 0.7) 0.28))
+        (haze-g (+ (* (car (cdr fog)) 0.7) 0.28))
+        (haze-b (+ (* (car (cdr (cdr fog))) 0.7) 0.28)))
+    (list (grade-clamp (+ (* (car c) 0.72) (* haze-r 0.28)))
+          (grade-clamp (+ (* (car (cdr c)) 0.72) (* haze-g 0.28)))
+          (grade-clamp (+ (* (car (cdr (cdr c))) 0.72) (* haze-b 0.28))))))
+
 (define (grade-sat plate)
   (let loop ((ks (list "sky0" "sky" "sky1" "track" "shoulderL" "shoulderR" "grass" "wall" "hill" "fog"))
              (acc 0.0) (w 0.0))
@@ -195,7 +203,9 @@
       (if (> w 0.0) (/ acc w) 0.0)
       (let ((k (car ks)))
         (loop (cdr ks)
-              (+ acc (* (grade-hsv (hash-ref plate k (list 0 0 0))) (hash-ref grade-weights k 0.0)))
+              (+ acc (* (grade-hsv (grade-render-swatch (hash-ref plate k (list 0 0 0))
+                                                       (hash-ref plate "fog" (list 0.7 0.78 0.86))))
+                        (hash-ref grade-weights k 0.0)))
               (+ w (hash-ref grade-weights k 0.0)))))))
 
 (define (grade-blue? c)
@@ -269,13 +279,13 @@
                             (lambda (ind)
                               (if (and (pair? ind) (pair? (cdr ind)))
                                 (let* ((hue (* (car ind) 0.012))
-                                       (sat (+ 0.66 (* (+ (car (cdr ind)) 1.0) 0.04)))
+                                       (sat (+ 0.76 (* (+ (car (cdr ind)) 1.0) 0.04)))
                                        (form (grade-knob venue hue sat))
                                        (found (grade-eval form)))
                                   (if (grade-ok? found) 1.0 0.0))
                                 0.0)))))
       (if (and (pair? best) (pair? (cdr best)))
         (let ((form (grade-knob venue (* (car best) 0.012)
-                                 (+ 0.66 (* (+ (car (cdr best)) 1.0) 0.04)))))
+                                 (+ 0.76 (* (+ (car (cdr best)) 1.0) 0.04)))))
           (if (grade-ok? (grade-eval form)) form grade-default))
         grade-default))))

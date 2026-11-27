@@ -124,7 +124,7 @@ const PLATES = {
 
 // City keeps its hue and comes down into the contract band.
 // contrast-pair is a no-op while the coral runner already clears the track.
-export const GRADE_CITY = "(grade city (contrast-pair player track (saturate 0.74 (base city))))";
+export const GRADE_CITY = "(grade city (contrast-pair player track (saturate 0.83 (base city))))";
 export const GRADE_GARDEN = "(grade garden (base garden))";
 export const GRADE_SPACE = "(grade space (base space))";
 export const GRADE_COAST = "(grade coast (base coast))";
@@ -337,14 +337,40 @@ function evalExpr(expr) {
 // clears it. A pair that already clears is not touched.
 function separate(plate, subject, ground) {
   const out = clonePlate(plate);
-  if (contrastRatio(out[subject], out[ground]) >= CONTRAST_MIN) return out;
+  // Headroom above the reported floor, so a high-tier sky wash
+  // still leaves the runner clear of the road.
+  const goal = 2.4;
+  if (contrastRatio(out[subject], out[ground]) >= goal) return out;
   let road = out[ground].slice();
-  for (let step = 0; step < 3; step++) {
+  for (let step = 0; step < 4; step++) {
     road = road.map((v) => clamp01(v * 0.92));
-    if (contrastRatio(out[subject], road) >= CONTRAST_MIN) break;
+    if (contrastRatio(out[subject], road) >= goal) break;
   }
   out[ground] = road;
   return out;
+}
+
+// Screenshot sample. The framebuffer mean sits below the raw plate
+// because fog and the pale horizon mix into every large surface.
+// 0.28 toward that haze matches a mid-run SwiftShader frame.
+const HAZE = 0.28;
+export function renderSwatch(rgb, fog) {
+  const src = fog || [0.7, 0.78, 0.86];
+  return rgb.map((v, i) => {
+    const haze = src[i] * 0.7 + 0.28;
+    return clamp01(v * (1 - HAZE) + haze * HAZE);
+  });
+}
+
+export function renderSat(colors) {
+  let acc = 0;
+  let w = 0;
+  for (const key of Object.keys(WEIGHT)) {
+    if (!colors[key]) continue;
+    acc += hsvSat(renderSwatch(colors[key], colors.fog)) * WEIGHT[key];
+    w += WEIGHT[key];
+  }
+  return w > 0 ? acc / w : 0;
 }
 
 export function weightedSat(colors) {
@@ -375,7 +401,7 @@ export function gradeReport(colors) {
   const obstacle = contrastRatio(colors.obstacle, colors.track);
   const playerE = deltaE(colors.player, colors.track);
   const obstacleE = deltaE(colors.obstacle, colors.track);
-  const sat = weightedSat(colors);
+  const sat = renderSat(colors);
   const blue = blueClip(colors);
   let why = "fair";
   if (sat < SAT_LO || sat > SAT_HI) why = "sat";
@@ -413,6 +439,15 @@ export function setActiveGrade(text) {
   return ev;
 }
 
+// Measurement hook. A form that parses still paints, so a probe can
+// read the picture outside the keep band.
+export function forceGrade(text) {
+  const ev = evalGrade(text);
+  if (!ev.colors) return ev;
+  activeForm = String(text || "").trim();
+  return ev;
+}
+
 export function gradeFor(venue) {
   const current = activeForm ? evalGrade(activeForm) : null;
   if (current && current.ok && current.venue === venue) return current;
@@ -426,11 +461,22 @@ export function gradeMutate(text, seed) {
   const venue = ev && ev.venue ? ev.venue : "city";
   const n = Math.abs(Number(seed) || 1);
   const hue = (((n % 5) - 2) * 0.006);
-  const sat = 0.66 + ((n % 4) * 0.02);
+  const sat = 0.78 + ((n % 4) * 0.02);
   const form = `(grade ${venue} (contrast-pair player track (hue-shift ${hue.toFixed(3)} (saturate ${sat.toFixed(2)} (base ${venue})))))`;
   const next = evalGrade(form);
   if (!next.ok) return ev.ok ? ev.form : (DEFAULT_FORM[venue] || GRADE_CITY);
   return next.form;
+}
+
+// Pull a dressed runner off the blue road without repainting a friend.
+export function contrastInk(rgb, track) {
+  const warm = [0.93, 0.34, 0.32];
+  let cur = rgb.slice();
+  for (let step = 0; step < 4; step++) {
+    if (contrastRatio(cur, track) >= 2.2 && deltaE(cur, track) >= 40) return cur;
+    cur = cur.map((v, i) => clamp01(v * 0.8 + warm[i] * 0.2));
+  }
+  return cur;
 }
 
 export function paintGrade(pal, venue) {
@@ -441,7 +487,7 @@ export function paintGrade(pal, venue) {
   pal.sky1 = c.sky1.slice();
   pal.sky = c.sky.slice();
   pal.fog = c.fog.slice();
-  if (venue === "city") pal.fogAmt = Math.min(0.16, pal.fogAmt);
+  if (venue === "city") pal.fogAmt = Math.min(0.13, pal.fogAmt);
   else if (venue === "space") pal.fogAmt = Math.min(0.16, pal.fogAmt);
   else if (venue === "coast") pal.fogAmt = Math.min(0.22, pal.fogAmt);
   pal.hill = c.hill.slice();
@@ -466,6 +512,9 @@ export function paintGrade(pal, venue) {
   if (venue === "city") {
     pal.body = c.player.slice();
     pal.bodyDeep = c.playerDeep.slice();
+    // A pure pale head picks up the blue sky on High and reads as a
+    // lavender rabbit against the road. Keep a warm face.
+    pal.head = [0, 1, 2].map((i) => clamp01(c.player[i] * 0.58 + [1, 0.86, 0.72][i] * 0.42));
     pal.lightAmt = Math.max(0.88, pal.lightAmt);
   }
   return pal;

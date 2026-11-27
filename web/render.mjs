@@ -1,4 +1,4 @@
-import { paintGrade } from "./grade.mjs";
+import { contrastInk, paintGrade } from "./grade.mjs";
 import { roadGrade, roadHeight } from "./road.mjs";
 import { drawThing, growOf, animOf, showBox } from "./thing.mjs";
 import { DEPTH_FS, highFragment, highSky, litFragment, litSky } from "./lit.mjs";
@@ -4103,7 +4103,7 @@ export function createRenderer(canvas, hooks) {
       }
       if (dressed) {
         const at = spot(sliding ? 0.12 : 0, leanLat);
-        drawBody(heroPlan, at.x, py + (sliding ? -0.22 : 0), at.z, palRgb(hero), st.time || 0, reduced);
+        drawBody(heroPlan, at.x, py + (sliding ? -0.22 : 0), at.z, contrastInk(palRgb(hero), pal.path || [0.2, 0.4, 0.6]), st.time || 0, reduced);
       } else {
         if (!sliding) {
           const leg = air ? -0.12 : swing * 0.32;

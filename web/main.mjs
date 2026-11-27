@@ -3,7 +3,7 @@ import { awardPickup, challengeFor, challengeMet, dropGrade, gradeLabel, lootWor
 import { clampMult } from "./runstate.mjs";
 import { COMBO_HEART, HEART_IFRAME, HEARTS_MAX, heartsBlank, heartsHit, heartsRecover, heartsTick } from "./hearts.mjs";
 import { raceGate, raceRead } from "./race.mjs";
-import { GRADE_CITY, activeGrade, setActiveGrade } from "./grade.mjs";
+import { GRADE_CITY, activeGrade, forceGrade, setActiveGrade } from "./grade.mjs";
 import { acceptSpec, createRenderer, takeVenue } from "./render.mjs";
 import { createFallback } from "./fallback.mjs";
 import { readQualityMode, writeQualityMode } from "./quality.mjs";
@@ -2332,6 +2332,7 @@ function requestSongSkip(text) {
   if (!mentionsSong(text)) return;
   if (audio.skip()) songSkips += 1;
 }
+window.__lumenSetGrade = (text) => forceGrade(text);
 const gradeApply = document.getElementById("grade-apply");
 if (gradeApply) gradeApply.addEventListener("click", applyGradeEdit);
 paintNotes();
