@@ -4119,6 +4119,10 @@
 (define llm-proxy-on #f)
 (define llm-replies (hash))
 (define llm-ask-id 0)
+; id -> channel. The worker blocks on it. A yield loop here retained a
+; frame per spin and, once the reply was late, filled the arena.
+(define llm-waiters (hash))
+(define llm-pending (list))
 (define conn #f)
 (define thing-staged #f)
 (define thing-live #f)
@@ -4187,25 +4191,54 @@
         (if (hash? ans) ans (hash "ok" #f "error" "llm" "content" ""))))))
 
 ; The socket POST is synchronous in the script runtime, so a wish's
-; first TLS handshake froze the tick. The bridge runs the POST in Node
-; and replies on the same line socket; this worker only yields.
-(define (proxy-wait id timeout-s)
-  (let loop ((deadline (+ (now-ms) (* timeout-s 1000.0))))
-    (let ((r (hash-ref llm-replies id #f)))
-      (cond
-        (r (hash-set! llm-replies id #f)
-           (hash "ok" (eq? (hash-ref r "ok" #f) #t)
-                 "error" (hash-ref r "error" "")
-                 "content" (hash-ref r "content" "")))
-        ((> (now-ms) deadline)
-         (hash "ok" #f "error" "timeout" "content" ""))
-        (else
-         (try (fiber:yield) (catch (e) #f))
-         (loop deadline))))))
+; first TLS handshake froze the tick. The bridge runs the POST in Node.
+; The worker blocks on a channel until that reply (or the tick's
+; deadline) arrives. Yielding until then kept a frame per spin.
+(define (proxy-wake! id)
+  (let ((ch (hash-ref llm-waiters id #f)))
+    (if ch
+      (begin
+        (hash-set! llm-waiters id #f)
+        (try (channel:send ch #t) (catch (e) #f)))
+      #f)))
+
+(define (proxy-expire!)
+  (let loop ((xs llm-pending) (keep (list)))
+    (if (null? xs)
+      (set! llm-pending keep)
+      (let ((row (car xs)))
+        (let ((id (car row))
+              (deadline (car (cdr row))))
+          (if (not (hash-ref llm-waiters id #f))
+            (loop (cdr xs) keep)
+            (if (> (now-ms) deadline)
+              (begin
+                (if (hash-ref llm-replies id #f)
+                  #f
+                  (hash-set! llm-replies id
+                             (hash "ok" #f "error" "timeout" "content" "")))
+                (proxy-wake! id)
+                (loop (cdr xs) keep))
+              (loop (cdr xs) (cons row keep)))))))))
+
+(define (proxy-take id)
+  (let ((r (hash-ref llm-replies id #f)))
+    (hash-set! llm-replies id #f)
+    (if (hash? r)
+      (hash "ok" (eq? (hash-ref r "ok" #f) #t)
+            "error" (hash-ref r "error" "")
+            "content" (hash-ref r "content" ""))
+      (hash "ok" #f "error" "timeout" "content" ""))))
 
 (define (proxy-ask model max-tokens temp timeout-s sys user)
-  (let ((id (number->string (+ llm-ask-id 1))))
-    (set! llm-ask-id (+ llm-ask-id 1))
+  ; channel:create yields. Bind the id before that call, or the next
+  ; worker reads the counter and both end up waiting on one slot.
+  (let* ((id (begin
+               (set! llm-ask-id (+ llm-ask-id 1))
+               (number->string llm-ask-id)))
+         (ch (channel:create 1)))
+    (hash-set! llm-waiters id ch)
+    (set! llm-pending (cons (list id (+ (now-ms) (* timeout-s 1000.0))) llm-pending))
     (let ((msg (hash "op" "llm-ask" "id" id
                      "model" model
                      "max_tokens" max-tokens
@@ -4217,7 +4250,10 @@
                            (hash "role" "user" "content" user)))))
       (if (number? temp) (hash-set! msg "temperature" temp) #f)
       (send conn msg))
-    (proxy-wait id timeout-s)))
+    ; Registered before the send, so a reply that lands inside send
+    ; is already queued on ch and this recv returns.
+    (channel:recv ch)
+    (proxy-take id)))
 
 (define (thing-chat-proxy sys user temp timeout-s ep)
   (proxy-ask (list-ref ep 2) 2400 temp timeout-s sys user))
@@ -5690,6 +5726,7 @@
         (try (job) (catch (e) #f)))))
 
 (define (on-tick c msg)
+  (proxy-expire!)
   (set! gate-tick #f)
   (set! tick-built #f)
   (set! tick-rules #f)
@@ -6055,7 +6092,9 @@
       ((string=? op "llm-proxy")
        (set! llm-proxy-on (eq? (hash-ref msg "ready" #f) #t)))
       ((string=? op "llm-reply")
-       (hash-set! llm-replies (hash-ref msg "id" "") msg))
+       (let ((id (hash-ref msg "id" "")))
+         (hash-set! llm-replies id msg)
+         (proxy-wake! id)))
       ((string=? op "hello") (on-hello c msg))
       ((string=? op "restart") (on-restart c msg))
       ((string=? op "resync") (on-resync c msg))
