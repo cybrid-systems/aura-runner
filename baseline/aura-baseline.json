@@ -2,11 +2,11 @@
   "aura": {
     "assets": {
       "linux-arm64": {
-        "name": "aura-nightly-linux-arm64.tar.gz",
+        "name": "aura-8004cc70b-r46020729144-a1-linux-arm64.tar.gz",
         "sha256": "a2fa3e8011f658270ea0b40ce2d78d2f45ad3a3ce6dfdd735745e56a9736872f"
       },
       "linux-x86_64": {
-        "name": "aura-nightly-linux-x86_64.tar.gz",
+        "name": "aura-8004cc70b-r46020729144-a1-linux-x86_64.tar.gz",
         "sha256": "04589460267328d2a399003b608b9e775d5b21631af9386baf552901d2b0991e"
       }
     },
@@ -27,7 +27,7 @@
     "cybrid-systems/aura-memory",
     "cybrid-systems/aura-memory-runtime"
   ],
-  "notes": "Aura main green nightly at 8004cc70b; the asset digests are the GitHub release asset digests. .github/workflows/nightly.yml follows the tag hourly, gates a moved nightly, and commits the pin; never touch tags or releases.",
+  "notes": "Aura main green nightly at 8004cc70b; each asset is the immutable per-build archive named by the nightly manifest, not the rolling alias. Bump this file only through a reviewed PR; never touch tags or releases.",
   "schema": 1,
   "stages": [
     "cybrid-systems/aura-runner",
