@@ -61,7 +61,11 @@ jobs:
             echo "Held back: $1. The pin still names the last green nightly." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           }
-          bin="$(bash scripts/install-aura.sh)" || hold "the pinned download did not verify"
+          # This job gates the pinned build: if the release has moved past
+          # the pin, the install must fail so the pin is held back rather
+          # than the newer build being installed and tested in its place.
+          bin="$(AURA_REQUIRE_PINNED=1 bash scripts/install-aura.sh)" \
+            || hold "the pinned download did not verify"
           export PATH="$bin:$PATH"
           aura test || hold "aura test failed"
           aura --quiet --preset dev scripts/play-review.aura || hold "the seeded play review failed"
