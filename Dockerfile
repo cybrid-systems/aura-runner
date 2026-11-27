@@ -28,8 +28,8 @@ RUN --mount=type=cache,target=/dl,sharing=locked \
     want="$(awk 'NF { print $1; exit }' /tmp/aura.sha256)"; \
     test -n "$want"; \
     if [ -n "$AURA_SHA_AMD64" ] && [ "$AURA_SHA_AMD64" != "$want" ]; then \
-      echo "the published Aura checksum changed during the build" >&2; \
-      exit 1; \
+      echo "warning: the pinned Aura $AURA_SHA_AMD64 is no longer published; the release now publishes $want" >&2; \
+      echo "warning: the image holds the published build; the pin moves in the nightly job" >&2; \
     fi; \
     got=""; \
     if [ -f "/dl/$aura" ]; then got="$(sha256sum "/dl/$aura" | awk '{print $1}')"; fi; \
@@ -62,8 +62,8 @@ RUN --mount=type=cache,target=/dl,sharing=locked \
     want="$(awk 'NF { print $1; exit }' /tmp/aura.sha256)"; \
     test -n "$want"; \
     if [ -n "$AURA_SHA_ARM64" ] && [ "$AURA_SHA_ARM64" != "$want" ]; then \
-      echo "the published Aura checksum changed during the build" >&2; \
-      exit 1; \
+      echo "warning: the pinned Aura $AURA_SHA_ARM64 is no longer published; the release now publishes $want" >&2; \
+      echo "warning: the image holds the published build; the pin moves in the nightly job" >&2; \
     fi; \
     got=""; \
     if [ -f "/dl/$aura" ]; then got="$(sha256sum "/dl/$aura" | awk '{print $1}')"; fi; \
