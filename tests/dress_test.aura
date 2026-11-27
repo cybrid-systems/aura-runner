@@ -1,0 +1,33 @@
+; Sculptures: the seed is kept, a form on the lane or over the
+; budget rolls back, and a second behaviour fills another qd cell.
+(require "lib/dress")
+
+(define (line name text)
+  (let ((gate (dress-gate text))
+        (found (dress-eval text)))
+    (display name)
+    (display " ")
+    (display (hash-ref gate "verdict" "?"))
+    (display " ")
+    (display (hash-ref gate "why" "?"))
+    (display " ")
+    (display (hash-ref found "count" 0))
+    (newline)))
+
+(line "default" dress-default)
+(line "lane" "(dress city (place 1 0 (move -2.4 0 0 (shard 0.8 trim))))")
+(line "tall" "(dress city (place 1 0 (stack 4 0.8 (shard 1.6 trim))))")
+(line "huge" "(dress city (mirror (place 1 0 (stack 4 0.3 (ring 0.8 trim)))))")
+(line "broken" "(dress city (nope))")
+(line "read" "(dress city (place 1 0 (box 0.2 0.2 0.2 trim)))")
+(line "join" "(dress city (place 1 0 (join (shard 0.8 trim) (lantern sun))))")
+
+(define archive (dress-blank))
+(display "keep ")
+(display (if (dress-keep! archive dress-default) 1 0))
+(display " ")
+(display (if (dress-keep! archive (dress-mutate dress-default 1)) 1 0))
+(newline)
+(display "cover ")
+(display (qd:coverage archive))
+(newline)

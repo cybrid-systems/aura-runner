@@ -73,6 +73,7 @@
   (boot-note! 92 "花园马上就好"))
 (load-fast!)
 (define grade-now "(grade city (contrast-pair player track (saturate 0.94 (base city))))")
+(define dress-now "(dress city (mirror (place 1 0 (float 0.55 (spin 0.4 (stack 3 0.5 (shard 0.8 trim)))))))")
 
 (define (load-slow-one!)
   (cond
@@ -91,6 +92,7 @@
      (begin
        (require "lib/voice")
        (require "lib/grade")
+       (require "lib/dress")
        (set! edsl-pool (edsl-boot))
        (set! slow-mods #t)
        (set! slow-step 6)))))
@@ -1161,9 +1163,11 @@
       (set! gate-followups
             (append gate-followups
                     (if (or biome-pin (pair? wish-hold))
-                      (append jobs (list (lambda () (grade-step!))))
+                      (append jobs (list (lambda () (grade-step!))
+                                       (lambda () (dress-step!))))
                       (append jobs (list (lambda () (archive-visit!))
-                                         (lambda () (grade-step!))))))))
+                                         (lambda () (grade-step!))
+                                         (lambda () (dress-step!))))))))
     (queue-chase! played bumps (chase-sum chase-recent) speed-now race)
     (set! tune-due #t)))
 
@@ -1740,6 +1744,7 @@
         "level" level-n "goal" level-x1 "level0" level-x0
         "mult" run-mult "biome" biome-now "mood" mood-now "spec" edsl-spec
         "grade" grade-now
+        "dress" dress-now
         "skybody" sky-body-now "sunuv" (list sun-x-now sun-y-now)
         "propshift" sky-shift
         "banner-id" banner-id "banner-kind" banner-kind
@@ -3912,6 +3917,7 @@
                 (refine-miss theme hint fallback held enter "banned")
                 (begin
                   (consider-grade! text)
+                  (consider-dress! text)
                   (let ((form (extract-balanced text "(biome"))
                       (asked (if (string=? theme "free") hint theme))
                       (install (or (string=? theme "free") enter)))
@@ -5959,6 +5965,49 @@
             (note! "ROLLBACK" (hash-ref gate "why" "shape") "grade" "配色没有换" "world")
             #f))))))
 
+(define (dress-step!)
+  (load-slow!)
+  (if llm-on
+    #f
+    (let ((next (dress-mutate dress-now (+ seed level-n))))
+      (if (and (string? next) (not (string=? next dress-now))
+               (string=? (hash-ref (dress-gate next) "verdict" "") "KEEP")
+               (dress-keep! dress-archive next))
+        (begin (set! dress-now next) (set! rules-dirty #t) #t)
+        #f))))
+
+(define (consider-dress! text)
+  (load-slow!)
+  (let ((form (extract-balanced text "(dress")))
+    (if (not (string? form))
+      #f
+      (let ((gate (dress-gate form)))
+        (if (string=? (hash-ref gate "verdict" "") "KEEP")
+          (if (dress-keep! dress-archive form)
+            (begin
+              (set! dress-now form)
+              (set! rules-dirty #t)
+              (note! "KEEP" "fair" "dress" "造型留下了" "world")
+              #t)
+            (begin (note! "ROLLBACK" "novel" "dress" "造型没有换" "world") #f))
+          (begin (note! "ROLLBACK" (hash-ref gate "why" "shape") "dress" "造型没有换" "world") #f))))))
+
+(define (on-dress c msg)
+  (load-slow!)
+  (let ((text (hash-ref msg "text" "")))
+    (if (or (not (string? text)) (= (string-length text) 0) (> (string-length text) 700))
+      (note! "ROLLBACK" "shape" "dress" "造型没有换" "world")
+      (let ((gate (dress-gate text)))
+        (if (string=? (hash-ref gate "verdict" "") "KEEP")
+          (begin
+            (dress-keep! dress-archive text)
+            (set! dress-now text)
+            (set! rules-dirty #t)
+            (note! "KEEP" "fair" "dress" "造型留下了" "world")
+            (send c (rules-msg))
+            (set! rules-dirty #f))
+          (note! "ROLLBACK" (hash-ref gate "why" "shape") "dress" "造型没有换" "world"))))))
+
 (define (on-grade c msg)
   (load-slow!)
   (let ((text (hash-ref msg "text" "")))
@@ -6012,6 +6061,7 @@
       ((string=? op "propose") (on-propose c msg))
       ((string=? op "wish") (on-wish c msg))
       ((string=? op "grade") (on-grade c msg))
+      ((string=? op "dress") (on-dress c msg))
       ((string=? op "thing-bad") (on-thing-bad c msg))
       ((string=? op "provider") (on-provider c msg))
       ((string=? op "audit") (on-audit c msg))

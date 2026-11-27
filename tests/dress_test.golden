@@ -1,0 +1,9 @@
+default KEEP fair 6
+lane ROLLBACK clearance 1
+tall ROLLBACK sight 3
+huge ROLLBACK budget 17
+broken ROLLBACK shape 0
+read ROLLBACK read 1
+join KEEP fair 3
+keep 1 1
+cover 0.125

@@ -4,6 +4,7 @@ import { clampMult } from "./runstate.mjs";
 import { COMBO_HEART, HEART_IFRAME, HEARTS_MAX, heartsBlank, heartsHit, heartsRecover, heartsTick } from "./hearts.mjs";
 import { raceGate, raceRead } from "./race.mjs";
 import { GRADE_CITY, activeGrade, forceGrade, setActiveGrade } from "./grade.mjs";
+import { activeDress, setActiveDress } from "./dress.mjs";
 import { acceptSpec, createRenderer, takeVenue } from "./render.mjs";
 import { createFallback } from "./fallback.mjs";
 import { readQualityMode, writeQualityMode } from "./quality.mjs";
@@ -360,6 +361,7 @@ function applyRules(msg) {
   if (typeof msg.hue === "number") hue = msg.hue;
   applyScene(msg);
   if (typeof msg.grade === "string" && msg.grade.startsWith("(grade")) setActiveGrade(msg.grade);
+  if (typeof msg.dress === "string" && msg.dress.startsWith("(dress")) setActiveDress(msg.dress);
   applyLook(msg);
   applyPals(msg);
   applyHero(msg);
@@ -394,6 +396,27 @@ function paintNotes() {
   const edit = document.getElementById("grade-edit");
   if (pre) pre.textContent = shown;
   if (edit && document.activeElement !== edit) edit.value = shown;
+  const sculpture = activeDress();
+  const dressPre = document.getElementById("dress-form");
+  const dressEdit = document.getElementById("dress-edit");
+  if (dressPre) dressPre.textContent = sculpture;
+  if (dressEdit && document.activeElement !== dressEdit) dressEdit.value = sculpture;
+}
+
+function applyDressEdit() {
+  const edit = document.getElementById("dress-edit");
+  const note = document.getElementById("dress-note");
+  const text = edit ? edit.value.trim() : "";
+  const result = setActiveDress(text);
+  if (note) {
+    note.textContent = result.ok
+      ? "KEEP  cubes " + result.count
+      : "ROLLBACK  " + (result.why || "shape");
+  }
+  paintNotes();
+  if (result.ok && ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ op: "dress", text: result.form }));
+  }
 }
 
 function applyGradeEdit() {
@@ -2335,6 +2358,9 @@ function requestSongSkip(text) {
 window.__lumenSetGrade = (text) => forceGrade(text);
 const gradeApply = document.getElementById("grade-apply");
 if (gradeApply) gradeApply.addEventListener("click", applyGradeEdit);
+const dressApply = document.getElementById("dress-apply");
+if (dressApply) dressApply.addEventListener("click", applyDressEdit);
+window.__lumenSetDress = (text) => setActiveDress(text);
 paintNotes();
 
 installWish({

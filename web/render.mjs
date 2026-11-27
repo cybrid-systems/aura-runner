@@ -1,4 +1,20 @@
 import { contrastInk, paintGrade } from "./grade.mjs";
+import { dressView } from "./dress.mjs";
+
+// The smallest city face is three cubes. Medium and High add one contact
+// shadow per face, and the two lamps are four cubes. A sculpture replaces
+// that block, so it must not draw more cubes than the block it removes.
+export function cityBlockCubes(tier) {
+  const shadow = tier === "low" ? 0 : 1;
+  return (3 + shadow) * 2 + 4;
+}
+
+// Cubes a dressed block actually emits. The old faces and lamps are gone,
+// so this is the whole block, and it stays at or under main.
+export function dressBlockInstances(tier, cubes) {
+  const n = Number.isFinite(cubes) ? Math.max(0, Math.floor(cubes)) : 0;
+  return Math.min(n, cityBlockCubes(tier));
+}
 import { roadGrade, roadHeight } from "./road.mjs";
 import { drawThing, growOf, animOf, showBox } from "./thing.mjs";
 import { DEPTH_FS, highFragment, highSky, litFragment, litSky } from "./lit.mjs";
@@ -3122,6 +3138,33 @@ export function createRenderer(canvas, hooks) {
         push(x, h * 0.72, z, 0.22 * s, 0.14 * s, 0.76 * s, 0, trim, 0.25, Math.max(glow, 0.35), psi);
       }
     }
+    // A sculpture stands in place of the street block (both faces and
+    // both lamps). It is not drawn on top of them.
+    function dressNear(z, dist) {
+      const view = dressView();
+      if (!view || !view.ok) return false;
+      const period = activeProfile.tier === "low" ? 16 : activeProfile.tier === "high" ? 8 : 12;
+      if ((((z / 2) | 0) % period) !== 0) return false;
+      const reach = activeProfile.tier === "low" ? 18 : activeProfile.tier === "high" ? 28 : 24;
+      return dist < reach;
+    }
+    function drawDress(cz, z) {
+      const view = dressView();
+      if (!view || !view.ok || n >= MAX - 24) return;
+      const t = reduced ? 0 : (st.time || 0);
+      let drawn = 0;
+      const budget = dressBlockInstances(activeProfile.tier, view.count);
+      for (const site of view.sites) {
+        for (const cube of site.cubes) {
+          if (drawn >= budget || n >= MAX - 8) return;
+          drawn += 1;
+          const at = onRoad(cz + site.along, site.side * 6.5 + cube.x);
+          const bob = cube.float ? Math.sin(t * 1.3 + cz * 0.17) * cube.float : 0;
+          const rgb = pal[cube.role] || pal.trim;
+          push(at.x, cube.y + bob, at.z, cube.sx, cube.sy, cube.sz, cube.shape || 0, rgb, 0.42, cube.shape ? 0.35 : 0.05, at.psi + cube.spin * t);
+        }
+      }
+    }
     function drawCityStreet(cz) {
       const raw = CITY_STYLES[pal.biome];
       const style = raw && pal.wall
@@ -3400,11 +3443,14 @@ export function createRenderer(canvas, hooks) {
             push(dash.x, 0.07, dash.z, 0.1, 0.02, 0.55, 0, [0.98, 0.9, 0.45], 0.3, 0.4, dash.psi);
           }
           if (step8) {
-            drawCityStreet(cz);
-            for (const side of [-1, 1]) {
-              const lamp = onRoad(cz, side * 3.15);
-              push(lamp.x, 0.9, lamp.z, 0.08, 1.8, 0.08, 0, pal.water, 0.45, 0.08, lamp.psi);
-              push(lamp.x, 1.86, lamp.z, 0.2, 0.12, 0.2, 1, pal.flower, 0.2, 0.9, lamp.psi);
+            if (dressNear(z, dist)) drawDress(cz, z);
+            else {
+              drawCityStreet(cz);
+              for (const side of [-1, 1]) {
+                const lamp = onRoad(cz, side * 3.15);
+                push(lamp.x, 0.9, lamp.z, 0.08, 1.8, 0.08, 0, pal.water, 0.45, 0.08, lamp.psi);
+                push(lamp.x, 1.86, lamp.z, 0.2, 0.12, 0.2, 1, pal.flower, 0.2, 0.9, lamp.psi);
+              }
             }
           }
         } else if (pal.biome === "space") {
