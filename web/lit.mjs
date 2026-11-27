@@ -106,10 +106,10 @@ float shadeNoise(vec2 p) {
     mix(shadeHash(i + vec2(0.0, 1.0)), shadeHash(i + vec2(1.0, 1.0)), u.x),
     u.y);
 }
-// Fine marks live near the runner. Past 7 m, or once a repeat is only
-// about a pixel wide, they drop out so speed does not shimmer.
+// Fine marks hold into the road ahead. Past 14 m, or once a repeat is
+// only about a pixel wide, they drop out so speed does not shimmer.
 float fineAmt(vec2 uv, float dist) {
-  float near = 1.0 - smoothstep(2.0, 7.0, dist);
+  float near = 1.0 - smoothstep(3.0, 14.0, dist);
   float px = length(fwidth(uv));
   return near * (1.0 - smoothstep(0.45, 1.15, px));
 }

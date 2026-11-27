@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import { DT, makePlayer, pressJump, roadHeight, rulesOf, step } from "../web/sim.mjs";
 import { highFragment, highSky, litAnchorsOk, litFragment, litSky, LIGHT_LINE } from "../web/lit.mjs";
-import { invertMat, meshSources } from "../web/render.mjs";
+import { CAM_AHEAD, CAM_BACK, CAM_EYE_Y, CAM_LOOK_Y, invertMat, meshSources } from "../web/render.mjs";
 import { BLUR_TAP_PX, blurAmount, blurTapPx, fovKick, glossFor, groundId, heroShape, laneEase, sceneGrade, shakeOffset, sunScreen, whooshNudge } from "../web/feel.mjs";
 import {
   DEFAULT_POLICY,
@@ -419,7 +419,8 @@ const highBox = highFragment(meshSources()[1]);
 assert(highBox.includes("uGloss") && highBox.includes("uPenumbra") && highBox.includes("highShade"), "high mesh adds gloss, penumbra, and haze");
 assert(highBox.includes("surfaceDetail") && highBox.includes("uGround") && highBox.includes("smoothstep(8.0, 20.0, dist)"), "high road detail fades by 20 m");
 assert(highBox.includes("vW.xz") && highBox.includes("shadeNoise"), "high road marks continue across slabs");
-assert(highBox.includes("fwidth") && highBox.includes("smoothstep(2.0, 7.0, dist)"), "fine grain stays near and drops before it aliases");
+assert(highBox.includes("fwidth") && highBox.includes("smoothstep(3.0, 14.0, dist)"), "road grain holds ahead and drops before it aliases");
+assert(highBox.includes("smoothstep(2.0, 7.0, dist)"), "round lawn still fades by distance");
 assert(!highBox.includes("mortar * 0.55") && !highBox.includes("smoothstep(0.025, 0.0"), "high road marks stay soft");
 assert(renderSrc.includes("deck ? vN"), "a road slab does not pillow its own highlight");
 assert(renderSrc.includes("const top = baseTop"), "neighbouring slabs share one colour");
@@ -460,7 +461,8 @@ assert(postText.includes("FINISH_FS") && !postText.slice(postText.indexOf("const
 assert(postText.includes("uHero"), "high finish keeps the hero sharp");
 assert(postText.includes("uSoft") && postText.includes("8.0 / span"), "speed blur steps at most 8px on the eighth-res tail");
 const finishHigh = postText.slice(postText.indexOf("const FINISH_HIGH_FS"), postText.indexOf("const REFLECT_FS"));
-assert(finishHigh.includes("clamp(uBlur, 0.0, 1.0) * 0.06 * reach"), "speed blur scales with uBlur");
+assert(finishHigh.includes("clamp(uBlur, 0.0, 1.0) * 0.04 * reach"), "speed blur scales with uBlur");
+assert(!finishHigh.includes("clamp(uBlur, 0.0, 1.0) * 0.06"), "speed blur does not go back to the heavier mix");
 assert(finishHigh.includes("mix(c, tail, 0.28)"), "the soft tail stays a hint of the sharp frame");
 assert(finishHigh.includes("span / 2.0"), "a short step does not veil the road");
 assert(!finishHigh.includes("(1.0 - sharp) * 0.42"), "speed blur is not a flat mix of the eighth-res image");
@@ -469,6 +471,8 @@ assert(!finishHigh.includes("clamp(uBlur, 0.0, 1.0) * 0.16"), "speed blur does n
 assert(finishHigh.includes("edge * 0.08 * (1.0 - body)"), "fxaa stays off the runner");
 assert(postText.slice(postText.indexOf("const FINISH_FS"), postText.indexOf("const COMPOSITE_HIGH_FS")).includes("edge * 0.08"), "medium fxaa stays light");
 assert(finishHigh.includes("/ 255.0"), "the finish dithers under one colour step");
+assert(postText.includes("Math.min(480, w >> 2)") && postText.includes("Math.min(270, h >> 2)"), "occlusion is a quarter-resolution buffer");
+assert(postText.includes("hp * 0.16"), "quiet frames keep a light unsharp");
 assert(postText.includes("RGBA16F is filterable"), "the scene buffer samples linearly");
 assert(postText.includes("DOWNSAMPLE_FS") && !postText.includes("blurPass(flat, 2 / flat.w"), "speed blur does not run four full-frame passes");
 const pageText = readFileSync(new URL("../web/main.mjs", import.meta.url), "utf8");
@@ -587,18 +591,21 @@ assert(renderSrc.includes("local.y += local.z * grade"), "the deck shader shears
 assert(renderSrc.includes("0, grade, grass"), "a road slab stores its grade");
 assert(renderSrc.includes("roadHeight(drawS + lookAhead, roadPieces)"), "the view looks along the road ahead");
 assert(!renderSrc.includes("gradeFeel"), "the view does not add a separate pitch");
-// Eye sits 2.25 m over the road at the camera. Look sits 0.95 m over the
-// road one span ahead. The change in pitch is the hill's own angle.
+// The eye is CAM_EYE_Y over the road at the runner. The look is CAM_LOOK_Y
+// over the road CAM_AHEAD ahead. A hill raises only that look point, so the
+// pitch change is the rise over the look-ahead, seen across the full span.
 function viewPitch(grade) {
-  const span = 4.7 + Math.max(6, 8 * 1.3);
-  const lookY = 0.95 + grade * span;
-  return Math.atan2(lookY - 2.25, span) * 180 / Math.PI;
+  const span = CAM_BACK + CAM_AHEAD;
+  const lookY = CAM_LOOK_Y + grade * CAM_AHEAD;
+  return Math.atan2(lookY - CAM_EYE_Y, span) * 180 / Math.PI;
 }
 const flatPitch = viewPitch(0);
 const upPitch = viewPitch(0.08);
 const downPitch = viewPitch(-0.08);
-const hill = Math.atan(0.08) * 180 / Math.PI;
-assert(Math.abs((upPitch - flatPitch) - hill) < 1.2, `uphill pitch should match the grade, ${upPitch.toFixed(2)} vs ${flatPitch.toFixed(2)}`);
-assert(Math.abs((flatPitch - downPitch) - hill) < 1.2, `downhill pitch should match the grade, ${downPitch.toFixed(2)} vs ${flatPitch.toFixed(2)}`);
+const hill = Math.atan(0.08 * CAM_AHEAD / (CAM_BACK + CAM_AHEAD)) * 180 / Math.PI;
+assert(flatPitch < -6 && flatPitch > -11, `the gaze stays a short look down the road, ${flatPitch.toFixed(2)}`);
+assert(CAM_EYE_Y < 2.4 && CAM_EYE_Y > 1.7, "the eye stays near a standing gaze");
+assert(Math.abs((upPitch - flatPitch) - hill) < 0.4, `uphill pitch should follow the grade, ${upPitch.toFixed(2)} vs ${flatPitch.toFixed(2)}`);
+assert(Math.abs((flatPitch - downPitch) - hill) < 0.4, `downhill pitch should follow the grade, ${downPitch.toFixed(2)} vs ${flatPitch.toFixed(2)}`);
 
 console.log(`quality ok tier-hysteresis fbo-fallback context-loss persist sim-steps ${at60.steps} x ${at60.x.toFixed(3)}`);

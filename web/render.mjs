@@ -929,13 +929,14 @@ export function roadPoint(s, lateral, bend = 0) {
   return projectLateral(integrateRoad([{ s: 0, bend }], s), lateral);
 }
 
-// Third-person frame shared by the view and by screenX. The eye sits
-// high and close, the look point is low and near, and the field is
-// narrow, so the sky is a thin band and the runner reads large.
-const CAM_EYE_Y = 3.55;
-const CAM_BACK = 4.55;
-const CAM_LOOK_Y = 0.42;
-const CAM_AHEAD = 3.9;
+// Third-person frame shared by the view and by screenX. The eye is about
+// two metres up, a little over a standing gaze, and the look point is near
+// chest height several metres ahead. The view tips down a few degrees, the
+// horizon stays in the upper third, and the runner's feet stay in frame.
+export const CAM_EYE_Y = 2.05;
+export const CAM_BACK = 4.5;
+export const CAM_LOOK_Y = 0.55;
+export const CAM_AHEAD = 6.4;
 const CAM_FOV = 0.7;
 
 export function cameraPose(simLx, simY, simZ, fovy = CAM_FOV, bend = 0) {
@@ -2799,10 +2800,10 @@ export function createRenderer(canvas, hooks) {
       eye[1] += nudge * (whooshSide === 0 ? 0.7 : 0.28);
     }
     drawFov = camFov - (hitStop > 0 ? (activeProfile.shake || 0.04) * (hitStop / 0.07) * 1.4 : 0);
-    // The look point stays close and low, so the sky is a thin band and
-    // the runner stays large. The eye is CAM_BACK behind, and a bend
-    // still rebases only past 8 m. The look height is the road there,
-    // so an uphill tips the view by that grade.
+    // Chest height, several metres ahead: a short downward gaze, not a
+    // view onto the road. The eye is CAM_BACK behind, and a bend still
+    // rebases only past 8 m. The look height is the road there, so an
+    // uphill tips the view by that grade.
     const at = [
       basis.x + ox * 0.22 + Math.sin(psi) * lookAhead,
       CAM_LOOK_Y + Math.max(0, rel) * 0.12 + floaty * 0.25 + camLook,

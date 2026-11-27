@@ -217,7 +217,7 @@ void main() {
     avg += texture(uTex, vUv - vec2(0.0, sp.y)).rgb;
     vec3 hp = c - avg * 0.25;
     float mag = dot(abs(hp), vec3(0.299, 0.587, 0.114));
-    if (mag > 0.035) c += hp * 0.1;
+    if (mag > 0.035) c += hp * 0.16;
   }
   if (uBlur > 0.001) {
     vec2 dir = (vUv - uFocus) * uBlur * 0.035;
@@ -322,7 +322,7 @@ void main() {
     avg += texture(uTex, vUv - vec2(0.0, sp.y)).rgb;
     vec3 hp = c - avg * 0.25;
     float mag = dot(abs(hp), vec3(0.299, 0.587, 0.114));
-    if (mag > 0.035) c += hp * 0.1 * (1.0 - body);
+    if (mag > 0.035) c += hp * 0.16 * (1.0 - body);
   }
   if (uBlur > 0.001) {
     float z = texture(uDepth, vUv).r;
@@ -340,7 +340,7 @@ void main() {
     // A step under two pixels adds nothing.
     tail = mix(c, tail, 0.28);
     float reach = clamp(span / 2.0, 0.0, 1.0);
-    c = mix(c, tail, (1.0 - sharp) * clamp(uBlur, 0.0, 1.0) * 0.06 * reach);
+    c = mix(c, tail, (1.0 - sharp) * clamp(uBlur, 0.0, 1.0) * 0.04 * reach);
   }
   c += (fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) - 0.5) / 255.0;
   o = vec4(clamp(c, 0.0, 1.0), 1.0);
@@ -814,8 +814,8 @@ export function createPost(gl, compiler) {
       aoLive = false;
       if (wantAo) {
         try {
-          const aw = Math.max(1, Math.min(240, w >> 3));
-          const ah = Math.max(1, Math.min(135, h >> 3));
+          const aw = Math.max(1, Math.min(480, w >> 2));
+          const ah = Math.max(1, Math.min(270, h >> 2));
           if (!aoBuf || aoBuf.w !== aw || aoBuf.h !== ah) {
             dropTarget(gl, aoBuf);
             aoBuf = target(gl, aw, ah, false, false);
