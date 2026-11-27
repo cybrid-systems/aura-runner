@@ -511,12 +511,12 @@ html, body {
   overflow: auto;
 }
 #notes[hidden] { display: none; }
-#grade-form {
+#grade-form, #dress-form {
   margin: 8px 0;
   white-space: pre-wrap;
   font: 12px/1.35 ui-monospace, monospace;
 }
-#grade-edit {
+#grade-edit, #dress-edit {
   width: 100%;
   box-sizing: border-box;
   min-height: 72px;
@@ -527,7 +527,7 @@ html, body {
   background: #fff;
   color: var(--ink);
 }
-#grade-apply {
+#grade-apply, #dress-apply {
   margin-top: 8px;
   border: 0;
   border-radius: 999px;
@@ -537,7 +537,7 @@ html, body {
   font: 800 13px/1 system-ui, sans-serif;
   cursor: pointer;
 }
-#grade-note { margin: 6px 0 0; font-size: 12px; color: #8a5a32; }
+#grade-note, #dress-note { margin: 6px 0 0; font-size: 12px; color: #8a5a32; }
 #note-list {
   margin: 8px 0 0;
   padding: 0;

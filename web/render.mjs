@@ -1,4 +1,5 @@
 import { contrastInk, paintGrade } from "./grade.mjs";
+import { dressView } from "./dress.mjs";
 import { roadGrade, roadHeight } from "./road.mjs";
 import { drawThing, growOf, animOf, showBox } from "./thing.mjs";
 import { DEPTH_FS, highFragment, highSky, litFragment, litSky } from "./lit.mjs";
@@ -3122,6 +3123,24 @@ export function createRenderer(canvas, hooks) {
         push(x, h * 0.72, z, 0.22 * s, 0.14 * s, 0.76 * s, 0, trim, 0.25, Math.max(glow, 0.35), psi);
       }
     }
+    // One sculpture per stride, off the lanes. The form is already capped
+    // at 16 cubes, and Low places it half as often as High.
+    function drawDress(cz, z) {
+      const view = dressView();
+      if (!view || !view.ok || n >= MAX - 24) return;
+      const period = activeProfile.tier === "low" ? 16 : activeProfile.tier === "high" ? 8 : 12;
+      if ((((z / 2) | 0) % period) !== 0) return;
+      const t = reduced ? 0 : (st.time || 0);
+      for (const site of view.sites) {
+        for (const cube of site.cubes) {
+          if (n >= MAX - 8) return;
+          const at = onRoad(cz + site.along, site.side * 6.5 + cube.x);
+          const bob = cube.float ? Math.sin(t * 1.3 + cz * 0.17) * cube.float : 0;
+          const rgb = pal[cube.role] || pal.trim;
+          push(at.x, cube.y + bob, at.z, cube.sx, cube.sy, cube.sz, cube.shape || 0, rgb, 0.42, cube.shape ? 0.35 : 0.05, at.psi + cube.spin * t);
+        }
+      }
+    }
     function drawCityStreet(cz) {
       const raw = CITY_STYLES[pal.biome];
       const style = raw && pal.wall
@@ -3406,6 +3425,7 @@ export function createRenderer(canvas, hooks) {
               push(lamp.x, 0.9, lamp.z, 0.08, 1.8, 0.08, 0, pal.water, 0.45, 0.08, lamp.psi);
               push(lamp.x, 1.86, lamp.z, 0.2, 0.12, 0.2, 1, pal.flower, 0.2, 0.9, lamp.psi);
             }
+            drawDress(cz, z);
           }
         } else if (pal.biome === "space") {
           if (step4) {
