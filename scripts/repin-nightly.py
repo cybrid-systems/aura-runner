@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Move the Aura nightly pin to whatever the nightly tag publishes now.
+"""Move the Aura nightly pin to the immutable archive the manifest names.
 
-The nightly tag is rebuilt in place, so its commit and both asset digests move
-without a new release. scripts/install-aura.sh and the image build compare
-those digests exactly, so every rebuild turns the pinned checks red until the
-pin moves with it.
+The nightly tag is rebuilt in place. The rolling alias is replaced every
+rebuild, so the pin stores the per-build archive name and its digest.
+scripts/install-aura.sh downloads that name and checks the digest published
+beside it. Pinning the alias's digest under the previous archive name makes
+that check fail and holds the pin back forever.
 
 This script rewrites the two pin files; it does not decide whether the new
 nightly is good. .github/workflows/nightly.yml runs it hourly, gates a moved
@@ -32,14 +33,17 @@ import urllib.request
 
 AURA = "https://api.github.com/repos/cybrid-systems/aura"
 RELEASE = AURA + "/releases/tags/nightly"
-COMMIT = AURA + "/commits/"
 DOWNLOAD = "https://github.com/cybrid-systems/aura/releases/download/nightly"
+MANIFEST_NAME = "aura-nightly-manifest.json"
 ARCHES = ("linux-x86_64", "linux-arm64")
+HEX40 = re.compile(r"^[0-9a-f]{40}$")
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
 BODY_SHA = re.compile(r"aura nightly @ ([0-9a-f]{7,40})")
+# Same sentence the orchestra baseline writer uses, so a manifest pin round-trips.
 NOTES = (
-    "Aura main green nightly at {short}; the asset digests are the GitHub release "
-    "asset digests. .github/workflows/nightly.yml follows the tag hourly, gates a "
-    "moved nightly, and commits the pin; never touch tags or releases."
+    "Aura main green nightly at {short}; each asset is the immutable per-build "
+    "archive named by the nightly manifest, not the rolling alias. Bump this file "
+    "only through a reviewed PR; never touch tags or releases."
 )
 
 TOKEN = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""
@@ -66,18 +70,7 @@ def json_at(url: str) -> dict:
     return json.loads(get(url, "application/vnd.github+json"))
 
 
-def full_commit(short: str) -> str:
-    """A 40-hex commit; the release body only carries the short form."""
-    if len(short) == 40:
-        return short
-    sha = json_at(COMMIT + short).get("sha") or ""
-    if len(sha) != 40 or not sha.startswith(short):
-        raise PinError(f"could not resolve nightly commit {short}")
-    return sha
-
-
-def asset_sha(assets: dict[str, dict], arch: str) -> str:
-    name = f"aura-nightly-{arch}.tar.gz"
+def published_sha(assets: dict[str, dict], name: str) -> str:
     asset = assets.get(name)
     if asset is None:
         raise PinError(f"the nightly release has no {name}")
@@ -87,28 +80,65 @@ def asset_sha(assets: dict[str, dict], arch: str) -> str:
     # Releases published before asset digests need the .sha256 file.
     body = get(f"{DOWNLOAD}/{name}.sha256")
     want = (body.decode("utf-8", "replace").split() or [""])[0]
-    if len(want) != 64:
+    if not SHA256.fullmatch(want):
         raise PinError(f"no usable checksum for {name}")
     return want
+
+
+def load_manifest(release: dict) -> dict:
+    """The manifest is the immutable-build contract; the rolling alias is not."""
+    assets = {a.get("name"): a for a in release.get("assets") or []}
+    asset = assets.get(MANIFEST_NAME) or {}
+    url = asset.get("browser_download_url") or f"{DOWNLOAD}/{MANIFEST_NAME}"
+    try:
+        manifest = json.loads(get(url))
+    except json.JSONDecodeError as error:
+        raise PinError(f"nightly manifest is not json: {error}") from error
+    if manifest.get("schema") != 1:
+        raise PinError("nightly manifest schema is not 1")
+    return manifest
+
+
+def state_from(release: dict, manifest: dict) -> dict:
+    found = BODY_SHA.search(release.get("body") or "")
+    if found is None:
+        raise PinError("the nightly release body has no 'aura nightly @ <sha>' line")
+    short = found.group(1)
+    commit = manifest.get("commit") or ""
+    if not HEX40.fullmatch(commit) or not commit.startswith(short):
+        raise PinError(f"nightly manifest commit {commit} does not match release notes {short}")
+    updated = release.get("updated_at") or release.get("published_at") or ""
+    if not re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", updated):
+        raise PinError(f"unexpected release timestamp {updated!r}")
+    assets = {a.get("name"): a for a in release.get("assets") or []}
+    names: dict[str, str] = {}
+    sha256: dict[str, str] = {}
+    for arch in ARCHES:
+        entry = ((manifest.get("assets") or {}).get(arch) or {}).get("immutable") or {}
+        name = entry.get("name") or ""
+        sha = entry.get("sha256") or ""
+        if not isinstance(name, str) or not name or "/" in name:
+            raise PinError(f"nightly manifest {arch}.immutable.name is invalid")
+        if not isinstance(sha, str) or not SHA256.fullmatch(sha):
+            raise PinError(f"nightly manifest {arch}.immutable.sha256 is invalid")
+        published = published_sha(assets, name)
+        if published != sha:
+            raise PinError(f"nightly manifest digest does not match the release asset {name}")
+        names[arch] = name
+        sha256[arch] = sha
+    return {
+        "short": commit[:9],
+        "commit": commit,
+        "updated_at": updated,
+        "sha256": sha256,
+        "names": names,
+    }
 
 
 def nightly(release: dict | None) -> dict:
     if release is None:
         release = json_at(RELEASE)
-    found = BODY_SHA.search(release.get("body") or "")
-    if found is None:
-        raise PinError("the nightly release body has no 'aura nightly @ <sha>' line")
-    short = found.group(1)
-    assets = {a.get("name"): a for a in release.get("assets") or []}
-    updated = release.get("updated_at") or release.get("published_at") or ""
-    if not re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", updated):
-        raise PinError(f"unexpected release timestamp {updated!r}")
-    return {
-        "short": short[:9],
-        "commit": full_commit(short),
-        "updated_at": updated,
-        "sha256": {arch: asset_sha(assets, arch) for arch in ARCHES},
-    }
+    return state_from(release, load_manifest(release))
 
 
 def pinned_state(baseline: dict) -> dict:
@@ -119,6 +149,7 @@ def pinned_state(baseline: dict) -> dict:
         "commit": aura["commit_sha"],
         "updated_at": aura["nightly_updated_at"],
         "sha256": {arch: aura["assets"][arch]["sha256"] for arch in ARCHES},
+        "names": {arch: aura["assets"][arch]["name"] for arch in ARCHES},
     }
 
 
@@ -127,6 +158,8 @@ def baseline_text(text: str, state: dict) -> str:
     aura = data["aura"]
     for arch in ARCHES:
         aura["assets"][arch]["sha256"] = state["sha256"][arch]
+        if state.get("names"):
+            aura["assets"][arch]["name"] = state["names"][arch]
     aura["commit_sha"] = state["commit"]
     aura["nightly_updated_at"] = state["updated_at"]
     data["generated_at"] = state["updated_at"]
@@ -196,7 +229,7 @@ def main() -> int:
 
     print(f"nightly {state['commit']} ({state['updated_at']})")
     for arch in ARCHES:
-        print(f"  {arch:13} {state['sha256'][arch]}")
+        print(f"  {arch:13} {state['names'][arch]} {state['sha256'][arch]}")
 
     if new_baseline == old_baseline and new_toml == old_toml:
         print(f"pin: {was} (unchanged)")
