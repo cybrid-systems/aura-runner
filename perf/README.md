@@ -11,7 +11,70 @@ The target program is `lib/phys.aura`. The runtime set-codes the seed
 rebinds - `nudge-flyers`, `step-poppers`, `collide-far?`, `pset` - live in
 the module the runtime mutates.
 
-## The profile on nightly `760246314` (2026-11-27): the bottleneck moved into the runtime
+## The profile on the pinned nightly `8004cc70b` (2026-11-28): the feedback tax is gone, the IR interpreter is what is left
+
+**This section replaces the `760246314` profile below; the numbers there are
+kept for the record.** The pinned nightly moved
+(`baseline/aura-baseline.json` now pins `8004cc70b`), and the first lever
+of the old list — the feedback-entry tax — **is no longer in the nightly**:
+`ir_enter_feedback` went from 29.64% to **0%** of the offline kernel.
+
+Measured with the current `aura-perf` (`profile --json` for the samples,
+`diff` for the comparison against the stored `760246314` sampling):
+
+```sh
+aura-perf profile --seconds 12 --out out/new --json -- \
+  aura --preset dev perf/run-physics.aura
+aura-perf diff out/old/profile.json out/new/profile.json --json
+```
+
+| symbol | `760246314` | `8004cc70b` (pinned) | delta |
+|---|---|---|---|
+| `aura::compiler::ir_enter_feedback` | 29.64% | **0** | −29.64 |
+| `IRInterpreter::run_function` | 21.08% | **36.69%** | +15.61 |
+| `std::__do_visit<…>` (EvalValue variant moves) | 5.74% | 7.58% | +1.84 |
+| `std::__do_visit<void, …::_M_reset>` | 3.45% | 4.32% | +0.87 |
+| `ir_exec_const` | 0 | 5.05% | +5.05 |
+| `ir_exec_data` | 2.96% | 4.29% | +1.33 |
+| `ir_exec_call` | 1.44% | 2.28% | +0.84 |
+| `__aarch64_ldadd8_relax` (atomics) | 2.02% | 2.43% | +0.41 |
+| `malloc` / `cfree` | 0 / 1.18% | 0.95% / 2.06% | — |
+
+The physics kernel now runs **entirely on the IR interpreter**
+(`ir-calls=1,491,707` / `tw-calls=20,880` for 2 courses), so its time is
+"interpret one IR instruction + move one EvalValue": 36.69% in the
+interpreter loop and ~12% in the variant moves. That is the JIT lever
+([aura#5491](https://github.com/cybrid-systems/aura/issues/5491)), still
+open.
+
+The live server is the other path (file-mode → tree walker). Sampled the
+same way (30 s native sampling of `core/main.aura` while
+`perf/mine-run.aura` drove 3000 ticks, seed 42, LLM off):
+
+| symbol | share |
+|---|---|
+| `std::_Hash_bytes` | 6.12% |
+| `Env::rebuild_symid_index` | 4.16% |
+| `std::__detail::_Map_base<string,…>` | 3.73% |
+| `FlatAST::assemble_nodeview` | 3.91% |
+| `file_reclaim_mark_value` + `reclaim_tw_unreachable` | 5.02% |
+
+The first three are one thing: every `materialize_call_env` on the
+tree-walker path rebuilds the frame's two hash indexes **wholesale**
+(`rebuild_symid_index` + `replace_string_bindings`), re-hashing every
+binding name per call — ~14% of the tick. The per-frame snapshot path
+already builds those indexes once per frame; the legacy copy path does it
+per call. Filed as
+[aura#5654](https://github.com/cybrid-systems/aura/issues/5654) with the
+perf call chains and the code locations.
+
+Two `aura-perf` defects were found while measuring this and fixed
+([aura-perf#59](https://github.com/cybrid-systems/aura-perf/issues/59)):
+the symbolizer dropped ~15% of the sample weight (perf's srcline sort
+loses the samples it cannot place on a line) and attributed the hotspot
+to the outer frame instead of the function that ran.
+
+### The profile on nightly `760246314` (2026-11-27): the bottleneck moved into the runtime
 
 Re-mined on the pinned nightly (`aura-perf install` + `mine-tick.aura`,
 `autotune perf/spec.aura`, `aura-perf profile` native sampling, and
@@ -106,11 +169,22 @@ too now IR-compiles (`ir-calls=27.3M`).
    nightly release still carries the single slot until the next
    nightly roll; the numbers above are from a Release build of aura
    main with the fix.
+   **Update 2026-11-28: the pinned nightly `8004cc70b` now carries the
+   fix** — `ir_enter_feedback` is 0% of the kernel's samples (was 29.64%).
+   This lever is done in the nightly; the remaining offline-kernel cost is
+   the IR interpreter loop (36.69%) plus the EvalValue variant moves
+   (~12%) — lever 2.
 2. Runtime: ship the JIT in the nightly (this binary has no LLVM). The
    local `build-jit2` build ran the same probe at the same wall time
    (82.5 s vs 81.8 s) with `run_function` still 51% — the set-code
    mutation workspace does not reach the JIT tiers today; that path
    needs the runtime-side work, not a target edit.
+   **Update 2026-11-28: this is now the FIRST offline-kernel lever.** The
+   pinned nightly's kernel is 36.69% `run_function` + ~12% EvalValue
+   moves, because the physics now runs on the IR interpreter
+   (`ir-calls=1,491,707`). Both costs are the same execution layer, and
+   both disappear when the IR reaches native code. See
+   [aura#5491](https://github.com/cybrid-systems/aura/issues/5491).
 3. ~~Runtime: the file-mode server path onto IR.~~ — **attempted,
    REVERTED (see below).** IR-izing the required modules is correctness-
    safe but SLOWER than the tree walker for this workload; the IR
@@ -118,6 +192,12 @@ too now IR-compiles (`ir-calls=27.3M`).
 4. Target: ~~re-trial `pset-share`~~ — **done, ROLLBACK (see below).** The
    per-write full-list rebuild is NOT a win on the IR nightly: the native
    `list->vector`/`vector->list` primitives beat a Scheme-level walk.
+5. Runtime: the live server rebuilds the frame's env hash indexes per
+   call — `rebuild_symid_index` 4.16% + `_Hash_bytes` 6.12% + the string
+   map 3.73%, ~14% of the tick. The per-frame snapshot path already
+   builds those indexes once per frame; the tree-walker legacy copy path
+   does it per call. Filed as
+   [aura#5654](https://github.com/cybrid-systems/aura/issues/5654).
 
 **Filed as issues (2026-11-28):**
 
@@ -127,10 +207,13 @@ too now IR-compiles (`ir-calls=27.3M`).
 | aura | [#5489](https://github.com/cybrid-systems/aura/issues/5489) | IR 解释器每调用税：宽调用图模块 IR 化慢 1.75x（lever 3 数据）|
 | aura | [#5490](https://github.com/cybrid-systems/aura/issues/5490) | IR TopCellStore 不 bump cell-store generation（失效协议缺口）|
 | aura | [#5491](https://github.com/cybrid-systems/aura/issues/5491) | nightly 未链接 LLVM，file-mode/workspace 到不了 JIT（lever 2）|
+| aura | [#5654](https://github.com/cybrid-systems/aura/issues/5654) | tree-walker 每次 materialize_call_env 整份重建两个 env 哈希索引（在线服务器 ~14% 的 tick）|
 | aura-perf | [#34](https://github.com/cybrid-systems/aura-perf/issues/34) | install 用 sh 调 bash 脚本，dash 系统必挂 |
 | aura-perf | [#35](https://github.com/cybrid-systems/aura-perf/issues/35) | profile launch-mode 误判 workload 非零退出，丢已采数据 |
 | aura-perf | [#36](https://github.com/cybrid-systems/aura-perf/issues/36) | workload 根 self 主导时 hot-node 误归因，negative memory 键失真 |
+| aura-perf | [#59](https://github.com/cybrid-systems/aura-perf/issues/59) | profile 符号化丢 ~15% 样本权重、热点归错函数（perf 符号列给的是外层帧）|
 | aura-runner | [#63](https://github.com/cybrid-systems/aura-runner/issues/63) | player 表示横切杠杆（需先解决 trial 隔离）|
+| aura-runner | [#64](https://github.com/cybrid-systems/aura-runner/issues/64) | 本 README 的 profile 段已过期：pinned nightly 里 feedback 税已消失 |
 
 ### pset-share re-trial on `760246314`: behavior-preserving, but 3x slower
 

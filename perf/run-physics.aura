@@ -1,0 +1,59 @@
+; Run aura-runner's physics kernel, for native sampling and counters.
+; The seed is lib/phys.aura + perf/workload.aura (the same seed the perf
+; harness uses), so the code being sampled is the game's own physics.
+;
+;   AURA_PATH=~/aura-perf AURA_SANDBOX=off \
+;     aura --preset dev perf/run-physics.aura
+;
+; PHYS_COURSES=1..n  how many courses to run (default 2)
+; PHYS_COUNTERS=1    also print the runtime's closure:stats counters
+;
+; The three float literals are written as their exact quotients: the
+; runtime unparses a float whose shortest spelling is scientific as
+; "1e-04.0", which is not a number, and the mutation path re-parses
+; that text (cybrid-systems/aura#5295).
+
+(require "lib/perf/util" all:)
+
+(define (seed-source)
+  (let ((phys (perf:read-text "lib/phys.aura")))
+    (string-append
+     (string-replace
+      (string-replace
+       (string-replace phys "0.0000001" "(/ 1.0 (* 1000.0 10000.0))")
+       "0.0008" "(/ 8.0 10000.0)")
+      "0.0001" "(/ 1.0 10000.0)")
+     "\n"
+     (perf:read-text "perf/workload.aura"))))
+
+(set-code (seed-source))
+(eval-current)
+
+(define courses
+  (let* ((raw (getenv "PHYS_COURSES"))
+         (n (if (and (string? raw) (> (string-length raw) 0))
+              (string->number raw)
+              2)))
+    (perf-courses n)))
+
+(display (bench-kernel courses))
+(newline)
+
+(define (want-counters?)
+  (let ((raw (getenv "PHYS_COUNTERS")))
+    (and (string? raw) (> (string-length raw) 0))))
+
+(when (want-counters?)
+  (let ((cs (stats:get "closure:stats")))
+    (define (n k) (let ((v (hash-ref cs k 0))) (if (number? v) v 0)))
+    (display (list "tw-calls" (n "tw-calls")
+                   "ir-calls" (n "ir-calls")
+                   "materialize-fallback-total" (n "materialize-fallback-total")
+                   "dual_path_desync_soft_continue_total"
+                   (n "dual_path_desync_soft_continue_total")
+                   "env-stale-total" (n "env-stale-total")
+                   "linear-stale-total" (n "linear-stale-total")
+                   "epoch-stale-total" (n "epoch-stale-total")
+                   "heap-pairs" (n "heap-pairs")
+                   "heap-strings" (n "heap-strings")))
+    (newline)))
